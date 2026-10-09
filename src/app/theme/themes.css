@@ -1,0 +1,80 @@
+/*
+ * Semantic color tokens. Components use these variables only; a theme is a
+ * complete set of values for them, selected by `data-theme` on <html>.
+ * Register new themes in `themes.ts`.
+ */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-app-bg: #f3f5f8;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #ffffff;
+  --color-sidebar-bg: #e9edf2;
+  --color-card-bg: #ffffff;
+  --color-input-bg: #ffffff;
+
+  --color-text-primary: #1a1d23;
+  --color-text-secondary: #3f4652;
+  --color-text-muted: #5f6774;
+  --color-text-on-accent: #ffffff;
+
+  --color-border: #d5dae1;
+  --color-border-strong: #aab2be;
+
+  --color-accent: #1f5fbf;
+  --color-accent-hover: #194f9f;
+  --color-hover: #e8eef7;
+  --color-selected: #dce7f8;
+  --color-focus: #1f5fbf;
+
+  --color-disabled-bg: #e4e7eb;
+  --color-disabled-text: #7b828d;
+
+  --color-success: #1d7438;
+  --color-success-bg: #e3f3e8;
+  --color-warning: #8a5000;
+  --color-warning-bg: #fdf0d9;
+  --color-error: #b0261c;
+  --color-error-bg: #fbe5e3;
+
+  --shadow-elevated: 0 4px 16px rgb(20 30 50 / 12%);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-app-bg: #121418;
+  --color-surface: #1b1e24;
+  --color-surface-elevated: #242832;
+  --color-sidebar-bg: #171a1f;
+  --color-card-bg: #1f232a;
+  --color-input-bg: #15181d;
+
+  --color-text-primary: #e8eaee;
+  --color-text-secondary: #c3c8d0;
+  --color-text-muted: #9aa1ac;
+  --color-text-on-accent: #0b1424;
+
+  --color-border: #343944;
+  --color-border-strong: #4c5361;
+
+  --color-accent: #7aaeff;
+  --color-accent-hover: #9cc2ff;
+  --color-hover: #262c37;
+  --color-selected: #22344f;
+  --color-focus: #9cc2ff;
+
+  --color-disabled-bg: #2a2e36;
+  --color-disabled-text: #7b828d;
+
+  --color-success: #7ed49a;
+  --color-success-bg: #1b3324;
+  --color-warning: #f5c26b;
+  --color-warning-bg: #3a2c12;
+  --color-error: #ff9188;
+  --color-error-bg: #3d1d1b;
+
+  --shadow-elevated: 0 4px 16px rgb(0 0 0 / 45%);
+}

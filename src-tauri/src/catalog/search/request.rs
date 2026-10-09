@@ -84,6 +84,8 @@ pub struct MachineFilters {
     pub manufacturers: Vec<Option<String>>,
     pub years: Vec<Option<String>>,
     pub clones: Option<CloneFilter>,
+    /// Clones of this parent machine (short name).
+    pub clone_of: Option<String>,
     pub bios: Option<bool>,
     pub device: Option<bool>,
     pub mechanical: Option<bool>,
@@ -166,6 +168,9 @@ pub struct SoftwareFilters {
     pub publishers: Vec<Option<String>>,
     pub years: Vec<Option<String>>,
     pub clones: Option<CloneFilter>,
+    /// Clones of this parent software (short name; combine with `lists` to
+    /// select the parent's list, since names are unique per list only).
+    pub clone_of: Option<String>,
     pub supported: Vec<SupportStatus>,
     /// Whether the catalog lists at least one ROM for the software (any dump
     /// status). This is not the availability of files on disk.

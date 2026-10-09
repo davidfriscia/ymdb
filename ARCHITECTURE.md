@@ -53,17 +53,146 @@ React + TypeScript application rendered by the system WebView through Tauri.
   serialized Rust types field by field.
 - `src/shared/ipc.ts` provides `invokeCommand`, the single place where `invoke` is
   called, and maps command failures to the `CommandError` contract.
+- `src/shared/useLoader.ts` runs an asynchronous load when its (memoized) input or
+  a refresh key changes, ignores responses of superseded loads and keeps the last
+  value for display while the next load runs.
 - Implemented features:
   - `mame-installation`: the MAME Installation panel (see below).
   - `catalog`: the MAME Catalog panel (catalog summary, import, progress, cancel).
-  - `search`: typed wrappers of the search commands (`searchApi.ts`) and a temporary
-    "Catalog search (preview)" panel (text, Machines/Software, total, first 20
-    results, query time) used to try the search engine.
+    It notifies the shell when an import replaced the catalog.
+  - `search`: typed wrappers of the search commands (`searchApi.ts`).
+  - `browser`: the catalog browser and detail views (see
+    [Catalog browser](#catalog-browser--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
-Planned: catalog browser with filter and facet panels (replacing the search preview),
-machine and software detail views, collections, launch profiles, navigation between
-screens.
+#### Application shell
+
+`App.tsx` shows a navigation rail with three pages: **Catalog** (the browser, the
+start page), **MAME** (MAME Installation and MAME Catalog panels) and **Settings**
+(theme, version, backend connection check). Pages stay mounted and are hidden with
+the `hidden` attribute, so the browser keeps its query, results and scroll position
+while the user visits another page. There is no router. Below 640 px the rail
+becomes a top bar.
+
+The shell keeps two counters, incremented when the MAME configuration changes and
+when an import replaces the catalog; the browser reloads its catalog status,
+results and open detail when their sum changes.
+
+#### Themes
+
+- Colors are semantic CSS custom properties (`--color-app-bg`, `--color-surface`,
+  `--color-surface-elevated`, `--color-sidebar-bg`, `--color-card-bg`,
+  `--color-input-bg`, `--color-text-primary`/`-secondary`/`-muted`/`-on-accent`,
+  `--color-border`/`-strong`, `--color-accent`/`-hover`, `--color-hover`,
+  `--color-selected`, `--color-focus`, `--color-disabled-bg`/`-text`,
+  `--color-success`/`-warning`/`-error` and their `-bg` variants,
+  `--shadow-elevated`). Stylesheets use only these tokens.
+- `src/app/theme/themes.css` defines the complete token set of each theme under
+  `:root[data-theme="<id>"]`; `themes.ts` registers the themes (`light`, `dark`) and
+  `applyTheme` sets `data-theme` on `<html>`. Light is the default and also applies
+  before any `data-theme` is set. The operating system preference is not followed.
+- Adding a theme means defining its tokens in `themes.css` and registering it in
+  `THEMES`; the Settings page lists registered themes automatically.
+- `main.tsx` applies the saved theme before the first render to avoid a flash.
+
+#### Interface preferences
+
+`src/app/preferences.ts` stores the interface preferences (theme, card size, filter
+panel visibility, result renderer) as JSON in the webview's `localStorage` under the
+versioned key `ymdb.preferences.v1`. They are separate from `settings.json` (MAME
+configuration) and from the catalog. Every field is validated when read: unknown
+themes or renderers, wrong types and malformed JSON fall back to the default of that
+field; the card size is clamped to 160-420 px. Unavailable storage only means the
+preferences last for the session.
+
+Planned: collections, launch profiles.
+
+### Catalog browser — Implemented
+
+`src/features/browser/` browses machines or software with the
+[search engine](#catalog-search--implemented). The frontend never searches,
+filters, sorts, counts or paginates itself: it only builds typed requests.
+
+- **State.** `browserState.ts` holds the query in a reducer: catalog type, search
+  box text and applied text, per catalog type the filters, sort, direction, page,
+  page size and facet options (value search, limit), and the stack of open detail
+  views. Every query change returns to the first page. Machine and software queries
+  are kept separately, the text is shared.
+- **Requests.** `buildResultsRequest` and `buildFacetRequest` translate the state to
+  `MachineSearchRequest`/`SoftwareSearchRequest`. Results and facets are two
+  requests: facets depend on the text and filters only, so changing page, sort or
+  page size does not recount them (on 0.280 all machine facets take about 60 ms and
+  software facets about 150 ms, a result page under 5 ms). Requests are memoized,
+  so rendering never searches again; `useLoader` ignores out-of-order responses.
+- **Text.** The search text is applied 300 ms after the last keystroke, or
+  immediately with Enter or the Search button.
+- **Filters.** `filterDefinitions.ts` lists the facet filters (machines:
+  manufacturer, year, driver status, emulation status, software list; software:
+  list, publisher, year, support status, part interface) and the single-choice
+  filters (machines: parent/clone, BIOS, device, mechanical, runnable, declares
+  ROMs, declares CHDs; software: parent/clone, declares ROMs, declares disks).
+  Facet values are checkboxes with counts (disjunctive semantics from the
+  backend), a value search on large facets (debounced) and "Show more" up to 200
+  values. Selected values missing from the returned values stay listed, with "—"
+  as count. Active filters are shown as removable chips with "Clear all filters";
+  the Filters button shows their number. Declared ROMs/CHDs are what MAME lists,
+  not files on disk.
+- **Filter panel.** The Filters toolbar button hides or shows the panel
+  (`aria-pressed`). Hiding it keeps every filter active, does not search again and
+  gives the whole width to the results.
+- **Renderers.** Results are displayed by a renderer implementing
+  `ResultRendererProps` (`renderers/types.ts`): the items of the current page, an
+  item size and `onOpen(index)`. Renderers only display; the choice of renderer
+  never changes the request. `renderers/registry.ts` registers `CardRenderer` only;
+  the renderer selector appears when more than one renderer is registered, so a
+  table or list renderer is added by implementing the contract and registering it.
+- **Cards.** `CardRenderer` uses a CSS grid with
+  `repeat(auto-fill, minmax(min(var(--card-size), 100%), 1fr))`: the Card size
+  slider (160-420 px, saved in the preferences) sets the minimum card width and
+  the number of columns follows the available width, without horizontal scrolling.
+  Machine cards show description, short name, manufacturer, year, driver status
+  and BIOS/device/mechanical/clone/not runnable badges; software cards show
+  description, list/name, publisher, year, list description and support status.
+  Pages hold at most 200 items, so no virtualization is used.
+- **Pagination.** Page numbers around the current page, previous/next, page size
+  (25, 50, 100, 200) and "Go to".
+- **Details.** Opening a result pushes a detail entry on the stack; links inside a
+  detail push further entries. "Back" pops one entry, "Back to results" clears the
+  stack. Results stay mounted (hidden) so the query and results are unchanged; the
+  results scroll position is saved when a detail opens and restored on return.
+  Previous/Next move through the items of the current result page. Each detail view
+  has a side tab list (top tabs below 800 px) and keeps the selected tab when moving
+  to the previous or next result.
+  - Machine: Overview (general data, parent, ROM parent, sample set, clones,
+    driver and emulation features, samples), ROMs (BIOS sets, ROMs with hashes,
+    regions, merge names, status), CHDs, Devices (device references linked to
+    their machine, media devices, RAM options), Display (displays, sound),
+    Controls (input, controls), Chipset, Software lists (declared lists with
+    status and filter, linked to the list detail, marked when not imported).
+  - Software: Overview (list, publisher, year, support, notes, parent, clones,
+    information and shared features), Parts (features, data areas with ROMs and
+    load instructions, disk areas), Machines (machines declaring the list, with a
+    note that this is not a compatibility guarantee).
+  - Software list: description, notes, software count, machines declaring it as
+    original or compatible, the software of the list and its machines. Lists
+    referenced by machines but missing from the imported software lists open with
+    an explanation.
+  - Clones, software of a list and machines of a list are paginated lists (20 per
+    page) served by the search engine (`cloneOf`, `lists`, `softwareLists`).
+  - Unresolved references (a parent or device missing from the catalog) are shown
+    as plain text.
+- **States.** Loading, no catalog (with a link to the MAME page), catalog
+  unreadable, catalog not matching the configured executable (warning banner, the
+  catalog stays browsable), software lists not imported, no results (with "Clear
+  all filters"), search or detail errors with Retry, a page past the end, and a
+  record that is no longer in the catalog after a reimport.
+
+Measured on the 0.280 catalog (48,893 machines, 139,122 software, release build,
+Windows): first results 0.65 s after the page starts loading; a typed search shows
+results about 340 ms after the last keystroke (300 ms of debounce); selecting a
+filter updates results in 12-18 ms; page changes 45-140 ms in the UI; machine and
+software details open in 13-40 ms (1-3 ms in the backend); "Show more" on
+manufacturers about 0.1 s; JavaScript heap about 4 MB after a full session.
 
 ### Application Core — Implemented (partially)
 
@@ -71,7 +200,7 @@ The Rust crate in `src-tauri/`.
 
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`, `catalog.rs`,
-  `search.rs`). Commands extract what they need from the Tauri runtime and delegate
+  `search.rs`, `detail.rs`). Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
   long-running work (catalog import) on a dedicated thread, so the UI never freezes.
@@ -390,8 +519,6 @@ read from the database only when an import ends.
 
 #### Limitations
 
-- No catalog browser yet; the search engine is only exposed through commands and a
-  temporary preview panel.
 - Machine/software compatibility (`filter` and `compatibility` values) is stored
   but not evaluated.
 - Re-importing machines discards the software lists; there is no combined "full
@@ -400,7 +527,38 @@ read from the database only when an import ends.
 - Imports cannot be cancelled during the final commit and file replacement.
 
 Planned: full catalog update (machines and software lists in one operation),
-catalog browser, favorites, collections, screenshots, artwork and metadata.
+favorites, collections, screenshots, artwork and metadata.
+
+### Catalog details — Implemented
+
+`src-tauri/src/catalog/detail/` reads one record with every imported attribute,
+exposed by `get_machine_detail(name)`, `get_software_detail(list, name)` and
+`get_software_list_detail(name)` (`commands/detail.rs`), typed in
+`src/features/browser/detailApi.ts`. These DTOs are separate from the lightweight
+search DTOs.
+
+- `MachineDetail`: identity, flags, source file, driver (status, emulation, cocktail,
+  save states, artwork/unofficial/no sound/incomplete), emulation features, sound,
+  input and controls, displays, chips, BIOS sets, ROMs, disks, device references,
+  media devices with extensions, software lists, RAM options and samples. Parent
+  (`cloneof`) and ROM parent (`romof`) are `RecordLink`s with the target
+  description, or `null` description when the target is not in the catalog; the
+  same applies to device references. Each software list says whether it is
+  available in the imported software lists.
+- `SoftwareDetail`: list and its description, identity, publisher, year, notes,
+  support status, parent, information, shared features and parts with features,
+  data areas (ROMs and load instructions) and disk areas.
+- `SoftwareListDetail`: description, notes, availability, software count and the
+  number of machines declaring the list as `original` or `compatible`. A list name
+  referenced by machines but not provided by MAME returns a detail with
+  `available: false`; an unknown name returns `null`.
+- One-to-many relations that can be large (clones, software of a list, machines of
+  a list) are not embedded: details carry counts and the frontend lists them
+  through the paginated search (`cloneOf`, `lists`, `softwareLists` filters).
+- Every command returns `null` when the record does not exist (for example after a
+  reimport removed it), and `catalogNotImported` without a catalog. Queries run
+  through `CatalogStore::with_reader` on the blocking pool; on the 0.280 catalog a
+  detail takes 1-3 ms.
 
 ### Catalog search — Implemented
 
@@ -472,12 +630,14 @@ Within a filter, values are alternatives (OR); different filters must all match
 of the catalog only; no machine is classified as arcade, console or computer.
 
 - Machines: manufacturers, years (as printed, such as `199?`), parents or clones,
+  clones of one parent (`cloneOf`),
   BIOS, device, mechanical, runnable, driver status, emulation status, has ROMs,
   has disks (CHD), software lists. "Has ROMs"/"has disks" mean that the catalog
   declares at least one ROM/disk entry (any dump status, including `nodump`); they
   say nothing about files present on disk. The software list filter uses the
   machines' references, so lists that MAME does not provide can still be selected.
-- Software: lists, publishers, years, parents or clones, support status (`yes`,
+- Software: lists, publishers, years, parents or clones, clones of one parent
+  (`cloneOf`, combined with `lists` to select the parent's list), support status (`yes`,
   `partial`, `no` as declared by MAME), has ROMs, has disks, part interfaces. The
   support status is unrelated to media availability.
 
@@ -601,6 +761,10 @@ machine-specific derived data that should not roam:
 | Windows  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb\catalog.sqlite`                                |
 | macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/catalog.sqlite`                 |
 | Linux    | `$XDG_DATA_HOME/io.github.davidfriscia.ymdb/catalog.sqlite` (default `~/.local/share/...`) |
+
+Implemented: interface preferences (theme, card size, filter panel, result renderer)
+in the webview `localStorage` (see [Interface preferences](#interface-preferences)).
+They live in the webview data directory and are not part of `settings.json`.
 
 Planned: user-configurable ROM, CHD and artwork directories.
 

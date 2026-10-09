@@ -7,6 +7,7 @@
 //! - [`import`]: orchestration of an import from the MAME executable.
 //! - [`freshness`]: whether a catalog matches the configured executable.
 
+pub mod detail;
 pub mod freshness;
 pub mod import;
 pub mod model;

@@ -28,9 +28,15 @@ interface CatalogPanelProps {
   refreshKey?: number;
   /** Interval between import status queries while an import runs. */
   pollIntervalMs?: number;
+  /** Called after an import replaced the catalog. */
+  onCatalogChanged?: () => void;
 }
 
-export function CatalogPanel({ refreshKey = 0, pollIntervalMs = 500 }: CatalogPanelProps) {
+export function CatalogPanel({
+  refreshKey = 0,
+  pollIntervalMs = 500,
+  onCatalogChanged,
+}: CatalogPanelProps) {
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus>({ state: "idle" });
   const [pending, setPending] = useState<"start" | "cancel" | null>(null);
@@ -76,6 +82,7 @@ export function CatalogPanel({ refreshKey = 0, pollIntervalMs = 500 }: CatalogPa
         if (!isActive()) return;
         setStatus(refreshed);
         setImportStatus(next);
+        if (next.state === "completed") onCatalogChanged?.();
       } catch (pollError) {
         if (isActive()) setError(describeError(pollError));
       }
@@ -86,7 +93,7 @@ export function CatalogPanel({ refreshKey = 0, pollIntervalMs = 500 }: CatalogPa
       polling.active = false;
       window.clearTimeout(polling.timer);
     };
-  }, [running, pollIntervalMs]);
+  }, [running, pollIntervalMs, onCatalogChanged]);
 
   async function run(action: "start" | "cancel", work: () => Promise<ImportStatus>) {
     setPending(action);

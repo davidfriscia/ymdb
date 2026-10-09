@@ -6,6 +6,7 @@
 //! the main thread stay responsive.
 
 pub mod catalog;
+pub mod detail;
 pub mod health;
 pub mod mame;
 pub mod search;

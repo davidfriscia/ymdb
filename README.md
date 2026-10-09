@@ -5,8 +5,8 @@ Your MAME DB (YMDB) is an open source, cross-platform desktop frontend for
 launch every system supported by the emulator: arcade machines, consoles, home and
 personal computers, other devices, and software lists.
 
-> **Status:** early development. Only the project bootstrap is in place; no MAME
-> features are implemented yet. See [Current status](#current-status).
+> **Status:** early development. MAME configuration, catalog import, search and
+> browsing work; launching does not yet. See [Current status](#current-status).
 
 YMDB does not include ROMs, BIOS files, CHDs or any other copyrighted content.
 
@@ -89,7 +89,7 @@ installations and custom builds are supported, as long as they support the
 `-version` option and print the standard MAME version line. This was verified with
 MAME 0.240 and 0.280; older releases such as MAME 0.162 do not support it.
 
-In the **MAME Installation** panel:
+On the **MAME** page, in the **MAME Installation** panel:
 
 - **Select executable…** opens the native file picker. Choose the MAME program file
   (`mame.exe` on Windows, usually `mame` on macOS and Linux). YMDB validates it and
@@ -132,7 +132,7 @@ read again on every verification and is not stored.
 
 ## MAME catalog
 
-Once MAME is configured, the **MAME Catalog** panel imports the machines and the
+Once MAME is configured, the **MAME Catalog** panel of the **MAME** page imports the machines and the
 software lists known to that MAME build:
 
 - **Import catalog** (or **Reimport machines**) runs `<mame> -listxml`, reads its
@@ -191,12 +191,43 @@ pagination over the imported catalog, through the commands
   pagination (up to 200 results per page) are described in
   [ARCHITECTURE.md](ARCHITECTURE.md#catalog-search--implemented), with measured
   timings: most searches on the MAME 0.280 catalog take less than 5 ms.
-- The **Catalog search (preview)** panel is a temporary way to try it: type a text,
-  choose Machines or Software, and see the total, the query time and the first 20
-  results. The catalog browser will replace it.
+- The [catalog browser](#browsing-the-catalog) is built on this engine.
 
 Catalogs imported by earlier versions are indexed automatically the first time they
 are opened.
+
+## Browsing the catalog
+
+The **Catalog** page (the start page) browses the imported machines or software:
+
+- Choose **Machines** or **Software**, type a text (the search starts when you pause
+  typing, or press Enter or **Search**), pick a sort order and direction.
+- The **Filters** panel lists, with counts, the manufacturers, years, driver and
+  emulation statuses and software lists of the machines (publishers, lists, years,
+  support statuses and part interfaces for software), plus parent/clone, BIOS,
+  device, mechanical, runnable and "declares ROMs/CHDs" filters. Values of one
+  filter are alternatives; different filters combine. Large lists have a value
+  search and **Show more**. Active filters appear as chips above the results; remove
+  them one by one or with **Clear all filters**. The **Filters** button hides the
+  panel to give the results the whole width; the filters stay active.
+- Results are cards; the **Card size** slider changes their width and the number of
+  columns adapts to the window. Pages hold 25 to 200 results, with page numbers and
+  **Go to**.
+- Click a card to open its detail: machines show general data, relations, emulation
+  status, ROMs, CHDs, devices, displays, controls, chips and software lists;
+  software shows its list, parts, ROMs and disks and the machines declaring its list;
+  software lists show their software and machines. Parents, clones, devices and
+  software lists are links. **Back** returns to the previous detail and **Back to
+  results** to the results, with the search, filters, page and scroll position
+  unchanged; **Previous**/**Next** move through the current page.
+- ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
+  and a software list declared by a machine does not guarantee compatibility.
+
+The **MAME** page holds the MAME installation and catalog import panels. The
+**Settings** page selects the **Light** (default) or **Dark** theme, applied
+immediately to the whole application, and shows the version and a backend
+connection check. Theme, card size, filter panel visibility and result view are
+saved in the application's web storage, separately from the MAME configuration.
 
 ## Testing and quality checks
 
@@ -263,7 +294,7 @@ The workflow does not publish releases or use any secrets.
 │   ├── capabilities/       # Tauri permission capabilities
 │   └── tauri.conf.json     # Tauri configuration
 ├── .github/workflows/      # Continuous integration
-├── ARCHITECTURE.md         # Planned architecture
+├── ARCHITECTURE.md         # Architecture (implemented and planned)
 ├── CLAUDE.md               # Instructions for AI-assisted development sessions
 └── LICENSE                 # Apache License 2.0
 ```
@@ -273,7 +304,7 @@ The workflow does not publish releases or use any secrets.
 Implemented:
 
 - Tauri 2 + React + TypeScript project skeleton.
-- Start screen showing the application name and version.
+- Application shell with Catalog, MAME and Settings pages; light and dark themes.
 - MAME installation management: manual selection through the native file picker,
   automatic detection, validation through `-version`, version display, and saving,
   verifying and removing the configuration (see [Configuring MAME](#configuring-mame)).
@@ -283,15 +314,16 @@ Implemented:
   consistency checks, atomic replacement, cancellation, progress and summaries
   (see [MAME catalog](#mame-catalog)).
 - Catalog search engine: FTS5 full-text search, combinable filters, facets with
-  counts, sorting and pagination, with a temporary preview panel
-  (see [Catalog search](#catalog-search)).
+  counts, sorting and pagination (see [Catalog search](#catalog-search)).
+- Catalog browser with filters, facets, card results, pagination and machine,
+  software and software list detail views (see [Browsing the catalog](#browsing-the-catalog)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including the catalog browser, machine and
-software detail views, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including the launcher, ROM management,
+artwork and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

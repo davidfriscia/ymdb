@@ -160,6 +160,9 @@ pub(super) fn conditions(
         Some(CloneFilter::Clones) => conditions.push("s.clone_of IS NOT NULL", []),
         None => {}
     }
+    if let Some(parent) = &filters.clone_of {
+        conditions.push("s.clone_of = ?", [Value::Text(parent.clone())]);
+    }
     if applies(SoftwareFacet::Supported) && !filters.supported.is_empty() {
         conditions.push(
             &format!("s.supported IN ({})", placeholders(filters.supported.len())),

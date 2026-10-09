@@ -287,6 +287,20 @@ fn combines_filters() {
     );
     assert_eq!(
         search(MachineFilters {
+            clone_of: Some("sf2".to_owned()),
+            ..MachineFilters::default()
+        }),
+        "sf2ce"
+    );
+    assert_eq!(
+        search(MachineFilters {
+            clone_of: Some("missing".to_owned()),
+            ..MachineFilters::default()
+        }),
+        ""
+    );
+    assert_eq!(
+        search(MachineFilters {
             bios: Some(true),
             ..MachineFilters::default()
         }),
@@ -798,6 +812,22 @@ fn filters_software() {
             ..SoftwareFilters::default()
         }),
         "c64_cart/gameb2"
+    );
+    assert_eq!(
+        search(SoftwareFilters {
+            lists: vec!["c64_cart".to_owned()],
+            clone_of: Some("gamebase".to_owned()),
+            ..SoftwareFilters::default()
+        }),
+        "c64_cart/gameb2"
+    );
+    assert_eq!(
+        search(SoftwareFilters {
+            lists: vec!["nes".to_owned()],
+            clone_of: Some("gamebase".to_owned()),
+            ..SoftwareFilters::default()
+        }),
+        ""
     );
     assert_eq!(
         search(SoftwareFilters {

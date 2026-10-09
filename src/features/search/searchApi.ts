@@ -50,6 +50,8 @@ export interface MachineFilters {
   manufacturers?: (string | null)[];
   years?: (string | null)[];
   clones?: CloneFilter;
+  /** Clones of this parent (short name). */
+  cloneOf?: string;
   bios?: boolean;
   device?: boolean;
   mechanical?: boolean;
@@ -99,6 +101,8 @@ export interface SoftwareFilters {
   publishers?: (string | null)[];
   years?: (string | null)[];
   clones?: CloneFilter;
+  /** Clones of this parent (short name). */
+  cloneOf?: string;
   supported?: SupportStatus[];
   hasRoms?: boolean;
   hasDisks?: boolean;

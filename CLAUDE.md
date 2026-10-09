@@ -99,6 +99,27 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Measure search changes with the `search_benchmark` ignored test on a real catalog
   and check `EXPLAIN QUERY PLAN` before adding indexes.
 - MAME is executed only in response to explicit user actions; never at startup.
+- Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
+  unbounded one-to-many relations (clones, software of a list, machines of a list)
+  in them: return a count and list them through the paginated search.
+
+## Frontend conventions
+
+- Colors come only from the semantic tokens defined per theme in
+  `src/app/theme/themes.css`; never hardcode a color in a stylesheet or component.
+  A new theme is a complete token set under `:root[data-theme="<id>"]` plus an entry
+  in `THEMES` (`themes.ts`). The default theme is `light`.
+- Interface preferences (theme, card size, filter panel, renderer) live in
+  `localStorage` through `src/app/preferences.ts`, validated field by field with
+  defaults. Never store MAME configuration or catalog data there.
+- The catalog browser never searches, filters, sorts, counts or paginates in the
+  frontend: it builds typed requests for the backend search. Keep results and facet
+  requests separate so that paging and sorting do not recount facets.
+- Result renderers implement `ResultRendererProps` and are registered in
+  `features/browser/renderers/registry.ts`; they only display the current page and
+  never change the request. Do not add selector entries for unimplemented renderers.
+- Asynchronous loads in components go through `src/shared/useLoader.ts` (stale
+  responses ignored, memoized inputs).
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
   from planned to implemented.
 

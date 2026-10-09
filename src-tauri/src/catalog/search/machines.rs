@@ -142,6 +142,9 @@ pub(super) fn conditions(
         Some(CloneFilter::Clones) => conditions.push("m.clone_of IS NOT NULL", []),
         None => {}
     }
+    if let Some(parent) = &filters.clone_of {
+        conditions.push("m.clone_of = ?", [Value::Text(parent.clone())]);
+    }
     conditions.push_flag("m.is_bios", filters.bios);
     conditions.push_flag("m.is_device", filters.device);
     conditions.push_flag("m.is_mechanical", filters.mechanical);

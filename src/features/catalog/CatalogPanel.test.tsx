@@ -125,9 +125,9 @@ async function findEnabledButton(name: string) {
   return button;
 }
 
-function renderPanel() {
+function renderPanel(onCatalogChanged?: () => void) {
   const user = userEvent.setup();
-  render(<CatalogPanel pollIntervalMs={POLL_MS} />);
+  render(<CatalogPanel pollIntervalMs={POLL_MS} onCatalogChanged={onCatalogChanged} />);
   return user;
 }
 
@@ -201,9 +201,11 @@ describe("CatalogPanel", () => {
         },
         POLL_MS * 3,
       );
-      const user = renderPanel();
+      const onCatalogChanged = vi.fn();
+      const user = renderPanel(onCatalogChanged);
 
       await user.click(await findEnabledButton("Import catalog"));
+      expect(onCatalogChanged).not.toHaveBeenCalled();
 
       const progress = await screen.findByRole("progressbar", { name: "Import progress" });
       expect(progress).not.toHaveAttribute("value");
@@ -216,6 +218,7 @@ describe("CatalogPanel", () => {
       expect(await screen.findByLabelText("Catalog summary")).toBeInTheDocument();
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Cancel import" })).not.toBeInTheDocument();
+      expect(onCatalogChanged).toHaveBeenCalledTimes(1);
     });
 
     it("cancels a running import", async () => {
@@ -333,8 +336,9 @@ describe("CatalogPanel", () => {
       });
       renderPanel();
 
-      expect(await screen.findByRole("button", { name: "Import software lists" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Reimport machines" })).toBeEnabled();
+      // Wait for the status: the buttons are disabled while it loads.
+      expect(await findEnabledButton("Reimport machines")).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Import software lists" })).toBeDisabled();
     });
 
     it("warns about software lists from another MAME build", async () => {
