@@ -56,23 +56,28 @@ React + TypeScript application rendered by the system WebView through Tauri.
 - Implemented features:
   - `mame-installation`: the MAME Installation panel (see below).
   - `catalog`: the MAME Catalog panel (catalog summary, import, progress, cancel).
+  - `search`: typed wrappers of the search commands (`searchApi.ts`) and a temporary
+    "Catalog search (preview)" panel (text, Machines/Software, total, first 20
+    results, query time) used to try the search engine.
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
-Planned: catalog browser, search and filter panels, machine and software detail
-views, collections, launch profiles, navigation between screens.
+Planned: catalog browser with filter and facet panels (replacing the search preview),
+machine and software detail views, collections, launch profiles, navigation between
+screens.
 
 ### Application Core — Implemented (partially)
 
 The Rust crate in `src-tauri/`.
 
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
-- `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`, `catalog.rs`).
-  Commands extract what they need from the Tauri runtime and delegate to plain
-  functions that are unit-tested without Tauri. Blocking work (process execution,
-  native dialogs) runs on the blocking thread pool, and long-running work (catalog
-  import) on a dedicated thread, so the UI never freezes. Failures are returned as a
-  structured `CommandError` (`settings`, `notConfigured`, `importInProgress`,
-  `internal`).
+- `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`, `catalog.rs`,
+  `search.rs`). Commands extract what they need from the Tauri runtime and delegate
+  to plain functions that are unit-tested without Tauri. Blocking work (process
+  execution, native dialogs, searches) runs on the blocking thread pool, and
+  long-running work (catalog import) on a dedicated thread, so the UI never freezes.
+  Failures are returned as a structured `CommandError` (`settings`, `notConfigured`,
+  `importInProgress`, `invalidRequest`, `catalogNotImported`,
+  `softwareListsNotImported`, `internal`).
 - `health.rs` builds the health report returned by `check_health`.
 - `settings.rs` persists application settings (see [Local storage](#local-storage--implemented-partially)).
 - `mame/` implements the MAME integration (see below).
@@ -150,6 +155,8 @@ Implemented in `src-tauri/src/catalog/`:
 - `import.rs`: orchestration (validate, run MAME, parse, store, swap). Machines and
   software lists share `stream_mame_output`, built on `mame::process::spawn_streaming`.
 - `freshness.rs`: whether the catalog matches the configured executable.
+- `search/`: full-text search and faceted filtering (see
+  [Catalog search](#catalog-search--implemented)).
 
 #### The `-listxml` format
 
@@ -207,7 +214,11 @@ its DTD:
   13 referenced names are not provided by MAME (for example `sorcerer_quik`).
 - The DTD allows part DIP switches and list notes; MAME 0.280 outputs neither.
 
-#### Schema (version 2)
+#### Schema (version 3)
+
+Migration 1 creates the machine tables, migration 2 the software list tables and
+migration 3 the search structures described in
+[Catalog search](#catalog-search--implemented).
 
 | Table                             | Content                                                                                                                                                                                                                                                                             |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -295,7 +306,8 @@ derived from MAME. An import:
 4. After the end of the document, waits for MAME and requires exit code 0.
 5. Checks that the number of stored machines equals the number parsed, runs
    `PRAGMA foreign_key_check` (reporting the first violations by name), writes the
-   metadata row and commits (deferred foreign keys are enforced here).
+   metadata row, rebuilds the full-text search indexes and commits (deferred foreign
+   keys are enforced here).
 6. Closes and syncs the partial file and renames it over `catalog.sqlite` while
    holding the lock that also guards catalog reads.
 
@@ -321,7 +333,8 @@ A **software list import** uses the same replacement mechanism:
    software with cached prepared statements. Progress counts software.
 4. Checks the stored list and software counts, checks again that the machine
    catalog in the file comes from the same build, runs `PRAGMA foreign_key_check`,
-   writes `software_catalog_metadata` and commits.
+   writes `software_catalog_metadata`, rebuilds the software search index and
+   commits.
 5. Syncs and renames the file over `catalog.sqlite`, as for machines.
 
 Consequences: an interrupted, failed or cancelled software import keeps both the
@@ -377,7 +390,8 @@ read from the database only when an import ends.
 
 #### Limitations
 
-- No catalog browser, search or filters yet; no FTS5 index.
+- No catalog browser yet; the search engine is only exposed through commands and a
+  temporary preview panel.
 - Machine/software compatibility (`filter` and `compatibility` values) is stored
   but not evaluated.
 - Re-importing machines discards the software lists; there is no combined "full
@@ -386,8 +400,168 @@ read from the database only when an import ends.
 - Imports cannot be cancelled during the final commit and file replacement.
 
 Planned: full catalog update (machines and software lists in one operation),
-full-text search and combinable filters, favorites, collections, screenshots,
-artwork and metadata.
+catalog browser, favorites, collections, screenshots, artwork and metadata.
+
+### Catalog search — Implemented
+
+Implemented in `src-tauri/src/catalog/search/`, exposed by the commands
+`search_catalog_machines` and `search_catalog_software` (`commands/search.rs`) and
+the typed wrappers in `src/features/search/searchApi.ts`. Machines and software are
+searched separately; there is no combined search.
+
+- `request.rs`: request models (deserialized from the frontend; unknown fields are
+  rejected) and validation.
+- `text.rs`: conversion of the search text into a safe FTS5 query.
+- `sql.rs`: composition of `WHERE` conditions. Only SQL fragments written in the
+  code are concatenated (columns, sort orders and subqueries chosen through enums);
+  every value from a request is a bound `?` parameter.
+- `machines.rs`, `software.rs`: count, page, facets and result mapping to
+  lightweight DTOs (`MachineSummary`, `SoftwareSummary`) without relations.
+- `benchmark.rs`: an ignored test measuring representative queries on a real
+  catalog and printing their `EXPLAIN QUERY PLAN`.
+
+The functions take a read-only connection. `CatalogStore::with_reader` keeps one
+cached read-only connection under the store's file lock (so its page cache survives
+between searches) and closes it before the catalog file is replaced. Searches run
+on the blocking thread pool, one at a time.
+
+#### Full-text indexes
+
+Migration 3 creates two FTS5 external-content tables: `machines_fts` (name,
+description, manufacturer, year) over `machines`, and `software_fts` (name,
+description, publisher, year, list name) over `software`. They index the text
+without storing a copy. The tokenizer is `unicode61 remove_diacritics 2`: words are
+runs of Unicode letters and digits, case- and accent-insensitive; punctuation and `_`
+separate words. Other metadata (`info` such as alternative titles) is not indexed
+yet: it would need a content view or a second copy of the text.
+
+The catalog is only written by imports, which rebuild both indexes (`'rebuild'`) in
+the partial file just before committing; the atomic replacement is unchanged and the
+previous catalog, with its indexes, stays available until the swap. Existing
+catalogs are indexed when migration 3 is applied (when they are first read). FTS5
+`prefix` indexes were measured and not used: they doubled the index size while
+2- and 3-character prefix queries already took about 1 ms without them.
+
+Migration 3 also adds indexes for result orders: `machines(description COLLATE
+NOCASE, name)`, `software(name, list_name)` and `software(description COLLATE
+NOCASE, list_name, name)`.
+
+#### Query semantics
+
+- The text is split into words (runs of Unicode letters and digits); any other
+  character separates words. Each word is sent to FTS5 as a quoted prefix
+  (`"word"*`), so FTS5 operators typed by the user (`"`, `*`, `:`, `(`, `-`, `^`,
+  `AND`, `OR`, `NOT`, `NEAR`) are never interpreted.
+- All words must match (AND), each in any indexed column, as a word prefix:
+  `pac` matches "Pac-Man" and `pacman`; `street fight` matches "Street Fighter";
+  `capcom 1992` combines a manufacturer and a year. Matching ignores case and
+  diacritics (`attache` matches "Attaché"). Text in scripts without spaces, such as
+  Japanese, matches from the beginning of each run (`ストリート` matches
+  "ストリートファイターIII"). Words are prefixes, not substrings: `man` does not match
+  `pacman`.
+- Text that is empty or has no letter or digit does not restrict the results.
+  At most 200 characters and 16 words are accepted.
+- With search text, the default order is relevance: an exact short name match
+  first (`sf2` before `sf2ce`), then FTS5 bm25 with column weights
+  name 10, description 4, manufacturer/publisher 2, year 1 (and list name 1).
+
+#### Filters
+
+Within a filter, values are alternatives (OR); different filters must all match
+(AND). `null` in a value list selects entries without a value. All filters use data
+of the catalog only; no machine is classified as arcade, console or computer.
+
+- Machines: manufacturers, years (as printed, such as `199?`), parents or clones,
+  BIOS, device, mechanical, runnable, driver status, emulation status, has ROMs,
+  has disks (CHD), software lists. "Has ROMs"/"has disks" mean that the catalog
+  declares at least one ROM/disk entry (any dump status, including `nodump`); they
+  say nothing about files present on disk. The software list filter uses the
+  machines' references, so lists that MAME does not provide can still be selected.
+- Software: lists, publishers, years, parents or clones, support status (`yes`,
+  `partial`, `no` as declared by MAME), has ROMs, has disks, part interfaces. The
+  support status is unrelated to media availability.
+
+#### Facets
+
+Requested facets return `(value, count)` pairs: machines by manufacturer, year,
+driver status, emulation status and software list; software by list, publisher,
+year, support status and interface.
+
+- Counts use disjunctive semantics: each facet applies the search text and all
+  filters except its own. Selecting a manufacturer therefore keeps the other
+  manufacturers visible with their counts (to add alternatives), while the other
+  facets count only the matching results.
+- Machines referencing a list, and software with several parts on one interface,
+  are counted once per value.
+- Years are listed chronologically; other facets by decreasing count, then value.
+  `null` values come last.
+- Each facet returns at most `limit` values (default 50, at most 200) with
+  `hasMore` when more exist, and accepts an optional `search` substring (ASCII
+  case-insensitive) to find values of large facets (3,140 manufacturers in 0.280).
+  Counts are computed by SQL `GROUP BY` queries; results are never loaded in memory
+  to be counted.
+
+#### Pagination and sorting
+
+- Offset pagination: zero-based `page` (at most 100,000) and `pageSize` (1-200,
+  default 50). The response contains `total`, `pageCount`, the items and the facets.
+  A page beyond the end is empty. Offset pagination was kept because measured deep
+  pages stay below 31 ms with the order indexes (see below); keyset pagination was
+  not needed for these volumes.
+- Sorts: machines by relevance, name, description, year, manufacturer; software by
+  relevance, name, description, year, publisher, list; ascending or descending.
+  Every order ends with the unique key (machine name; software list and name), so
+  pages are stable. `null` years, manufacturers and publishers come last in both
+  directions; ties are broken by description and name in ascending order. Relevance
+  without search text falls back to the name.
+- Text sorts use SQLite `NOCASE` collation, which folds ASCII letters only.
+
+#### Measured performance
+
+Measured on the MAME 0.280 catalog (48,893 machines, 139,122 software) with
+`search_benchmark`, release build, Windows: "first" is the first execution on a new
+connection (empty SQLite page cache, warm operating system cache), "median" the
+median of 15 executions on a warm connection. Each search includes the count and
+the first page of 50 items.
+
+| Search                                        | Results | First (ms) | Median (ms) |
+| --------------------------------------------- | ------- | ---------- | ----------- |
+| Machines, no text, by name                    | 48,893  | 1.7        | 0.1         |
+| Machines, exact name `pacman`                 | 36      | 1.0        | 0.2         |
+| Machines, `street fighter`                    | 286     | 1.8        | 0.6         |
+| Machines, one-letter prefix `s`               | 28,328  | 37.9       | 37.0        |
+| Machines, text + 6 filters                    | 64      | 1.9        | 0.5         |
+| Machines, software list filter                | 473     | 1.9        | 0.5         |
+| Machines, by year / manufacturer              | 48,893  | 10.0       | 9.0         |
+| Machines, 5 facets, no text                   | 48,893  | 66.2       | 66.3        |
+| Machines, 5 facets, text `fighter`            | 574     | 4.0        | 1.9         |
+| Machines, page at offset 45,000, description  | 48,893  | 5.2        | 3.6         |
+| Software, no text, by name                    | 139,122 | 4.9        | 3.6         |
+| Software, `super mario`                       | 215     | 3.1        | 1.7         |
+| Software, one-letter prefix `s`               | 75,908  | 111.5      | 111.0       |
+| Software, text + list + support filters       | 36      | 2.2        | 0.5         |
+| Software, has ROMs = false                    | 10,055  | 106.4      | 102.8       |
+| Software, interface filter                    | 20,549  | 20.8       | 19.0        |
+| Software, 5 facets, no text                   | 139,122 | 162.0      | 161.9       |
+| Software, 5 facets, text `mario`              | 454     | 5.0        | 3.4         |
+| Software, page at offset 130,000, description | 139,122 | 31.2       | 30.4        |
+
+Optimizations made from these measurements: relation filters are uncorrelated `IN`
+subqueries (a correlated `EXISTS` on software lists took 3.3 s), and the order
+indexes turned full sorts into index scans (deep software pages took 0.6-0.7 s).
+The search structures add about 28 MiB to the 0.280 catalog (FTS 13 MiB, order
+indexes 15 MiB), for a total of 231 MB.
+
+#### Known limitations
+
+- Prefix, not substring, matching; no fuzzy matching or typo tolerance.
+- One-letter searches over all software, the unfiltered software facets
+  (30-50 ms each, about 160 ms for all five) and "software without ROMs" are the
+  slowest searches (about 0.1-0.16 s).
+- Sorting by year or manufacturer without text uses a temporary sort (about 9 ms
+  for all machines).
+- `NOCASE` sorting and facet value search fold ASCII case only.
+- Searches are serialized on the catalog store lock.
 
 ### Local storage — Implemented (partially)
 
@@ -435,9 +609,10 @@ Planned: user-configurable ROM, CHD and artwork directories.
 - SQLite is embedded through `rusqlite` with the `bundled` feature, so every
   platform uses the same SQLite version, without system libraries.
 - Explicit SQL, no ORM. Versioned migrations in `catalog/schema.rs`.
-- Implemented: the catalog database (see [Catalog](#catalog--implemented-machines-and-software-lists)).
+- Implemented: the catalog database (see [Catalog](#catalog--implemented-machines-and-software-lists)),
+  including FTS5 full-text indexes (see [Catalog search](#catalog-search--implemented)).
 - Planned: a separate user database (favorites, collections, profiles, cache
-  metadata) that survives catalog re-imports; full-text search with FTS5.
+  metadata) that survives catalog re-imports.
 
 ### Remote storage provider abstraction — Planned
 

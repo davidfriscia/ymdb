@@ -8,6 +8,7 @@
 pub mod catalog;
 pub mod health;
 pub mod mame;
+pub mod search;
 
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
@@ -31,6 +32,12 @@ pub enum CommandError {
     NotConfigured,
     /// A catalog import is already running.
     ImportInProgress,
+    /// The search request is invalid (for example a page size out of range).
+    InvalidRequest { message: String },
+    /// No catalog has been imported yet.
+    CatalogNotImported,
+    /// The catalog contains no software lists.
+    SoftwareListsNotImported,
     /// Unexpected failure (for example a native dialog error).
     Internal { message: String },
 }

@@ -48,6 +48,8 @@ pub fn run() {
             commands::catalog::start_catalog_import,
             commands::catalog::start_software_list_import,
             commands::catalog::cancel_catalog_import,
+            commands::search::search_catalog_machines,
+            commands::search::search_catalog_software,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

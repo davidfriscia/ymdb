@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// Ordered list of migrations. The schema version equals its length.
-const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2];
+const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2, MIGRATION_3];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -343,6 +343,50 @@ CREATE TABLE software_disks (
     is_writeable INTEGER NOT NULL CHECK (is_writeable IN (0, 1))
 ) STRICT;
 CREATE INDEX software_disks_disk_area ON software_disks (disk_area_id);
+";
+
+/// Full-text search indexes.
+///
+/// Both are FTS5 external-content tables: they index the text of `machines`
+/// and `software` without storing a second copy of it. The catalog is only
+/// written by imports, which rebuild these indexes before committing (see
+/// [`REBUILD_SEARCH_INDEXES`]), so no triggers are needed. Existing catalogs
+/// are indexed when this migration is applied.
+///
+/// - `unicode61 remove_diacritics 2`: case-insensitive, accent-insensitive
+///   words; punctuation and `_` separate words (`Pac-Man` -> `pac`, `man`).
+/// - No `prefix` option: measured on MAME 0.280, prefix indexes doubled the
+///   index size (12.9 MB -> 27.7 MB) while 2- and 3-character prefix queries
+///   already took about 1 ms without them.
+const MIGRATION_3: &str = "
+CREATE VIRTUAL TABLE machines_fts USING fts5(
+    name, description, manufacturer, year,
+    content='machines', content_rowid='id',
+    tokenize='unicode61 remove_diacritics 2'
+);
+INSERT INTO machines_fts(machines_fts) VALUES ('rebuild');
+
+CREATE VIRTUAL TABLE software_fts USING fts5(
+    name, description, publisher, year, list_name,
+    content='software', content_rowid='id',
+    tokenize='unicode61 remove_diacritics 2'
+);
+INSERT INTO software_fts(software_fts) VALUES ('rebuild');
+
+-- Orders used by result lists. Measured on MAME 0.280, they turn full sorts
+-- (up to 0.7 s for deep pages of software) into index scans.
+CREATE INDEX machines_description ON machines (description COLLATE NOCASE, name);
+CREATE INDEX software_name ON software (name, list_name);
+CREATE INDEX software_description ON software (description COLLATE NOCASE, list_name, name);
+";
+
+/// Rebuilds the full-text indexes from their content tables.
+pub const REBUILD_SOFTWARE_SEARCH_INDEX: &str =
+    "INSERT INTO software_fts(software_fts) VALUES ('rebuild');";
+/// Both indexes; used after a machine import, which starts a new catalog.
+pub const REBUILD_SEARCH_INDEXES: &str = "
+INSERT INTO machines_fts(machines_fts) VALUES ('rebuild');
+INSERT INTO software_fts(software_fts) VALUES ('rebuild');
 ";
 
 #[derive(Debug)]

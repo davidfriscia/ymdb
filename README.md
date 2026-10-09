@@ -176,6 +176,28 @@ rebuilt by the next import. See
 [ARCHITECTURE.md](ARCHITECTURE.md#catalog--implemented-machines-and-software-lists) for
 the schema, the imported and deferred information, and the import strategy.
 
+## Catalog search
+
+The backend provides full-text search with combinable filters, facets, sorting and
+pagination over the imported catalog, through the commands
+`search_catalog_machines` and `search_catalog_software` (typed wrappers in
+`src/features/search/searchApi.ts`). Machines and software are searched separately.
+
+- Text: every word must match, in any indexed field (machines: name, description,
+  manufacturer, year; software: name, description, publisher, year, list name), as a
+  word prefix, ignoring case and accents. An exact short name (`sf2`) ranks first.
+  Search operators typed by the user are treated as plain text.
+- Filters, facets with counts, relevance and field sorting, and server-side
+  pagination (up to 200 results per page) are described in
+  [ARCHITECTURE.md](ARCHITECTURE.md#catalog-search--implemented), with measured
+  timings: most searches on the MAME 0.280 catalog take less than 5 ms.
+- The **Catalog search (preview)** panel is a temporary way to try it: type a text,
+  choose Machines or Software, and see the total, the query time and the first 20
+  results. The catalog browser will replace it.
+
+Catalogs imported by earlier versions are indexed automatically the first time they
+are opened.
+
 ## Testing and quality checks
 
 | Command             | Description                               |
@@ -199,10 +221,18 @@ pnpm tauri build --debug --no-bundle
 
 Optional end-to-end tests validate a real MAME executable and import its full catalog
 (printing the duration and the catalog summary). They are ignored by default because
-they need a local MAME installation:
+they need a local MAME installation. Set `YMDB_TEST_CATALOG_DIR` to keep the imported
+catalog:
 
 ```sh
-YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --release --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture
+YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --release --manifest-path src-tauri/Cargo.toml real_mame -- --ignored --nocapture
+```
+
+The search benchmark measures representative searches on an imported catalog and
+prints their query plans:
+
+```sh
+YMDB_BENCH_CATALOG=/path/to/catalog.sqlite cargo test --release --manifest-path src-tauri/Cargo.toml search_benchmark -- --ignored --nocapture
 ```
 
 ## Continuous integration
@@ -252,13 +282,16 @@ Implemented:
   (`-listsoftware`) into SQLite with versioned schema and migrations, version
   consistency checks, atomic replacement, cancellation, progress and summaries
   (see [MAME catalog](#mame-catalog)).
+- Catalog search engine: FTS5 full-text search, combinable filters, facets with
+  counts, sorting and pagination, with a temporary preview panel
+  (see [Catalog search](#catalog-search)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including the catalog browser, search and
-filters, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including the catalog browser, machine and
+software detail views, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

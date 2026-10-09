@@ -1036,7 +1036,8 @@ mod tests {
         // Turn the catalog into what version 1 of the application wrote.
         open(&store)
             .execute_batch(
-                "DROP TABLE software_disks; DROP TABLE software_disk_areas;
+                "DROP TABLE machines_fts; DROP TABLE software_fts; DROP INDEX machines_description;
+                 DROP TABLE software_disks; DROP TABLE software_disk_areas;
                  DROP TABLE software_roms; DROP TABLE software_data_areas;
                  DROP TABLE software_part_features; DROP TABLE software_parts;
                  DROP TABLE software_shared_features; DROP TABLE software_info;
@@ -1130,8 +1131,11 @@ mod tests {
     fn real_mame_catalog_import() {
         let executable = std::env::var_os("YMDB_TEST_MAME_EXECUTABLE")
             .expect("YMDB_TEST_MAME_EXECUTABLE must be set");
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = CatalogStore::in_dir(dir.path());
+        // YMDB_TEST_CATALOG_DIR keeps the catalog, for example for benchmarks.
+        let temp = tempfile::tempdir().expect("temp dir");
+        let dir = std::env::var_os("YMDB_TEST_CATALOG_DIR")
+            .map_or_else(|| temp.path().to_path_buf(), std::path::PathBuf::from);
+        let store = CatalogStore::in_dir(&dir);
         let cancel = Arc::new(AtomicBool::new(false));
 
         let started = Instant::now();

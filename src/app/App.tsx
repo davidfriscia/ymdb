@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CatalogPanel } from "../features/catalog/CatalogPanel";
 import { HealthCheck } from "../features/health-check/HealthCheck";
+import { SearchPreview } from "../features/search/SearchPreview";
 import { MameInstallation } from "../features/mame-installation/MameInstallation";
 
 export function App() {
@@ -25,6 +26,7 @@ export function App() {
         }}
       />
       <CatalogPanel refreshKey={mameConfigurationVersion} />
+      <SearchPreview />
       <HealthCheck />
     </main>
   );

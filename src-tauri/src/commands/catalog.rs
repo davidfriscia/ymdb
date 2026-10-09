@@ -109,7 +109,7 @@ impl CatalogState {
         }
     }
 
-    fn store(&self) -> Result<&CatalogStore, CommandError> {
+    pub(super) fn store(&self) -> Result<&CatalogStore, CommandError> {
         self.store.as_ref().ok_or_else(|| CommandError::Internal {
             message: "the application data directory is unavailable".to_owned(),
         })

@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<mame build="0.280 (mame0280)" debug="no" mameconfig="10">
+	<machine name="attache" sourcefile="otrona/attache.cpp">
+		<description>Attaché</description>
+		<year>1982</year>
+		<manufacturer>Otrona</manufacturer>
+		<rom name="u252" size="4096" crc="0e3f2fd2" sha1="88ba1a4cbe3df91a6d9c4d6a2c11ea8bf5a27a10" region="boot" offset="0"/>
+		<driver status="good" emulation="good" savestate="unsupported"/>
+		<softwarelist tag="flop_list" name="attache_flop" status="original"/>
+	</machine>
+	<machine name="bup" sourcefile="hegenglaser/mephisto.cpp">
+		<description>Mephisto Blitz- und Problemlösungs-Modul (set 1)</description>
+		<year>199?</year>
+		<manufacturer>Hegener + Glaser</manufacturer>
+		<rom name="bup.bin" size="8192" crc="e1b3a43d" sha1="ab1ab2c9f2f9c4fd1f1b8c9fd7e3a5c3b56c1a8c" region="maincpu" offset="0"/>
+		<driver status="imperfect" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="c64" sourcefile="commodore/c64.cpp">
+		<description>Commodore 64 (NTSC)</description>
+		<year>1982</year>
+		<manufacturer>Commodore Business Machines</manufacturer>
+		<rom name="901227-03.u4" size="8192" crc="dbe3e7c7" sha1="1d503e56df85a62fee696e7618dc5b4e781df1bb" region="kernal" offset="0"/>
+		<device_ref name="z80"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<softwarelist tag="cart_list_c64" name="c64_cart" status="original" filter="NTSC"/>
+		<softwarelist tag="cart_list_vic10" name="vic10" status="compatible"/>
+	</machine>
+	<machine name="fruitbank" sourcefile="misc/fruit.cpp" ismechanical="yes">
+		<description>Fruit Bank</description>
+		<year>199?</year>
+		<manufacturer>Barcrest</manufacturer>
+		<rom name="fb.bin" size="1024" status="nodump" region="maincpu" offset="0"/>
+		<driver status="preliminary" emulation="preliminary" savestate="unsupported"/>
+	</machine>
+	<machine name="mspacman" sourcefile="pacman/pacman.cpp" cloneof="pacman" romof="pacman">
+		<description>Ms. Pac-Man</description>
+		<year>1981</year>
+		<manufacturer>Midway / General Computer Corporation</manufacturer>
+		<rom name="pacman.6e" size="4096" crc="c1e6ab10" sha1="e87e059c5be45753f7e9f33dff851f16d6751181" region="maincpu" offset="0"/>
+		<driver status="imperfect" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="neogeo" sourcefile="neogeo/neogeo.cpp" isbios="yes">
+		<description>Neo-Geo MV-6F</description>
+		<year>1990</year>
+		<manufacturer>SNK</manufacturer>
+		<rom name="sp-s2.sp1" size="131072" crc="9036d879" sha1="4f5ed7105b7128794654ce82b51723e16e389543" region="mainbios" offset="0"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="pacman" sourcefile="pacman/pacman.cpp" cloneof="puckman" romof="puckman">
+		<description>Pac-Man (Midway)</description>
+		<year>1980</year>
+		<manufacturer>Namco (Midway license)</manufacturer>
+		<rom name="pacman.6e" size="4096" crc="c1e6ab10" sha1="e87e059c5be45753f7e9f33dff851f16d6751181" region="maincpu" offset="0"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="pong" sourcefile="atari/pong.cpp">
+		<description>Pong (Rev E)</description>
+		<year>1972</year>
+		<manufacturer>Atari</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="puckman" sourcefile="pacman/pacman.cpp">
+		<description>Puck Man (Japan set 1)</description>
+		<year>1980</year>
+		<manufacturer>Namco</manufacturer>
+		<rom name="pm1_prg1.6e" size="2048" crc="f36e88ab" sha1="813cecf44bf5464b1aed64b36f5047e4c79ba176" region="maincpu" offset="0"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="sf2" sourcefile="capcom/cps1.cpp">
+		<description>Street Fighter II: The World Warrior (World 910522)</description>
+		<year>1991</year>
+		<manufacturer>Capcom</manufacturer>
+		<rom name="sf2e_30g.11e" size="131072" crc="fe39ee33" sha1="22558eb15e035b09b80935a32b8425d91cd79669" region="maincpu" offset="0"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="sf2ce" sourcefile="capcom/cps1.cpp" cloneof="sf2" romof="sf2">
+		<description>Street Fighter II': Champion Edition (World 920513)</description>
+		<year>1992</year>
+		<manufacturer>Capcom</manufacturer>
+		<rom name="s92e_23b.8f" size="524288" crc="0aaa1a3a" sha1="774a2b2ff7b8b4e7d7f6a0e1f1d6b4e0e5d0c0a1" region="maincpu" offset="0"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="sfiii" sourcefile="capcom/cps3.cpp">
+		<description>ストリートファイターIII (Japan 970204)</description>
+		<year>1997</year>
+		<manufacturer>Capcom</manufacturer>
+		<rom name="sfiii_japan.29f400.u2" size="524288" crc="74205250" sha1="c3e83ace7121d32da729162662ec6b5285a31211" region="bios" offset="0"/>
+		<disk name="cap-sf3-3" sha1="606e62cc5f46275e366e7dbb412dbaeb7e54cd0c" region="scsi:1:cdrom" index="0" writable="no"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="z80" sourcefile="devices/cpu/z80/z80.cpp" isdevice="yes" runnable="no">
+		<description>Zilog Z80</description>
+	</machine>
+</mame>

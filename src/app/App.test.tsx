@@ -15,6 +15,15 @@ const responses: Record<string, unknown> = {
     mameConfigured: false,
     import: { state: "idle" },
   },
+  search_catalog_machines: {
+    items: [],
+    total: 0,
+    page: 0,
+    pageSize: 20,
+    pageCount: 0,
+    facets: [],
+    elapsedMs: 0.5,
+  },
 };
 
 describe("App", () => {
@@ -44,6 +53,9 @@ describe("App", () => {
       screen.getByRole("heading", { level: 2, name: "MAME Installation" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "MAME Catalog" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Catalog search (preview)" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check backend connection" })).toBeEnabled();
     expect(await screen.findByRole("button", { name: "Select executable…" })).toBeEnabled();
     expect(await screen.findByText("No catalog has been imported yet.")).toBeInTheDocument();

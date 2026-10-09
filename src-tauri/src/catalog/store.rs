@@ -214,19 +214,21 @@ pub struct CatalogStatistics {
 
 /// Location of the catalog database files.
 ///
-/// Clones share a lock that serializes reads of the catalog file with its
-/// replacement, so the file is never replaced while it is open.
+/// Clones share one lock that serializes every access to the catalog file
+/// with its replacement. The lock also holds the cached read-only connection
+/// used by queries (summary, search), so its page cache survives between
+/// queries; the connection is closed before the file is replaced.
 #[derive(Debug, Clone)]
 pub struct CatalogStore {
     dir: PathBuf,
-    file_lock: Arc<Mutex<()>>,
+    file_lock: Arc<Mutex<Option<Connection>>>,
 }
 
 impl CatalogStore {
     pub fn in_dir(dir: &Path) -> Self {
         Self {
             dir: dir.to_path_buf(),
-            file_lock: Arc::new(Mutex::new(())),
+            file_lock: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -242,33 +244,47 @@ impl CatalogStore {
     /// when no catalog has been imported yet.
     pub fn read_info(&self) -> Result<Option<CatalogInfo>, StoreError> {
         let path = self.catalog_path();
-        let _guard = self
+        self.with_reader(|connection| {
+            let database_size = fs::metadata(&path).map_or(0, |metadata| metadata.len());
+            read_info(connection, database_size)
+        })
+        .map(Option::flatten)
+    }
+
+    /// Runs `query` with a read-only connection to the current catalog, or
+    /// returns `None` when no catalog has been imported yet.
+    ///
+    /// Catalogs created by an older release are upgraded in place first:
+    /// migrations only add tables and indexes, so existing data stays valid.
+    pub fn with_reader<T>(
+        &self,
+        query: impl FnOnce(&Connection) -> Result<T, StoreError>,
+    ) -> Result<Option<T>, StoreError> {
+        let path = self.catalog_path();
+        let mut cached = self
             .file_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         if !path.is_file() {
+            *cached = None;
             return Ok(None);
         }
-        let connection = Connection::open_with_flags(
-            &path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        let found = schema::schema_version(&connection)?;
-        if found > SCHEMA_VERSION {
-            return Err(StoreError::UnsupportedSchema { found });
+        // The file may have been changed outside this store: reopen (and
+        // upgrade) when the schema version is no longer the current one.
+        let current = cached.as_ref().is_some_and(|connection| {
+            schema::schema_version(connection).ok() == Some(SCHEMA_VERSION)
+        });
+        if !current {
+            *cached = None;
+            *cached = Some(open_reader(&path)?);
         }
-        let connection = if found < SCHEMA_VERSION {
-            // Catalogs created by an older release are upgraded in place.
-            // Migrations only add tables, so the existing data stays valid.
-            drop(connection);
-            let mut upgraded = Connection::open(&path)?;
-            schema::migrate(&mut upgraded)?;
-            upgraded
-        } else {
-            connection
-        };
-        let database_size = fs::metadata(&path).map_or(0, |metadata| metadata.len());
-        read_info(&connection, database_size)
+        let connection = cached.as_ref().expect("connection was just opened");
+        let result = query(connection);
+        if result.is_err() {
+            // Do not keep a connection in an unknown state.
+            *cached = None;
+        }
+        result.map(Some)
     }
 
     /// Starts building a new catalog in the partial file.
@@ -329,6 +345,24 @@ impl CatalogStore {
         remove_if_exists(&partial)?;
         Ok(partial)
     }
+}
+
+/// Opens the current catalog read-only, upgrading an older schema first.
+fn open_reader(path: &Path) -> Result<Connection, StoreError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = Connection::open_with_flags(path, flags)?;
+    let found = schema::schema_version(&connection)?;
+    if found > SCHEMA_VERSION {
+        return Err(StoreError::UnsupportedSchema { found });
+    }
+    if found == SCHEMA_VERSION {
+        return Ok(connection);
+    }
+    drop(connection);
+    let mut upgraded = Connection::open(path)?;
+    schema::migrate(&mut upgraded)?;
+    upgraded.close().map_err(|(_, error)| error)?;
+    Ok(Connection::open_with_flags(path, flags)?)
 }
 
 /// Opens the partial file for writing. It is discarded on any failure and
@@ -466,11 +500,13 @@ impl CatalogWriter {
 impl CatalogWriter {
     fn replace_catalog(&self, partial: &Path) -> Result<(), StoreError> {
         let target = self.store.catalog_path();
-        let _guard = self
+        let mut cached = self
             .store
             .file_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        // Windows cannot rename over a file that is still open.
+        *cached = None;
         fs::rename(partial, &target).map_err(|source| StoreError::Replace {
             path: target,
             source,
@@ -523,6 +559,7 @@ fn commit(
             to_i64(machines),
         ],
     )?;
+    connection.execute_batch(schema::REBUILD_SEARCH_INDEXES)?;
     connection.execute_batch("COMMIT")?;
     Ok(())
 }
@@ -580,6 +617,7 @@ fn commit_software(
             to_i64(software),
         ],
     )?;
+    connection.execute_batch(schema::REBUILD_SOFTWARE_SEARCH_INDEX)?;
     connection.execute_batch("COMMIT")?;
     Ok(())
 }

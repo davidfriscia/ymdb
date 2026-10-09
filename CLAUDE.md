@@ -89,6 +89,15 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Do not classify machines or software (arcade, console, computer, genre) beyond
   what MAME's data states; store free-form metadata (`info`, `sharedfeat`, `feature`)
   verbatim.
+- Catalog queries (summary, search) run through `CatalogStore::with_reader`, never on
+  connections opened elsewhere.
+- Search SQL (`catalog/search/`): concatenate only SQL fragments written in the code
+  and selected through enums; bind every request value as a `?` parameter. Never pass
+  user text to FTS5 syntax: go through `search::text::parse`.
+- FTS5 tables are external-content indexes rebuilt by imports before commit; any new
+  code that writes indexed tables must rebuild them too.
+- Measure search changes with the `search_benchmark` ignored test on a real catalog
+  and check `EXPLAIN QUERY PLAN` before adding indexes.
 - MAME is executed only in response to explicit user actions; never at startup.
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
   from planned to implemented.

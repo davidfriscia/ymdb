@@ -12,6 +12,7 @@ pub mod import;
 pub mod model;
 pub mod parser;
 pub mod schema;
+pub mod search;
 pub mod software_model;
 pub mod software_parser;
 pub mod store;

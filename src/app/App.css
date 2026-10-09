@@ -217,3 +217,40 @@ body {
 .import-progress .message {
   margin-top: 8px;
 }
+
+.search-preview__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.search-preview__input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.search-preview__scope {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.search-preview__results {
+  margin: 12px 0 0;
+  padding-left: 24px;
+}
+
+.search-preview__result {
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
