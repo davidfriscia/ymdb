@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// Ordered list of migrations. The schema version equals its length.
-const MIGRATIONS: &[&str] = &[MIGRATION_1];
+const MIGRATIONS: &[&str] = &[MIGRATION_1, MIGRATION_2];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -218,6 +218,133 @@ CREATE TABLE machine_ram_options (
 CREATE INDEX machine_ram_options_machine ON machine_ram_options (machine_name);
 ";
 
+/// Software lists from `mame -listsoftware`.
+///
+/// Conventions (in addition to those of [`MIGRATION_1`]):
+/// - A software is identified by its list and its short name: names are only
+///   unique within a list.
+/// - `software.clone_of` references a software of the same list through a
+///   deferred composite foreign key (parents may be listed after clones).
+/// - Machines are linked to software lists by name through
+///   `machine_software_lists.list_name` = `software_lists.name`. This is not a
+///   foreign key because machines may reference lists that MAME does not ship.
+/// - `software_catalog_metadata` exists only when the software lists were
+///   imported from the same MAME build as the machines in this catalog.
+const MIGRATION_2: &str = "
+CREATE TABLE software_catalog_metadata (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    status TEXT NOT NULL CHECK (status IN ('complete')),
+    mame_release TEXT NOT NULL,
+    mame_revision TEXT NOT NULL,
+    executable_path TEXT NOT NULL,
+    executable_size INTEGER,
+    executable_modified_at INTEGER,
+    imported_at INTEGER NOT NULL,
+    import_duration_ms INTEGER NOT NULL,
+    list_count INTEGER NOT NULL CHECK (list_count >= 0),
+    software_count INTEGER NOT NULL CHECK (software_count >= 0)
+) STRICT;
+
+CREATE TABLE software_lists (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    notes TEXT
+) STRICT;
+
+CREATE TABLE software (
+    id INTEGER PRIMARY KEY,
+    list_name TEXT NOT NULL REFERENCES software_lists (name) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    clone_of TEXT,
+    supported TEXT NOT NULL,
+    description TEXT NOT NULL,
+    year TEXT,
+    publisher TEXT,
+    notes TEXT,
+    UNIQUE (list_name, name),
+    CHECK (clone_of IS NULL OR clone_of <> name),
+    FOREIGN KEY (list_name, clone_of) REFERENCES software (list_name, name)
+        DEFERRABLE INITIALLY DEFERRED
+) STRICT;
+CREATE INDEX software_clone_of ON software (list_name, clone_of);
+
+CREATE TABLE software_info (
+    id INTEGER PRIMARY KEY,
+    software_id INTEGER NOT NULL REFERENCES software (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    value TEXT
+) STRICT;
+CREATE INDEX software_info_software ON software_info (software_id);
+
+CREATE TABLE software_shared_features (
+    id INTEGER PRIMARY KEY,
+    software_id INTEGER NOT NULL REFERENCES software (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    value TEXT
+) STRICT;
+CREATE INDEX software_shared_features_software ON software_shared_features (software_id);
+
+CREATE TABLE software_parts (
+    id INTEGER PRIMARY KEY,
+    software_id INTEGER NOT NULL REFERENCES software (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    interface TEXT NOT NULL
+) STRICT;
+CREATE INDEX software_parts_software ON software_parts (software_id);
+CREATE INDEX software_parts_interface ON software_parts (interface);
+
+CREATE TABLE software_part_features (
+    id INTEGER PRIMARY KEY,
+    part_id INTEGER NOT NULL REFERENCES software_parts (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    value TEXT
+) STRICT;
+CREATE INDEX software_part_features_part ON software_part_features (part_id);
+
+CREATE TABLE software_data_areas (
+    id INTEGER PRIMARY KEY,
+    part_id INTEGER NOT NULL REFERENCES software_parts (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL CHECK (size >= 0),
+    databits INTEGER NOT NULL,
+    endian TEXT NOT NULL
+) STRICT;
+CREATE INDEX software_data_areas_part ON software_data_areas (part_id);
+
+CREATE TABLE software_roms (
+    id INTEGER PRIMARY KEY,
+    data_area_id INTEGER NOT NULL REFERENCES software_data_areas (id) ON DELETE CASCADE,
+    name TEXT,
+    size INTEGER CHECK (size >= 0),
+    length INTEGER,
+    crc TEXT,
+    sha1 TEXT,
+    offset TEXT,
+    value TEXT,
+    status TEXT NOT NULL,
+    load_flag TEXT
+) STRICT;
+CREATE INDEX software_roms_data_area ON software_roms (data_area_id);
+
+CREATE TABLE software_disk_areas (
+    id INTEGER PRIMARY KEY,
+    part_id INTEGER NOT NULL REFERENCES software_parts (id) ON DELETE CASCADE,
+    name TEXT NOT NULL
+) STRICT;
+CREATE INDEX software_disk_areas_part ON software_disk_areas (part_id);
+
+CREATE TABLE software_disks (
+    id INTEGER PRIMARY KEY,
+    disk_area_id INTEGER NOT NULL REFERENCES software_disk_areas (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    sha1 TEXT,
+    status TEXT NOT NULL,
+    is_writeable INTEGER NOT NULL CHECK (is_writeable IN (0, 1))
+) STRICT;
+CREATE INDEX software_disks_disk_area ON software_disks (disk_area_id);
+";
+
 #[derive(Debug)]
 pub enum MigrationError {
     Sqlite(rusqlite::Error),
@@ -399,5 +526,104 @@ mod tests {
         assert!(wrong_type.is_err());
         assert!(self_clone.is_err());
         assert!(orphan_rom.is_err());
+    }
+
+    /// Applies only the first `version` migrations, as an older release did.
+    fn migrate_to(connection: &mut Connection, version: usize) {
+        for (index, sql) in MIGRATIONS.iter().enumerate().take(version) {
+            let transaction = connection.transaction().expect("begin");
+            transaction.execute_batch(sql).expect("migration");
+            transaction
+                .pragma_update(
+                    None,
+                    "user_version",
+                    i64::try_from(index + 1).expect("version"),
+                )
+                .expect("version");
+            transaction.commit().expect("commit");
+        }
+    }
+
+    #[test]
+    fn migrates_version_1_catalog_and_keeps_machines() {
+        let mut connection = open();
+        migrate_to(&mut connection, 1);
+        connection
+            .execute_batch(
+                "INSERT INTO machines (name, description, is_bios, is_device, is_mechanical, is_runnable)
+                 VALUES ('c64', 'Commodore 64', 0, 0, 0, 1);
+                 INSERT INTO machine_software_lists (machine_name, list_name, status)
+                 VALUES ('c64', 'c64_cart', 'original');",
+            )
+            .expect("version 1 data");
+
+        let applied = migrate(&mut connection).expect("migrate");
+
+        assert_eq!(applied, MIGRATIONS.len() - 1);
+        assert_eq!(
+            schema_version(&connection).expect("version"),
+            SCHEMA_VERSION
+        );
+        let machines: i64 = connection
+            .query_row("SELECT COUNT(*) FROM machines", [], |row| row.get(0))
+            .expect("count");
+        let software_lists: i64 = connection
+            .query_row("SELECT COUNT(*) FROM software_lists", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!((machines, software_lists), (1, 0));
+    }
+
+    fn insert_software(
+        connection: &Connection,
+        list: &str,
+        name: &str,
+        clone_of: Option<&str>,
+    ) -> rusqlite::Result<usize> {
+        connection.execute(
+            "INSERT INTO software (list_name, name, clone_of, supported, description)
+             VALUES (?1, ?2, ?3, 'yes', ?2)",
+            rusqlite::params![list, name, clone_of],
+        )
+    }
+
+    #[test]
+    fn identifies_software_by_list_and_name() {
+        let mut connection = open();
+        migrate(&mut connection).expect("migrate");
+        connection
+            .execute_batch(
+                "INSERT INTO software_lists (name) VALUES ('nes');
+                 INSERT INTO software_lists (name) VALUES ('c64_cart');",
+            )
+            .expect("lists");
+
+        insert_software(&connection, "nes", "tetris", None).expect("nes tetris");
+        insert_software(&connection, "c64_cart", "tetris", None).expect("same name, other list");
+
+        assert!(insert_software(&connection, "nes", "tetris", None).is_err());
+        assert!(insert_software(&connection, "missing_list", "x", None).is_err());
+    }
+
+    #[test]
+    fn enforces_deferred_clone_references_within_the_same_list() {
+        let mut connection = open();
+        migrate(&mut connection).expect("migrate");
+        connection
+            .execute_batch(
+                "INSERT INTO software_lists (name) VALUES ('nes');
+                 INSERT INTO software_lists (name) VALUES ('snes');",
+            )
+            .expect("lists");
+
+        // A clone listed before its parent is accepted at commit.
+        let transaction = connection.transaction().expect("begin");
+        insert_software(&transaction, "nes", "smb_alt", Some("smb")).expect("clone first");
+        insert_software(&transaction, "nes", "smb", None).expect("parent later");
+        transaction.commit().expect("valid clone reference");
+
+        // A parent that only exists in another list is a dangling reference.
+        let transaction = connection.transaction().expect("begin");
+        insert_software(&transaction, "snes", "smb_alt", Some("smb")).expect("deferred");
+        assert!(transaction.commit().is_err());
     }
 }

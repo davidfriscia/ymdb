@@ -132,24 +132,36 @@ read again on every verification and is not stored.
 
 ## MAME catalog
 
-Once MAME is configured, the **MAME Catalog** panel imports the list of all machines
-known to that MAME build:
+Once MAME is configured, the **MAME Catalog** panel imports the machines and the
+software lists known to that MAME build:
 
-- **Import catalog** (or **Reimport catalog**) runs `<mame> -listxml`, reads its
+- **Import catalog** (or **Reimport machines**) runs `<mame> -listxml`, reads its
   output as a stream and stores the machines in a local SQLite database. With MAME
-  0.280 this takes a few seconds and stores 48,893 entries (including devices).
+  0.280 this stores 48,893 entries (including devices) in a few seconds.
+- **Import software lists** (or **Update software lists**) runs
+  `<mame> -listsoftware` and adds the software lists to the catalog: with MAME 0.280,
+  720 lists and 139,122 software, with their parts, media (ROMs and disks),
+  checksums and metadata. MAME itself needs from about 15 seconds to a minute to produce this list.
+  Software lists can only be imported from the same, unchanged MAME executable the
+  machines were imported from.
+- Each software list is stored once and linked to the machines that reference it,
+  keeping the kind of relation (original or compatible) and the machine's filter.
 - While importing, the panel shows an indeterminate progress bar and the number of
-  machines processed. **Cancel import** stops MAME and discards the partial import.
-- The panel shows the MAME version the catalog was built from, the import date and
-  a summary (machines, runnable systems, clones, BIOS sets, devices, mechanical
-  machines, ROMs, disks, software lists, database size).
+  machines or software processed. **Cancel import** stops MAME and discards the
+  partial import.
+- The panel shows the MAME version, import date and a summary for machines and for
+  software lists.
 - If the configured MAME executable changes (another file, or the same file updated),
   the panel warns that the catalog no longer matches it. Reimport to update it.
+  Reimporting machines starts a new catalog without software lists; import the
+  software lists again afterwards.
 
 Imports are atomic: a new catalog is built in a separate file and replaces the
 previous one only when the import succeeds. If MAME fails, the output cannot be
 parsed, the database cannot be written, or the import is cancelled, the previous
-catalog stays available.
+catalog (machines and software lists) stays available. If another program keeps the
+catalog file open, Windows prevents its replacement: the import fails with a message
+asking to close that program, and the previous catalog is kept.
 
 The catalog is stored in `catalog.sqlite` in the application local data directory:
 
@@ -161,7 +173,7 @@ The catalog is stored in `catalog.sqlite` in the application local data director
 
 The file contains only data derived from MAME and can be deleted at any time; it is
 rebuilt by the next import. See
-[ARCHITECTURE.md](ARCHITECTURE.md#catalog--implemented-machines-from--listxml) for
+[ARCHITECTURE.md](ARCHITECTURE.md#catalog--implemented-machines-and-software-lists) for
 the schema, the imported and deferred information, and the import strategy.
 
 ## Testing and quality checks
@@ -236,8 +248,9 @@ Implemented:
   automatic detection, validation through `-version`, version display, and saving,
   verifying and removing the configuration (see [Configuring MAME](#configuring-mame)).
 - Application settings persisted as JSON in the platform configuration directory.
-- MAME machine catalog: streaming import of `-listxml` into SQLite with versioned
-  schema, atomic replacement, cancellation, progress and a catalog summary
+- MAME catalog: streaming import of machines (`-listxml`) and software lists
+  (`-listsoftware`) into SQLite with versioned schema and migrations, version
+  consistency checks, atomic replacement, cancellation, progress and summaries
   (see [MAME catalog](#mame-catalog)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
@@ -245,7 +258,7 @@ Implemented:
 - Continuous integration on Windows, macOS and Linux.
 
 Not implemented yet: everything else, including the catalog browser, search and
-filters, software list import, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+filters, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

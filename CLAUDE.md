@@ -73,12 +73,22 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Long-running operations (such as the catalog import) run on a dedicated thread,
   expose a cheap in-memory status that the frontend polls, and support cancellation.
   Never emit per-item events to the frontend.
-- `src-tauri/src/catalog/`: `catalog.sqlite` holds only data derived from MAME and is
-  rebuilt (not migrated) on every import, then swapped atomically. Never store user
-  data in it; user data must reference machines by their MAME short name.
+- `src-tauri/src/catalog/`: `catalog.sqlite` holds only data derived from MAME. Every
+  change to it (machine import, software list import, future full update) builds a
+  partial file through `CatalogWriter` and swaps it atomically; never write to the
+  live file. Open connections to it only inside `CatalogStore` (under its file
+  lock), otherwise Windows cannot replace it. Never store user data in it; user data
+  must reference machines by MAME short name and software by list and short name.
+- Software lists may only be combined with machines of the same MAME build and
+  executable; keep that check whenever the catalog import flow changes.
+- Run MAME commands with large output through `stream_mame_output` in
+  `catalog/import.rs` (built on `mame::process::spawn_streaming`).
 - Schema changes to a database go through a new migration in its `schema.rs`;
-  never edit a released migration.
-- Do not classify machines (arcade, console, computer) beyond what MAME's data states.
+  never edit a released migration. Catalog migrations must stay additive, because
+  older catalogs are upgraded in place when read.
+- Do not classify machines or software (arcade, console, computer, genre) beyond
+  what MAME's data states; store free-form metadata (`info`, `sharedfeat`, `feature`)
+  verbatim.
 - MAME is executed only in response to explicit user actions; never at startup.
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
   from planned to implemented.

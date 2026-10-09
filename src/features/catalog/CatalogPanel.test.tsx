@@ -1,7 +1,13 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CatalogInfo, CatalogStatus, ImportStatus } from "./catalogApi";
+import type {
+  CatalogInfo,
+  CatalogStatus,
+  ImportKind,
+  ImportStatus,
+  SoftwareCatalogInfo,
+} from "./catalogApi";
 import { CatalogPanel } from "./CatalogPanel";
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -11,7 +17,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 const POLL_MS = 10;
 
 const CATALOG: CatalogInfo = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   mameRelease: "0.280",
   mameRevision: "mame0280",
   mameBuild: "0.280 (mame0280)",
@@ -30,7 +36,31 @@ const CATALOG: CatalogInfo = {
     disks: 1378,
     softwareLists: 733,
   },
+  software: null,
 };
+
+const SOFTWARE: SoftwareCatalogInfo = {
+  mameRelease: "0.280",
+  mameRevision: "mame0280",
+  importedAt: Date.UTC(2026, 9, 9, 12, 5, 0),
+  importDurationMs: 68150,
+  matchesMachineCatalog: true,
+  statistics: {
+    lists: 720,
+    software: 139122,
+    clones: 43533,
+    partiallySupported: 2005,
+    unsupported: 39054,
+    parts: 236041,
+    dataAreas: 236580,
+    roms: 235190,
+    diskAreas: 11386,
+    disks: 11374,
+    missingReferencedLists: 13,
+  },
+};
+
+const WITH_SOFTWARE: CatalogInfo = { ...CATALOG, software: SOFTWARE };
 
 function status(overrides: Partial<CatalogStatus> = {}): CatalogStatus {
   return {
@@ -43,11 +73,16 @@ function status(overrides: Partial<CatalogStatus> = {}): CatalogStatus {
   };
 }
 
-function running(machinesProcessed: number, cancelRequested = false): ImportStatus {
+function running(
+  itemsProcessed: number,
+  cancelRequested = false,
+  kind: ImportKind = "machines",
+): ImportStatus {
   return {
     state: "running",
+    kind,
     phase: "reading",
-    machinesProcessed,
+    itemsProcessed,
     startedAt: 1,
     cancelRequested,
   };
@@ -101,153 +136,309 @@ describe("CatalogPanel", () => {
     invokeMock.mockReset();
   });
 
-  it("shows that no catalog exists and allows importing", async () => {
-    mockCommands({ get_catalog_status: () => status() });
-    renderPanel();
+  describe("machine catalog", () => {
+    it("shows that no catalog exists and allows importing", async () => {
+      mockCommands({ get_catalog_status: () => status() });
+      renderPanel();
 
-    expect(screen.getByText("Loading catalog…")).toBeInTheDocument();
-    expect(await screen.findByText("No catalog has been imported yet.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import catalog" })).toBeEnabled();
-  });
-
-  it("shows the catalog summary", async () => {
-    mockCommands({ get_catalog_status: () => status({ catalog: CATALOG, freshness: "current" }) });
-    renderPanel();
-
-    const summary = within(await screen.findByLabelText("Catalog summary"));
-    expect(summary.getByText("0.280 (mame0280)")).toBeInTheDocument();
-    expect(summary.getByText("48,893")).toBeInTheDocument();
-    expect(summary.getByText("42,013")).toBeInTheDocument();
-    expect(summary.getByText("364,836")).toBeInTheDocument();
-    expect(summary.getByText("105.6 MB")).toBeInTheDocument();
-    expect(summary.getByText("5.2 s")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reimport catalog" })).toBeEnabled();
-  });
-
-  it("warns when the catalog does not match the configured executable", async () => {
-    mockCommands({
-      get_catalog_status: () => status({ catalog: CATALOG, freshness: "executableChanged" }),
+      expect(screen.getByText("Loading catalog…")).toBeInTheDocument();
+      expect(await screen.findByText("No catalog has been imported yet.")).toBeInTheDocument();
+      expect(screen.getByText("Import the machine catalog first.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import catalog" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Import software lists" })).toBeDisabled();
     });
-    renderPanel();
 
-    expect(
-      await screen.findByText(/MAME executable has changed since this catalog was imported/),
-    ).toBeInTheDocument();
-  });
+    it("shows the catalog summary", async () => {
+      mockCommands({
+        get_catalog_status: () => status({ catalog: CATALOG, freshness: "current" }),
+      });
+      renderPanel();
 
-  it("disables importing when MAME is not configured", async () => {
-    mockCommands({ get_catalog_status: () => status({ mameConfigured: false }) });
-    renderPanel();
-
-    expect(await screen.findByRole("button", { name: "Import catalog" })).toBeDisabled();
-  });
-
-  it("shows indeterminate progress while importing, then the result", async () => {
-    // IPC latency longer than the polling interval, as in the real application.
-    mockCommands(
-      {
-        get_catalog_status: [status(), status({ catalog: CATALOG, freshness: "current" })],
-        start_catalog_import: () => running(0),
-        get_catalog_import_status: [
-          running(12000),
-          { state: "completed", machines: 48893, durationMs: 5153, finishedAt: 2 },
-        ],
-      },
-      POLL_MS * 3,
-    );
-    const user = renderPanel();
-
-    await user.click(await findEnabledButton("Import catalog"));
-
-    const progress = await screen.findByRole("progressbar", { name: "Import progress" });
-    expect(progress).not.toHaveAttribute("value");
-    expect(await screen.findByText(/12,000 machines processed/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import catalog" })).toBeDisabled();
-
-    expect(
-      await screen.findByText("Catalog imported: 48,893 machines in 5.2 s."),
-    ).toBeInTheDocument();
-    expect(await screen.findByLabelText("Catalog summary")).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel import" })).not.toBeInTheDocument();
-  });
-
-  it("cancels a running import", async () => {
-    // The backend reports the cancellation request only after it was made.
-    let cancelRequested = false;
-    mockCommands({
-      get_catalog_status: () => status({ import: running(100) }),
-      get_catalog_import_status: () => running(200, cancelRequested),
-      cancel_catalog_import: () => {
-        cancelRequested = true;
-        return running(150, true);
-      },
+      const summary = within(await screen.findByLabelText("Catalog summary"));
+      expect(summary.getByText("0.280 (mame0280)")).toBeInTheDocument();
+      expect(summary.getByText("48,893")).toBeInTheDocument();
+      expect(summary.getByText("42,013")).toBeInTheDocument();
+      expect(summary.getByText("364,836")).toBeInTheDocument();
+      expect(summary.getByText("105.6 MB")).toBeInTheDocument();
+      expect(summary.getByText("5.2 s")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Reimport machines" })).toBeEnabled();
     });
-    const user = renderPanel();
 
-    await user.click(await findEnabledButton("Cancel import"));
+    it("warns when the catalog does not match the configured executable", async () => {
+      mockCommands({
+        get_catalog_status: () => status({ catalog: CATALOG, freshness: "executableChanged" }),
+      });
+      renderPanel();
 
-    expect(invokeMock).toHaveBeenCalledWith("cancel_catalog_import", undefined);
-    expect(await screen.findByRole("button", { name: "Cancelling…" })).toBeDisabled();
-  });
-
-  it("reports a cancelled import", async () => {
-    mockCommands({
-      get_catalog_status: () => status({ import: { state: "cancelled", finishedAt: 1 } }),
+      expect(
+        await screen.findByText(/MAME executable has changed since this catalog was imported/),
+      ).toBeInTheDocument();
     });
-    renderPanel();
 
-    expect(
-      await screen.findByText("Import cancelled. The previous catalog, if any, was kept."),
-    ).toBeInTheDocument();
-  });
+    it("disables importing when MAME is not configured", async () => {
+      mockCommands({ get_catalog_status: () => status({ mameConfigured: false }) });
+      renderPanel();
 
-  it("reports import failures", async () => {
-    mockCommands({
-      get_catalog_status: () =>
-        status({
-          catalog: CATALOG,
-          freshness: "current",
-          import: {
-            state: "failed",
-            error: { kind: "mameFailed", exitCode: 3, stderr: "fatal error" },
-            finishedAt: 1,
-          },
-        }),
+      expect(await screen.findByRole("button", { name: "Import catalog" })).toBeDisabled();
     });
-    renderPanel();
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(
-      "Import failed: MAME exited with code 3 while listing machines.",
-    );
-    expect(alert).toHaveTextContent("fatal error");
-    expect(screen.getByLabelText("Catalog summary")).toBeInTheDocument();
-  });
+    it("shows indeterminate progress while importing, then the result", async () => {
+      // IPC latency longer than the polling interval, as in the real application.
+      mockCommands(
+        {
+          get_catalog_status: [status(), status({ catalog: CATALOG, freshness: "current" })],
+          start_catalog_import: () => running(0),
+          get_catalog_import_status: [
+            running(12000),
+            {
+              state: "completed",
+              kind: "machines",
+              items: 48893,
+              durationMs: 5153,
+              finishedAt: 2,
+            },
+          ],
+        },
+        POLL_MS * 3,
+      );
+      const user = renderPanel();
 
-  it("shows command errors when an import cannot start", async () => {
-    mockCommands({ get_catalog_status: () => status() });
-    invokeMock.mockResolvedValueOnce(status());
-    // Tauri rejects with the serialized `CommandError`, not with an `Error`.
-    invokeMock.mockRejectedValueOnce({ kind: "importInProgress" });
-    const user = renderPanel();
+      await user.click(await findEnabledButton("Import catalog"));
 
-    await user.click(await findEnabledButton("Import catalog"));
+      const progress = await screen.findByRole("progressbar", { name: "Import progress" });
+      expect(progress).not.toHaveAttribute("value");
+      expect(await screen.findByText(/12,000 machines processed/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import catalog" })).toBeDisabled();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "A catalog import is already running.",
-    );
-  });
-
-  it("reports an unreadable catalog", async () => {
-    mockCommands({
-      get_catalog_status: () =>
-        status({ catalogError: "catalog schema version 9 is not supported (expected 1)" }),
+      expect(
+        await screen.findByText("Machine catalog imported: 48,893 machines in 5.2 s."),
+      ).toBeInTheDocument();
+      expect(await screen.findByLabelText("Catalog summary")).toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel import" })).not.toBeInTheDocument();
     });
-    renderPanel();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The catalog cannot be read: catalog schema version 9 is not supported",
-    );
+    it("cancels a running import", async () => {
+      // The backend reports the cancellation request only after it was made.
+      let cancelRequested = false;
+      mockCommands({
+        get_catalog_status: () => status({ import: running(100) }),
+        get_catalog_import_status: () => running(200, cancelRequested),
+        cancel_catalog_import: () => {
+          cancelRequested = true;
+          return running(150, true);
+        },
+      });
+      const user = renderPanel();
+
+      await user.click(await findEnabledButton("Cancel import"));
+
+      expect(invokeMock).toHaveBeenCalledWith("cancel_catalog_import", undefined);
+      expect(await screen.findByRole("button", { name: "Cancelling…" })).toBeDisabled();
+    });
+
+    it("reports a cancelled import", async () => {
+      mockCommands({
+        get_catalog_status: () =>
+          status({ import: { state: "cancelled", kind: "machines", finishedAt: 1 } }),
+      });
+      renderPanel();
+
+      expect(
+        await screen.findByText("Import cancelled. The previous catalog, if any, was kept."),
+      ).toBeInTheDocument();
+    });
+
+    it("reports import failures", async () => {
+      mockCommands({
+        get_catalog_status: () =>
+          status({
+            catalog: CATALOG,
+            freshness: "current",
+            import: {
+              state: "failed",
+              kind: "machines",
+              error: { kind: "mameFailed", exitCode: 3, stderr: "fatal error" },
+              finishedAt: 1,
+            },
+          }),
+      });
+      renderPanel();
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Import failed: MAME exited with code 3.");
+      expect(alert).toHaveTextContent("fatal error");
+      expect(screen.getByLabelText("Catalog summary")).toBeInTheDocument();
+    });
+
+    it("shows command errors when an import cannot start", async () => {
+      mockCommands({ get_catalog_status: () => status() });
+      invokeMock.mockResolvedValueOnce(status());
+      // Tauri rejects with the serialized `CommandError`, not with an `Error`.
+      invokeMock.mockRejectedValueOnce({ kind: "importInProgress" });
+      const user = renderPanel();
+
+      await user.click(await findEnabledButton("Import catalog"));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "A catalog import is already running.",
+      );
+    });
+
+    it("reports an unreadable catalog", async () => {
+      mockCommands({
+        get_catalog_status: () =>
+          status({ catalogError: "catalog schema version 9 is not supported (expected 2)" }),
+      });
+      renderPanel();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "The catalog cannot be read: catalog schema version 9 is not supported",
+      );
+    });
+  });
+
+  describe("software lists", () => {
+    it("shows that software lists are not imported for the catalog", async () => {
+      mockCommands({
+        get_catalog_status: () => status({ catalog: CATALOG, freshness: "current" }),
+      });
+      renderPanel();
+
+      expect(
+        await screen.findByText("Software lists have not been imported for this catalog."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import software lists" })).toBeEnabled();
+    });
+
+    it("shows the software list summary", async () => {
+      mockCommands({
+        get_catalog_status: () => status({ catalog: WITH_SOFTWARE, freshness: "current" }),
+      });
+      renderPanel();
+
+      const summary = within(await screen.findByLabelText("Software list summary"));
+      expect(summary.getByText("720")).toBeInTheDocument();
+      expect(summary.getByText("139,122")).toBeInTheDocument();
+      expect(summary.getByText("236,041")).toBeInTheDocument();
+      expect(summary.getByText("13")).toBeInTheDocument();
+      expect(summary.getByText("68.2 s")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update software lists" })).toBeEnabled();
+      expect(screen.getByText(/import the software lists again afterwards/)).toBeInTheDocument();
+    });
+
+    it("only allows importing software lists from the catalog's executable", async () => {
+      mockCommands({
+        get_catalog_status: () => status({ catalog: CATALOG, freshness: "differentExecutable" }),
+      });
+      renderPanel();
+
+      expect(await screen.findByRole("button", { name: "Import software lists" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Reimport machines" })).toBeEnabled();
+    });
+
+    it("warns about software lists from another MAME build", async () => {
+      mockCommands({
+        get_catalog_status: () =>
+          status({
+            catalog: { ...CATALOG, software: { ...SOFTWARE, matchesMachineCatalog: false } },
+            freshness: "current",
+          }),
+      });
+      renderPanel();
+
+      expect(
+        await screen.findByText(/do not come from the MAME build of the machine catalog/),
+      ).toBeInTheDocument();
+    });
+
+    it("imports software lists with progress and refreshes the summary", async () => {
+      mockCommands(
+        {
+          get_catalog_status: [
+            status({ catalog: CATALOG, freshness: "current" }),
+            status({ catalog: WITH_SOFTWARE, freshness: "current" }),
+          ],
+          start_software_list_import: () => running(0, false, "softwareLists"),
+          get_catalog_import_status: [
+            running(50000, false, "softwareLists"),
+            {
+              state: "completed",
+              kind: "softwareLists",
+              items: 139122,
+              durationMs: 68150,
+              finishedAt: 2,
+            },
+          ],
+        },
+        POLL_MS * 3,
+      );
+      const user = renderPanel();
+
+      await user.click(await findEnabledButton("Import software lists"));
+
+      expect(
+        await screen.findByRole("progressbar", { name: "Import progress" }),
+      ).not.toHaveAttribute("value");
+      expect(
+        await screen.findByText("Reading the software lists… 50,000 software processed."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Reimport machines" })).toBeDisabled();
+      expect(
+        await screen.findByText("Software lists imported: 139,122 software in 68.2 s."),
+      ).toBeInTheDocument();
+      expect(await screen.findByLabelText("Software list summary")).toBeInTheDocument();
+      expect(invokeMock).toHaveBeenCalledWith("start_software_list_import", undefined);
+    });
+
+    it("cancels a running software list import", async () => {
+      let cancelRequested = false;
+      mockCommands({
+        get_catalog_status: () =>
+          status({
+            catalog: CATALOG,
+            freshness: "current",
+            import: running(10, false, "softwareLists"),
+          }),
+        get_catalog_import_status: () => running(20, cancelRequested, "softwareLists"),
+        cancel_catalog_import: () => {
+          cancelRequested = true;
+          return running(15, true, "softwareLists");
+        },
+      });
+      const user = renderPanel();
+
+      await user.click(await findEnabledButton("Cancel import"));
+
+      expect(await screen.findByRole("button", { name: "Cancelling…" })).toBeDisabled();
+      expect(screen.getByText(/software processed/)).toBeInTheDocument();
+    });
+
+    it("explains a version mismatch error", async () => {
+      mockCommands({
+        get_catalog_status: () =>
+          status({
+            catalog: CATALOG,
+            freshness: "current",
+            import: {
+              state: "failed",
+              kind: "softwareLists",
+              error: {
+                kind: "catalogMismatch",
+                catalogRelease: "0.279",
+                catalogRevision: "mame0279",
+                executableRelease: "0.280",
+                executableRevision: "mame0280",
+              },
+              finishedAt: 1,
+            },
+          }),
+      });
+      renderPanel();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "The machine catalog comes from MAME 0.279 (mame0279) but the configured executable is MAME 0.280 (mame0280). Reimport the machine catalog first.",
+      );
+    });
   });
 });

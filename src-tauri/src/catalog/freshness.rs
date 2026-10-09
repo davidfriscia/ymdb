@@ -79,6 +79,7 @@ mod tests {
             imported_at: 1,
             import_duration_ms: 1,
             database_size: 1,
+            software: None,
             statistics: CatalogStatistics {
                 machines: 0,
                 devices: 0,

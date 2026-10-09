@@ -1,9 +1,10 @@
-//! Orchestration of a catalog import from `mame -listxml`.
+//! Orchestration of catalog imports from `mame -listxml` (machines) and
+//! `mame -listsoftware` (software lists).
 //!
 //! Steps: validate the configured executable (to record its version), start
-//! `mame -listxml`, stream its output through the parser into a new catalog
-//! database, check the process result, then commit and swap the catalog.
-//! Any failure or cancellation before the swap discards the new database and
+//! MAME, stream its output through the parser into a new catalog database
+//! file, check the process result, then commit and swap the catalog. Any
+//! failure or cancellation before the swap discards the new database file and
 //! keeps the previous catalog.
 
 use std::fs;
@@ -17,14 +18,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 
 use super::parser::{ListXmlParser, ParseError};
-use super::store::{CatalogInfo, CatalogSource, CatalogStore, CompletedImport, StoreError};
-use crate::mame::process::{self, ProcessError, StreamingOutcome, Termination};
+use super::software_parser::{SoftwareListItem, SoftwareListParser};
+use super::store::{
+    CatalogInfo, CatalogSource, CatalogStore, CompletedImport, CompletedSoftwareImport, StoreError,
+};
+use crate::mame::process::{self, ActivityReader, ProcessError, StreamingOutcome, Termination};
 use crate::mame::validation::{ValidationStatus, validate_executable};
 
-/// `-listxml` is terminated if it produces no output for this long. The whole
-/// run usually takes seconds; the limit only catches a hung process.
+/// MAME is terminated if it produces no output for this long. Measured with
+/// MAME 0.280: `-listxml` runs for 2-3 s and `-listsoftware` for 12-66 s
+/// depending on system load, with pauses between output chunks below 2 s; the
+/// limit only catches a hung process.
 pub const LISTXML_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(120);
-/// Read buffer for the `-listxml` output.
+/// Read buffer for the MAME output.
 const READ_BUFFER_SIZE: usize = 256 * 1024;
 /// Maximum length of the MAME standard error included in error messages.
 const MAX_STDERR_IN_ERROR: usize = 2000;
@@ -34,7 +40,7 @@ const MAX_STDERR_IN_ERROR: usize = 2000;
 pub enum ImportPhase {
     /// Running `mame -version` to identify the build.
     Validating,
-    /// Reading `-listxml` and storing machines.
+    /// Reading the MAME output and storing machines or software.
     Reading,
     /// Verifying, committing and replacing the catalog.
     Finalizing,
@@ -44,7 +50,8 @@ pub enum ImportPhase {
 #[derive(Debug, Default)]
 pub struct ImportProgress {
     phase: AtomicU8,
-    machines: AtomicU64,
+    /// Machines or software stored so far.
+    items: AtomicU64,
 }
 
 impl ImportProgress {
@@ -56,8 +63,12 @@ impl ImportProgress {
         }
     }
 
-    pub fn machines_processed(&self) -> u64 {
-        self.machines.load(Ordering::Relaxed)
+    pub fn items_processed(&self) -> u64 {
+        self.items.load(Ordering::Relaxed)
+    }
+
+    fn set_items(&self, items: u64) {
+        self.items.store(items, Ordering::Relaxed);
     }
 
     fn set_phase(&self, phase: ImportPhase) {
@@ -81,16 +92,26 @@ pub enum ImportError {
     Cancelled,
     /// The configured executable is not a valid MAME installation.
     InvalidMame { status: ValidationStatus },
-    /// `mame -listxml` could not be started or waited for.
+    /// Software lists require an imported machine catalog.
+    MachineCatalogRequired,
+    /// The configured executable is not the one the machine catalog was
+    /// imported from (another MAME build, another file, or a modified file).
+    CatalogMismatch {
+        catalog_release: String,
+        catalog_revision: String,
+        executable_release: String,
+        executable_revision: String,
+    },
+    /// MAME could not be started or waited for.
     LaunchFailed { message: String },
-    /// `mame -listxml` exited with an error.
+    /// MAME exited with an error.
     MameFailed {
         exit_code: Option<i32>,
         stderr: String,
     },
-    /// `mame -listxml` stopped producing output and was terminated.
+    /// MAME stopped producing output and was terminated.
     Inactive { timeout_seconds: u64 },
-    /// The output of `mame -listxml` could not be parsed.
+    /// The output of MAME could not be parsed.
     Parse { message: String },
     /// The catalog database could not be written.
     Database { message: String },
@@ -127,8 +148,78 @@ pub fn import_catalog(
     check_cancelled(cancel)?;
 
     progress.set_phase(ImportPhase::Reading);
+    stream_mame_output(executable, "-listxml", cancel, |reader, finish_process| {
+        import_from_reader(reader, store, source, cancel, progress, finish_process)
+    })
+}
+
+/// Imports the software lists from the MAME executable at `executable` into
+/// the current catalog, replacing its previous software lists.
+///
+/// The executable must be the one the machine catalog was imported from
+/// (same MAME release and revision, same file, unchanged); otherwise
+/// [`ImportError::CatalogMismatch`] is returned and nothing is changed.
+/// Blocks until the import ends; run it on a background thread.
+pub fn import_software_lists(
+    executable: &Path,
+    store: &CatalogStore,
+    cancel: &Arc<AtomicBool>,
+    progress: &ImportProgress,
+) -> Result<CatalogInfo, ImportError> {
+    progress.set_phase(ImportPhase::Validating);
+    let source = identify_source(executable)?;
+    let catalog = store
+        .read_info()?
+        .ok_or(ImportError::MachineCatalogRequired)?;
+    check_same_build(&catalog, &source)?;
+    check_cancelled(cancel)?;
+
+    progress.set_phase(ImportPhase::Reading);
+    stream_mame_output(
+        executable,
+        "-listsoftware",
+        cancel,
+        |reader, finish_process| {
+            import_software_from_reader(reader, store, source, cancel, progress, finish_process)
+        },
+    )
+}
+
+/// Software lists may only be added to a catalog built from the same MAME
+/// build, read from the same unchanged executable.
+fn check_same_build(catalog: &CatalogInfo, source: &CatalogSource) -> Result<(), ImportError> {
+    let same_build = catalog.mame_release == source.mame_release
+        && catalog.mame_revision == source.mame_revision;
+    let same_executable = catalog.executable_path == source.executable_path
+        && catalog.executable_size == source.executable_size
+        && catalog.executable_modified_at == source.executable_modified_at;
+    if same_build && same_executable {
+        Ok(())
+    } else {
+        Err(ImportError::CatalogMismatch {
+            catalog_release: catalog.mame_release.clone(),
+            catalog_revision: catalog.mame_revision.clone(),
+            executable_release: source.mame_release.clone(),
+            executable_revision: source.mame_revision.clone(),
+        })
+    }
+}
+
+/// Runs `<executable> <argument>` and lets `consume` read its standard
+/// output. `consume` must call the provided function once the whole output
+/// has been read and before committing: it waits for MAME and fails unless
+/// MAME exited successfully.
+fn stream_mame_output<T>(
+    executable: &Path,
+    argument: &str,
+    cancel: &Arc<AtomicBool>,
+    consume: impl FnOnce(
+        BufReader<ActivityReader>,
+        &mut dyn FnMut() -> Result<(), ImportError>,
+    ) -> Result<T, ImportError>,
+) -> Result<T, ImportError> {
     let mut command = Command::new(executable);
-    command.arg("-listxml");
+    command.arg(argument);
     if let Some(dir) = executable.parent() {
         command.current_dir(dir);
     }
@@ -141,14 +232,19 @@ pub fn import_catalog(
     );
 
     let mut process = Some(process);
-    let result = import_from_reader(stdout, store, source, cancel, progress, || {
-        let outcome = process
-            .take()
-            .expect("process is finished once")
-            .finish()
-            .map_err(launch_error)?;
-        check_outcome(outcome)
-    });
+    let result = {
+        let mut finish_process = || {
+            let outcome = process
+                .take()
+                .ok_or_else(|| ImportError::LaunchFailed {
+                    message: "MAME process already finished".to_owned(),
+                })?
+                .finish()
+                .map_err(launch_error)?;
+            check_outcome(outcome)
+        };
+        consume(stdout, &mut finish_process)
+    };
 
     match (result, process) {
         (Ok(info), _) => Ok(info),
@@ -187,9 +283,7 @@ pub fn import_from_reader<R: BufRead>(
     while let Some(machine) = parser.next_machine()? {
         check_cancelled(cancel)?;
         writer.insert_machine(&machine)?;
-        progress
-            .machines
-            .store(writer.machine_count(), Ordering::Relaxed);
+        progress.set_items(writer.machine_count());
     }
     before_commit()?;
     check_cancelled(cancel)?;
@@ -205,6 +299,42 @@ pub fn import_from_reader<R: BufRead>(
         import_duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
     Ok(writer.finish(&completed)?)
+}
+
+/// Replaces the software lists of the current catalog with those of a
+/// `-listsoftware` document. `before_commit` runs after the whole document
+/// has been read; an error from it aborts the import.
+pub fn import_software_from_reader<R: BufRead>(
+    reader: R,
+    store: &CatalogStore,
+    source: CatalogSource,
+    cancel: &AtomicBool,
+    progress: &ImportProgress,
+    before_commit: impl FnOnce() -> Result<(), ImportError>,
+) -> Result<CatalogInfo, ImportError> {
+    let started = Instant::now();
+    let mut writer = store.begin_software_import()?;
+    let mut parser = SoftwareListParser::new(reader);
+    while let Some(item) = parser.next_item()? {
+        check_cancelled(cancel)?;
+        match item {
+            SoftwareListItem::List(list) => writer.insert_software_list(&list)?,
+            SoftwareListItem::Software(software) => {
+                writer.insert_software(&software)?;
+                progress.set_items(writer.software_count());
+            }
+        }
+    }
+    before_commit()?;
+    check_cancelled(cancel)?;
+
+    progress.set_phase(ImportPhase::Finalizing);
+    let completed = CompletedSoftwareImport {
+        source,
+        imported_at: now_millis(),
+        import_duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    };
+    Ok(writer.finish_software(&completed)?)
 }
 
 /// Validates the executable and collects the information recorded with the catalog.
@@ -373,7 +503,7 @@ mod tests {
         assert_eq!(stats.roms, 8);
         assert_eq!(stats.disks, 1);
         assert_eq!(stats.software_lists, 2);
-        assert_eq!(progress.machines_processed(), 8);
+        assert_eq!(progress.items_processed(), 8);
         assert_eq!(progress.phase(), ImportPhase::Finalizing);
         assert_eq!(store.read_info().expect("read"), Some(info));
         assert_no_partial_file(dir.path());
@@ -586,8 +716,414 @@ mod tests {
         );
     }
 
-    /// Imports the catalog from a real MAME executable and prints measurements.
-    /// Run with: `YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --release
+    const SOFTWARE_SAMPLE: &str = include_str!("testdata/listsoftware-sample.xml");
+
+    fn import_software(
+        store: &CatalogStore,
+        xml: &str,
+        source: CatalogSource,
+        cancel: &AtomicBool,
+    ) -> Result<CatalogInfo, ImportError> {
+        import_software_from_reader(
+            xml.as_bytes(),
+            store,
+            source,
+            cancel,
+            &ImportProgress::default(),
+            || Ok(()),
+        )
+    }
+
+    /// A store with the machine fixture imported from MAME "0.280".
+    fn store_with_machines(dir: &Path) -> CatalogStore {
+        let store = CatalogStore::in_dir(dir);
+        import(&store, SAMPLE, "0.280", &not_cancelled()).expect("machine import");
+        store
+    }
+
+    #[test]
+    fn imports_software_lists_into_the_machine_catalog() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        let machines_before = store
+            .read_info()
+            .expect("read")
+            .expect("catalog")
+            .statistics;
+        let progress = ImportProgress::default();
+
+        let info = import_software_from_reader(
+            SOFTWARE_SAMPLE.as_bytes(),
+            &store,
+            source("0.280"),
+            &not_cancelled(),
+            &progress,
+            || Ok(()),
+        )
+        .expect("software import");
+
+        assert_eq!(
+            info.statistics, machines_before,
+            "machine data is unchanged"
+        );
+        let software = info.software.expect("software info");
+        assert_eq!(software.mame_release, "0.280");
+        assert!(software.matches_machine_catalog);
+        let stats = software.statistics;
+        assert_eq!((stats.lists, stats.software), (4, 7));
+        assert_eq!(
+            (stats.clones, stats.partially_supported, stats.unsupported),
+            (1, 1, 1)
+        );
+        assert_eq!((stats.parts, stats.data_areas, stats.roms), (9, 8, 9));
+        assert_eq!((stats.disk_areas, stats.disks), (2, 2));
+        // The c64 machine references `vic10`, which the sample does not provide.
+        assert_eq!(stats.missing_referenced_lists, 1);
+        assert_eq!(progress.items_processed(), 7);
+        assert_no_partial_file(dir.path());
+    }
+
+    #[test]
+    fn links_machines_to_software_lists_without_duplicating_them() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+            .expect("software import");
+        let db = open(&store);
+
+        // c64 -> c64_cart (original, NTSC filter) -> 3 software.
+        let (status, filter, software): (String, Option<String>, i64) = db
+            .query_row(
+                "SELECT m.status, m.filter, COUNT(s.id)
+                 FROM machine_software_lists m
+                 JOIN software_lists l ON l.name = m.list_name
+                 JOIN software s ON s.list_name = l.name
+                 WHERE m.machine_name = 'c64' AND m.list_name = 'c64_cart'
+                 GROUP BY m.id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("relation");
+        assert_eq!(
+            (status.as_str(), filter.as_deref(), software),
+            ("original", Some("NTSC"), 3)
+        );
+        // A list is stored once, whatever the number of machines using it.
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM software_lists WHERE name = 'c64_cart'"
+            ),
+            1
+        );
+        // The compatibility metadata is kept verbatim for later evaluation.
+        let compatibility: String = db
+            .query_row(
+                "SELECT f.value FROM software_shared_features f
+                 JOIN software s ON s.id = f.software_id
+                 WHERE s.list_name = 'c64_cart' AND s.name = 'gameb2' AND f.name = 'compatibility'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("compatibility");
+        assert_eq!(compatibility, "NTSC");
+    }
+
+    #[test]
+    fn persists_software_relations_parts_and_media() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+            .expect("software import");
+        let db = open(&store);
+
+        // Same short name in two lists.
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM software WHERE name = 'tetris'"),
+            2
+        );
+        // Clone listed before its parent.
+        let parent: (String, String) = db
+            .query_row(
+                "SELECT p.name, p.description FROM software c
+                 JOIN software p ON p.list_name = c.list_name AND p.name = c.clone_of
+                 WHERE c.list_name = 'c64_cart' AND c.name = 'gameb2'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("parent");
+        assert_eq!(parent, ("gamebase".to_owned(), "Game Base".to_owned()));
+        // Several parts with their interfaces.
+        let parts: String = db
+            .query_row(
+                "SELECT group_concat(p.name || ':' || p.interface, ',') FROM software_parts p
+                 JOIN software s ON s.id = p.software_id
+                 WHERE s.list_name = 'pcecd' AND s.name = 'ys12'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("parts");
+        assert_eq!(parts, "cdrom:pce_cdrom,save:pce_hdd");
+        // Several data areas with their ROM checksums.
+        let areas: String = db
+            .query_row(
+                "SELECT group_concat(a.name || '=' || r.crc, ',') FROM software_data_areas a
+                 JOIN software_roms r ON r.data_area_id = a.id
+                 JOIN software_parts p ON p.id = a.part_id
+                 JOIN software s ON s.id = p.software_id
+                 WHERE s.list_name = 'nes' AND s.name = 'smb'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("areas");
+        assert_eq!(areas, "prg=967a605f,chr=867b51ad");
+        // Loading instruction without ROM name.
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM software_roms WHERE name IS NULL AND load_flag = 'reload'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM software_disks WHERE is_writeable = 1"
+            ),
+            1
+        );
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM pragma_foreign_key_check"),
+            0
+        );
+        assert_eq!(
+            db.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .expect("integrity"),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn rejects_software_lists_from_another_mame_build() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        let before = store.read_info().expect("read");
+
+        let error = import_software(&store, SOFTWARE_SAMPLE, source("0.281"), &not_cancelled())
+            .expect_err("different build");
+
+        assert!(
+            matches!(&error, ImportError::Database { message } if message.contains("MAME build")),
+            "{error:?}"
+        );
+        assert_eq!(store.read_info().expect("read"), before);
+        assert_no_partial_file(dir.path());
+    }
+
+    #[test]
+    fn checks_build_and_executable_before_importing_software() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        let catalog = store.read_info().expect("read").expect("catalog");
+
+        assert_eq!(check_same_build(&catalog, &source("0.280")), Ok(()));
+        let mismatch = check_same_build(&catalog, &source("0.281")).expect_err("release");
+        assert_eq!(
+            mismatch,
+            ImportError::CatalogMismatch {
+                catalog_release: "0.280".to_owned(),
+                catalog_revision: "mame0280".to_owned(),
+                executable_release: "0.281".to_owned(),
+                executable_revision: "mame0281".to_owned(),
+            }
+        );
+        // Same build, but the executable file was modified since the import.
+        let mut modified = source("0.280");
+        modified.executable_modified_at = Some(9999);
+        assert!(check_same_build(&catalog, &modified).is_err());
+    }
+
+    #[test]
+    fn failed_or_cancelled_software_import_keeps_previous_software_lists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        let previous = import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+            .expect("first software import");
+
+        let cancelled = import_software(
+            &store,
+            SOFTWARE_SAMPLE,
+            source("0.280"),
+            &AtomicBool::new(true),
+        );
+        let truncated = import_software(
+            &store,
+            &SOFTWARE_SAMPLE[..SOFTWARE_SAMPLE.len() / 2],
+            source("0.280"),
+            &not_cancelled(),
+        );
+        let process_failed = import_software_from_reader(
+            SOFTWARE_SAMPLE.as_bytes(),
+            &store,
+            source("0.280"),
+            &not_cancelled(),
+            &ImportProgress::default(),
+            || {
+                Err(ImportError::MameFailed {
+                    exit_code: Some(1),
+                    stderr: String::new(),
+                })
+            },
+        );
+
+        assert_eq!(cancelled.expect_err("cancelled"), ImportError::Cancelled);
+        assert!(matches!(truncated, Err(ImportError::Parse { .. })));
+        assert!(matches!(
+            process_failed,
+            Err(ImportError::MameFailed { .. })
+        ));
+        assert_eq!(store.read_info().expect("read"), Some(previous));
+        assert_no_partial_file(dir.path());
+    }
+
+    #[test]
+    fn software_reimport_replaces_previous_software_lists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+            .expect("first software import");
+        let smaller = concat!(
+            "<softwarelists><softwarelist name=\"c64_cart\">",
+            "<software name=\"solo\"><description>Solo</description></software>",
+            "</softwarelist></softwarelists>"
+        );
+
+        let info =
+            import_software(&store, smaller, source("0.280"), &not_cancelled()).expect("reimport");
+
+        let software = info.software.expect("software");
+        assert_eq!(
+            (software.statistics.lists, software.statistics.software),
+            (1, 1)
+        );
+        assert_eq!(software.statistics.roms, 0);
+        assert_eq!(info.statistics.machines, 8);
+        assert_eq!(
+            count(&open(&store), "SELECT COUNT(*) FROM software_info"),
+            0
+        );
+        assert_no_partial_file(dir.path());
+    }
+
+    #[test]
+    fn machine_reimport_drops_software_lists_of_the_previous_build() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+            .expect("software import");
+
+        let info = import(&store, SAMPLE, "0.281", &not_cancelled()).expect("machine reimport");
+
+        assert_eq!(info.mame_release, "0.281");
+        assert_eq!(info.software, None);
+        assert_eq!(count(&open(&store), "SELECT COUNT(*) FROM software"), 0);
+    }
+
+    #[test]
+    fn upgrades_a_version_1_catalog_and_imports_software_lists() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        // Turn the catalog into what version 1 of the application wrote.
+        open(&store)
+            .execute_batch(
+                "DROP TABLE software_disks; DROP TABLE software_disk_areas;
+                 DROP TABLE software_roms; DROP TABLE software_data_areas;
+                 DROP TABLE software_part_features; DROP TABLE software_parts;
+                 DROP TABLE software_shared_features; DROP TABLE software_info;
+                 DROP TABLE software; DROP TABLE software_lists;
+                 DROP TABLE software_catalog_metadata;
+                 PRAGMA user_version = 1;",
+            )
+            .expect("downgrade");
+
+        let upgraded = store.read_info().expect("read").expect("catalog");
+        let info = import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+            .expect("software import");
+
+        assert_eq!(upgraded.statistics.machines, 8);
+        assert_eq!(upgraded.software, None);
+        assert_eq!(info.software.map(|s| s.statistics.software), Some(7));
+        assert_eq!(
+            count(&open(&store), "PRAGMA user_version"),
+            crate::catalog::schema::SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn replacement_with_an_externally_open_catalog_keeps_it_on_windows() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        let before = store.read_info().expect("read");
+        // Another program (outside the store's lock) keeps the catalog open.
+        let external = open(&store);
+        count(&external, "SELECT COUNT(*) FROM machines");
+
+        let result = import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled());
+
+        if cfg!(windows) {
+            // Windows refuses to rename over an open file: the import fails
+            // with an explanation and the previous catalog is kept.
+            let error = result.expect_err("catalog in use");
+            assert!(
+                matches!(&error, ImportError::Database { message }
+                    if message.contains("Close any other program")),
+                "{error:?}"
+            );
+            drop(external);
+            assert_eq!(store.read_info().expect("read"), before);
+        } else {
+            // Unix replaces the directory entry; the open file stays valid.
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(count(&external, "SELECT COUNT(*) FROM machines"), 8);
+        }
+        assert_no_partial_file(dir.path());
+    }
+
+    #[test]
+    fn concurrent_status_reads_do_not_block_catalog_replacement() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = store_with_machines(dir.path());
+        let stop = Arc::new(AtomicBool::new(false));
+        let reader = {
+            let store = store.clone();
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut reads = 0;
+                while !stop.load(Ordering::Relaxed) {
+                    store
+                        .read_info()
+                        .expect("read during replacement")
+                        .expect("catalog");
+                    reads += 1;
+                }
+                reads
+            })
+        };
+
+        for round in 0..5 {
+            import(&store, SAMPLE, "0.280", &not_cancelled()).expect("machine import");
+            import_software(&store, SOFTWARE_SAMPLE, source("0.280"), &not_cancelled())
+                .unwrap_or_else(|error| panic!("software import {round}: {error:?}"));
+        }
+        stop.store(true, Ordering::Relaxed);
+
+        assert!(reader.join().expect("reader thread") > 0);
+        assert_no_partial_file(dir.path());
+    }
+
+    /// Imports the catalog and the software lists from a real MAME executable
+    /// and prints measurements. Run with:
+    /// `YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --release
     /// real_mame_catalog_import -- --ignored --nocapture`
     #[test]
     #[ignore = "requires a local MAME executable in YMDB_TEST_MAME_EXECUTABLE"]
@@ -596,18 +1132,29 @@ mod tests {
             .expect("YMDB_TEST_MAME_EXECUTABLE must be set");
         let dir = tempfile::tempdir().expect("temp dir");
         let store = CatalogStore::in_dir(dir.path());
-        let started = Instant::now();
+        let cancel = Arc::new(AtomicBool::new(false));
 
+        let started = Instant::now();
         let info = import_catalog(
             Path::new(&executable),
             &store,
-            &Arc::new(AtomicBool::new(false)),
+            &cancel,
             &ImportProgress::default(),
         )
-        .expect("import");
-
-        println!("import took {:?}", started.elapsed());
-        println!("{info:#?}");
+        .expect("machine import");
+        println!("machine import took {:?}", started.elapsed());
         assert!(info.statistics.machines > 0);
+
+        let started = Instant::now();
+        let info = import_software_lists(
+            Path::new(&executable),
+            &store,
+            &cancel,
+            &ImportProgress::default(),
+        )
+        .expect("software list import");
+        println!("software list import took {:?}", started.elapsed());
+        println!("{info:#?}");
+        assert!(info.software.is_some_and(|s| s.statistics.software > 0));
     }
 }

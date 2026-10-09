@@ -1,0 +1,119 @@
+<?xml version="1.0"?>
+<!DOCTYPE softwarelists [
+<!ELEMENT softwarelists (softwarelist*)>
+	<!ELEMENT softwarelist (notes?, software+)>
+		<!ATTLIST softwarelist name CDATA #REQUIRED>
+		<!ATTLIST softwarelist description CDATA #IMPLIED>
+]>
+
+<softwarelists>
+	<softwarelist name="c64_cart" description="Commodore 64 cartridges">
+		<notes>Cartridges for the C64 &amp; C128.</notes>
+		<software name="gameb2" cloneof="gamebase" supported="partial">
+			<description>Game Base (alt)</description>
+			<year>198?</year>
+			<publisher>&lt;unknown&gt;</publisher>
+			<info name="alt_title" value="Game Base 2"/>
+			<info name="alt_title" value="GB2"/>
+			<sharedfeat name="compatibility" value="NTSC"/>
+			<part name="cart" interface="c64_cart">
+				<feature name="slot" value="standard" />
+				<dataarea name="roml" size="16384">
+					<rom name="gameb2 lo.u2" size="16384" crc="47d02bb1" sha1="48539447a5a247c57faadd7236281844609e8fc0"/>
+					<rom size="8192" offset="0x2000" loadflag="reload" />
+				</dataarea>
+				<dipswitch name="Mode" tag="DSW" mask="1">
+					<dipvalue name="Off" value="0" default="yes"/>
+				</dipswitch>
+			</part>
+		</software>
+		<software name="gamebase">
+			<description>Game Base</description>
+			<year>1984</year>
+			<publisher>Commodore</publisher>
+			<part name="cart" interface="c64_cart">
+				<dataarea name="roml" size="8192">
+					<rom name="gamebase.u2" size="8192" crc="ea1f5502" sha1="fa2fa3c5aa20ebd5f55d8182dadc822bdbba1ac5" status="baddump"/>
+				</dataarea>
+			</part>
+			<future_element value="ignored"/>
+		</software>
+		<software name="tetris" supported="no">
+			<description>Tetris (C64)</description>
+			<year>1988</year>
+			<publisher>Mirrorsoft</publisher>
+			<part name="cart" interface="c64_cart">
+				<dataarea name="roml" size="8192">
+					<rom name="tetris.bin" size="8192" status="nodump"/>
+				</dataarea>
+			</part>
+		</software>
+	</softwarelist>
+	<softwarelist name="nes" description="Nintendo Entertainment System cartridges">
+		<software name="smb">
+			<description>Super Mario Bros. (Europe, rev. A)</description>
+			<year>1987</year>
+			<publisher>Nintendo</publisher>
+			<info name="serial" value="NES-SM (EEC/NOE/SCN/ESP)"/>
+			<info name="release" value="19870515"/>
+			<part name="cart" interface="nes_cart">
+				<feature name="pcb" value="NES-NROM-256" />
+				<feature name="slot" value="nrom" />
+				<dataarea name="prg" size="32768">
+					<rom name="pal-sm-0 prg" size="32768" crc="967a605f" sha1="31b332f6bc338e058a7b958dca285066c405b697"/>
+				</dataarea>
+				<dataarea name="chr" size="8192" databits="16" endian="big">
+					<rom name="hvc-sm-0 chr" size="8192" crc="867b51ad" sha1="394badaf0b0bdd0ea279a1bca89a9d9ddc00b1b5"/>
+				</dataarea>
+			</part>
+		</software>
+		<software name="tetris">
+			<description>Tetris (NES)</description>
+			<year>1989</year>
+			<publisher>Nintendo</publisher>
+			<part name="cart" interface="nes_cart">
+				<dataarea name="prg" size="32768">
+					<rom name="tetris prg" size="32768" crc="1c4c1a4e" sha1="5b1ce7cc89b1e2c1c3d6f8f7b2c3a1d4e5f6a7b8"/>
+				</dataarea>
+			</part>
+		</software>
+	</softwarelist>
+	<softwarelist name="apple2_flop_orig" description="Apple II original disks">
+		<software name="ultima4">
+			<description>Ultima IV: Quest of the Avatar</description>
+			<year>1985</year>
+			<publisher>Origin Systems</publisher>
+			<info name="usage" value="Requires a 64K Apple ][+, //e, //c, or IIgs."/>
+			<sharedfeat name="compatibility" value="A2P,A2E,A2EE,A2C,A2GS"/>
+			<part name="flop1" interface="floppy_5_25">
+				<feature name="part_id" value="Side A - Program Disk" />
+				<dataarea name="flop" size="240170">
+					<rom name="ultima iv - side a - program.woz" size="240170" crc="9e1d5595" sha1="a2de1815ffe51b4bdaad8b6abe8ec935911ec394"/>
+				</dataarea>
+			</part>
+			<part name="flop2" interface="floppy_5_25">
+				<feature name="part_id" value="Side B - Towne Disk" />
+				<dataarea name="flop" size="233516">
+					<rom name="ultima iv - side b - towne.woz" size="233516" crc="8ba7e933" sha1="f100cec0ae9d04a25f687fc3c1d76b139266826e"/>
+				</dataarea>
+			</part>
+		</software>
+	</softwarelist>
+	<softwarelist name="pcecd" description="PC Engine CD-ROM">
+		<software name="ys12">
+			<description>Ys I &amp; II</description>
+			<year>1989</year>
+			<publisher>Hudson Soft</publisher>
+			<part name="cdrom" interface="pce_cdrom">
+				<diskarea name="cdrom">
+					<disk name="ys i &amp; ii (japan)" sha1="a1f1e6b8e1b7a5c0a2a8d65e3b9e8c4f1b2a3c4d" status="baddump"/>
+				</diskarea>
+			</part>
+			<part name="save" interface="pce_hdd">
+				<diskarea name="harddriv">
+					<disk name="save" sha1="b2f2e6b8e1b7a5c0a2a8d65e3b9e8c4f1b2a3c4e" writeable="yes"/>
+				</diskarea>
+			</part>
+		</software>
+	</softwarelist>
+</softwarelists>

@@ -21,6 +21,33 @@ export interface CatalogStatistics {
   softwareLists: number;
 }
 
+/** Mirrors `SoftwareStatistics` in `src-tauri/src/catalog/store.rs`. */
+export interface SoftwareStatistics {
+  lists: number;
+  software: number;
+  clones: number;
+  partiallySupported: number;
+  unsupported: number;
+  parts: number;
+  dataAreas: number;
+  roms: number;
+  diskAreas: number;
+  disks: number;
+  /** Distinct list names referenced by machines but not provided by MAME. */
+  missingReferencedLists: number;
+}
+
+/** Mirrors `SoftwareCatalogInfo` in `src-tauri/src/catalog/store.rs`. */
+export interface SoftwareCatalogInfo {
+  mameRelease: string;
+  mameRevision: string;
+  /** Milliseconds since the Unix epoch. */
+  importedAt: number;
+  importDurationMs: number;
+  matchesMachineCatalog: boolean;
+  statistics: SoftwareStatistics;
+}
+
 /** Mirrors `CatalogInfo` in `src-tauri/src/catalog/store.rs`. */
 export interface CatalogInfo {
   schemaVersion: number;
@@ -34,6 +61,8 @@ export interface CatalogInfo {
   /** Size of the catalog database file in bytes. */
   databaseSize: number;
   statistics: CatalogStatistics;
+  /** `null` until software lists are imported for this catalog. */
+  software: SoftwareCatalogInfo | null;
 }
 
 /** Mirrors `CatalogFreshness` in `src-tauri/src/catalog/freshness.rs`. */
@@ -44,6 +73,9 @@ export type CatalogFreshness =
   | "executableMissing"
   | "mameNotConfigured";
 
+/** Mirrors `ImportKind` in `src-tauri/src/commands/catalog.rs`. */
+export type ImportKind = "machines" | "softwareLists";
+
 /** Mirrors `ImportPhase` in `src-tauri/src/catalog/import.rs`. */
 export type ImportPhase = "validating" | "reading" | "finalizing";
 
@@ -51,6 +83,14 @@ export type ImportPhase = "validating" | "reading" | "finalizing";
 export type ImportError =
   | { kind: "cancelled" }
   | { kind: "invalidMame"; status: ValidationStatus }
+  | { kind: "machineCatalogRequired" }
+  | {
+      kind: "catalogMismatch";
+      catalogRelease: string;
+      catalogRevision: string;
+      executableRelease: string;
+      executableRevision: string;
+    }
   | { kind: "launchFailed"; message: string }
   | { kind: "mameFailed"; exitCode: number | null; stderr: string }
   | { kind: "inactive"; timeoutSeconds: number }
@@ -62,14 +102,22 @@ export type ImportStatus =
   | { state: "idle" }
   | {
       state: "running";
+      kind: ImportKind;
       phase: ImportPhase;
-      machinesProcessed: number;
+      /** Machines or software stored so far, depending on `kind`. */
+      itemsProcessed: number;
       startedAt: number;
       cancelRequested: boolean;
     }
-  | { state: "completed"; machines: number; durationMs: number; finishedAt: number }
-  | { state: "failed"; error: ImportError; finishedAt: number }
-  | { state: "cancelled"; finishedAt: number };
+  | {
+      state: "completed";
+      kind: ImportKind;
+      items: number;
+      durationMs: number;
+      finishedAt: number;
+    }
+  | { state: "failed"; kind: ImportKind; error: ImportError; finishedAt: number }
+  | { state: "cancelled"; kind: ImportKind; finishedAt: number };
 
 /** Mirrors `CatalogStatus` in `src-tauri/src/commands/catalog.rs`. */
 export interface CatalogStatus {
@@ -92,8 +140,14 @@ export function getCatalogImportStatus(): Promise<ImportStatus> {
   return call("get_catalog_import_status");
 }
 
+/** Imports the machine catalog; replaces the whole catalog, software lists included. */
 export function startCatalogImport(): Promise<ImportStatus> {
   return call("start_catalog_import");
+}
+
+/** Imports the software lists into the current machine catalog. */
+export function startSoftwareListImport(): Promise<ImportStatus> {
+  return call("start_software_list_import");
 }
 
 export function cancelCatalogImport(): Promise<ImportStatus> {

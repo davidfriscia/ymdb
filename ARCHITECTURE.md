@@ -76,7 +76,7 @@ The Rust crate in `src-tauri/`.
 - `health.rs` builds the health report returned by `check_health`.
 - `settings.rs` persists application settings (see [Local storage](#local-storage--implemented-partially)).
 - `mame/` implements the MAME integration (see below).
-- `catalog/` implements the machine catalog (see [Catalog](#catalog--implemented-machines-from--listxml)).
+- `catalog/` implements the machine and software list catalog (see [Catalog](#catalog--implemented-machines-and-software-lists)).
 
 ### MAME integration — Implemented (installation management only)
 
@@ -124,28 +124,31 @@ by canonical path, capped at 16, and validated concurrently. Detection only repo
 results; it never changes the saved configuration.
 
 **Execution policy:** MAME is only executed in response to an explicit user action
-(select, verify, detect, import catalog), always with fixed arguments (`-version`,
-`-listxml`). Loading the configuration or the catalog at startup never runs MAME.
-The frontend cannot pass arbitrary arguments.
+(select, verify, detect, import catalog, import software lists), always with fixed
+arguments (`-version`, `-listxml`, `-listsoftware`). Loading the configuration or the
+catalog at startup never runs MAME. The frontend cannot pass arbitrary arguments.
 
 Planned:
 
-- Read software list information (`-listsoftware` or the `hash/*.xml` files).
 - Build command lines and launch machines and software, supporting the full set of
   MAME command-line options, launch profiles and per-machine configuration.
 - Verify ROM sets, BIOS and CHD requirements.
 
-### Catalog — Implemented (machines from `-listxml`)
+### Catalog — Implemented (machines and software lists)
 
 Implemented in `src-tauri/src/catalog/`:
 
 - `parser.rs`: streaming parser for `mame -listxml` (quick-xml, event by event,
   reusable buffers). Memory use is bounded by one `<machine>` entry; the document
   is never loaded as a whole.
-- `model.rs`: plain data model of one machine entry, close to the XML.
+- `software_parser.rs`: streaming parser for `mame -listsoftware`; memory use is
+  bounded by one `<software>` entry.
+- `xml.rs`: helpers shared by both parsers (attributes, text, entities, numbers).
+- `model.rs`, `software_model.rs`: plain data models, close to the XML.
 - `schema.rs`: versioned SQLite schema (migrations tracked in `PRAGMA user_version`).
 - `store.rs`: catalog database files, inserts and atomic replacement.
-- `import.rs`: orchestration (validate, run `-listxml`, parse, store, swap).
+- `import.rs`: orchestration (validate, run MAME, parse, store, swap). Machines and
+  software lists share `stream_mame_output`, built on `mame::process::spawn_streaming`.
 - `freshness.rs`: whether the catalog matches the configured executable.
 
 #### The `-listxml` format
@@ -174,7 +177,37 @@ MAME 0.77 to 0.278:
   across runs; the parser accepts a single comma as the decimal separator for
   decimal values.
 
-#### Schema (version 1)
+#### The `-listsoftware` format
+
+Analyzed on the real output of MAME 0.280 (102 MB; MAME needs 12-66 s to produce
+it depending on system load, with continuous output and pauses below 2 s) and on
+its DTD:
+
+- The root `<softwarelists>` carries no version; the build is identified by running
+  `-version` on the same executable.
+- 720 `<softwarelist>` elements (name, description, optional `notes`) containing
+  139,122 `<software>` elements: description, year, publisher, optional notes,
+  `info` and `sharedfeat` name/value pairs, and `part` elements.
+- Software names are unique within a list but not across lists (13,306 names
+  appear in more than one list), so a software is identified by list and name.
+- `cloneof` references a software of the same list; 4,656 parents are listed after
+  their clones. `supported` is `yes` (default), `partial` (2,005) or `no` (39,054).
+- A software can have several parts (23,272 do); each part has a name, an
+  interface, `feature` name/value pairs, `dataarea` elements (name, size, optional
+  `databits`/`endian`) with `rom` entries, and `diskarea` elements with `disk`
+  entries. Parts and data areas can be many per software.
+- `rom` entries without a name (482) are loading instructions (`loadflag` such as
+  `reload` or `fill`, with an offset); `crc`/`sha1` are absent for `nodump` ROMs.
+- `info` names can repeat within a software (153 cases).
+- Compatibility between machines and software is expressed by MAME through the
+  `filter` attribute of a machine's `<softwarelist>` reference (for example `NTSC`,
+  `2,3`, `!DVC`) and the `compatibility` shared feature or part feature of software.
+  Both are stored verbatim; YMDB does not evaluate them yet.
+- Machines of 0.280 reference 733 list names, all 720 provided lists among them;
+  13 referenced names are not provided by MAME (for example `sorcerer_quik`).
+- The DTD allows part DIP switches and list notes; MAME 0.280 outputs neither.
+
+#### Schema (version 2)
 
 | Table                             | Content                                                                                                                                                                                                                                                                             |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -194,6 +227,22 @@ MAME 0.77 to 0.278:
 | `machine_software_lists`          | Software lists referenced by a machine: list name, tag, status, filter                                                                                                                                                                                                              |
 | `machine_ram_options`             | RAM options: name, size, default flag                                                                                                                                                                                                                                               |
 
+Software list tables (migration 2):
+
+| Table                       | Content                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `software_catalog_metadata` | Single row: MAME release/revision, executable path/size/mtime, import time and duration, counts, status |
+| `software_lists`            | Name (`UNIQUE`), description, notes                                                                     |
+| `software`                  | List name, name (`UNIQUE` per list), clone of, supported, description, year, publisher, notes           |
+| `software_info`             | `info` name/value pairs                                                                                 |
+| `software_shared_features`  | `sharedfeat` name/value pairs (for example `compatibility`)                                             |
+| `software_parts`            | Part name and interface                                                                                 |
+| `software_part_features`    | Part `feature` name/value pairs                                                                         |
+| `software_data_areas`       | Name, size, data bits, endianness                                                                       |
+| `software_roms`             | Name (nullable), size, length, CRC, SHA-1, offset, value, dump status, load flag                        |
+| `software_disk_areas`       | Name                                                                                                    |
+| `software_disks`            | Name, SHA-1, dump status, writeable                                                                     |
+
 Design rules:
 
 - All tables are `STRICT`. Flags are `0`/`1` with `CHECK` constraints.
@@ -207,16 +256,28 @@ Design rules:
 - Values whose set grows with MAME versions are stored as text without `CHECK`.
 - Indexes exist on every foreign key and on `clone_of`, `rom_of`,
   `machine_device_refs.device_name` and `machine_software_lists.list_name`.
-- `machine_software_lists.list_name` will become a reference to the software list
-  tables when `-listsoftware` is imported (planned); the column already holds the
-  list names used for that join.
+- Software are identified by `(list_name, name)`. `software.clone_of` is a deferred
+  composite foreign key to a software of the same list. Parts, areas, ROMs, disks
+  and metadata hang off integer ids with `ON DELETE CASCADE`.
+- Machines are linked to software lists by name: `machine_software_lists.list_name`
+  = `software_lists.name`, joined through the existing index. It is not a foreign
+  key because machines reference lists that MAME does not provide; the summary
+  counts them. A list is stored once, however many machines use it, and the
+  machine-side attributes (`status` `original`/`compatible`, `filter`, `tag`) stay
+  on the relation. A relation does not mean that every software of the list runs
+  on every configuration of the machine.
+- `info`, `sharedfeat` and `feature` names are free-form metadata defined by each
+  list; they are stored as name/value rows, not interpreted as categories.
+- Data bits and endianness are stored with the DTD defaults (8, `little`) applied.
 
-Not stored in this version (deferred): DIP switches and their locations/values,
-configuration switches, input ports and analog masks, adjusters, slots and slot
-options, conditions, display timing details (pixel clock, blanking), analog control
-parameters (minimum, maximum, sensitivity, key delta, reverse), and the legacy
-pre-0.191 driver attributes (`color`, `sound`, `graphic`, `protection`). These matter
-for launching and configuring machines and will be added with the launcher.
+Not stored in this version (deferred): for machines, DIP switches and their
+locations/values, configuration switches, input ports and analog masks, adjusters,
+slots and slot options, conditions, display timing details (pixel clock, blanking),
+analog control parameters (minimum, maximum, sensitivity, key delta, reverse), and
+the legacy pre-0.191 driver attributes (`color`, `sound`, `graphic`, `protection`).
+These matter for launching and configuring machines and will be added with the
+launcher. For software, part DIP switches (allowed by the DTD, not output by MAME
+0.280). Everything else in `-listsoftware` is stored.
 
 #### Import strategy
 
@@ -246,40 +307,87 @@ after updating MAME) follows the same steps and replaces the catalog only on
 success. Cancellation sets a flag that the parser checks before each machine and the
 watchdog uses to kill MAME; it is honored until the final commit.
 
+A **software list import** uses the same replacement mechanism:
+
+1. Validates the configured executable and requires a machine catalog built from
+   the same MAME release and revision, read from the same unchanged executable
+   (path, size and modification time); otherwise it fails with `catalogMismatch`
+   (or `machineCatalogRequired`) before running `-listsoftware`.
+2. Copies `catalog.sqlite` to `catalog.sqlite.partial` (under the file lock), empties
+   the software list tables of the copy and opens a single transaction. Machine
+   data is copied unchanged.
+3. Streams `<mame> -listsoftware` through the same `stream_mame_output` as machines
+   (same watchdog, inactivity timeout and exit code check), inserting each list and
+   software with cached prepared statements. Progress counts software.
+4. Checks the stored list and software counts, checks again that the machine
+   catalog in the file comes from the same build, runs `PRAGMA foreign_key_check`,
+   writes `software_catalog_metadata` and commits.
+5. Syncs and renames the file over `catalog.sqlite`, as for machines.
+
+Consequences: an interrupted, failed or cancelled software import keeps both the
+machines and the previous software lists. Re-importing software lists replaces them
+entirely. Re-importing machines starts from an empty file, so the new catalog has no
+software lists until they are imported again from the new build: software lists of
+one build are never attached to machines of another. A future "full update" can
+write machines and software lists into the same partial file with the same
+`CatalogWriter` before a single swap.
+
+Only one import (of either kind) runs at a time. On Windows a file cannot be
+renamed over while a handle to it is open: every connection to `catalog.sqlite` is
+opened and closed under the store's file lock, which the rename also holds, so the
+application never blocks its own replacement. If another program keeps the file
+open, the rename fails with a message asking to close it, and the previous catalog
+is kept.
+
 User data (future favorites, collections, launch profiles) must not live in
 `catalog.sqlite`, which is replaced on every import; it will be stored separately and
-reference machines by short name.
+reference machines by short name and software by list and short name.
 
 #### MAME versions
 
-A catalog is tied to the MAME build it was imported from (`catalog_metadata`). The
-catalog status compares it, without running MAME, with the configured executable:
+A catalog is tied to the MAME build it was imported from (`catalog_metadata`); its
+software lists, when present, record their own build in `software_catalog_metadata`
+and are only accepted from the same build and executable. The catalog status
+compares the catalog, without running MAME, with the configured executable:
 `current`, `executableChanged` (same path, different size or modification time,
 for example after an in-place update), `differentExecutable`, `executableMissing` or
 `mameNotConfigured`. The catalog is never treated as valid for another executable;
-the UI asks to import again. A catalog whose schema version differs from the
-application's is reported as unreadable and must be imported again (it is derived
-data, so it is rebuilt rather than migrated).
+the UI asks to import again, and software lists can only be imported when the
+status is `current`.
+
+Schema versions: a catalog created by an older release is upgraded in place when it
+is read (migrations only add tables, so existing machine data stays valid; version
+1 catalogs gain empty software list tables). A catalog from a newer release is
+reported as unreadable and must be imported again.
 
 #### Interface
 
-The MAME Catalog panel shows whether a catalog exists, its MAME version, import date
-and statistics (entries, runnable systems, clones, BIOS sets, devices, mechanical,
-ROMs, disks, referenced software lists, database size, import duration), the
-freshness warning, and import/reimport and cancel buttons. While importing it polls
-an in-memory status every 500 ms and shows an indeterminate progress bar with the
-number of machines processed: the total is not known in advance, so no percentage
-is shown. The catalog summary is read from the database only when the import ends.
+The MAME Catalog panel shows, for machines, whether a catalog exists, its MAME
+version, import date and statistics (entries, runnable systems, clones, BIOS sets,
+devices, mechanical, ROMs, disks, referenced software lists, database size, import
+duration) and the freshness warning; for software lists, whether they are imported,
+their MAME version, import date and statistics (lists, software, clones, partially
+supported, unsupported, parts, ROMs, disks, referenced lists not provided by MAME,
+import duration). Buttons import or reimport machines, import or update software
+lists (enabled only when the catalog matches the configured executable) and cancel
+the running import. While importing it polls an in-memory status every 500 ms and
+shows an indeterminate progress bar with the number of machines or software
+processed: totals are not known in advance, so no percentage is shown. Summaries are
+read from the database only when an import ends.
 
 #### Limitations
 
 - No catalog browser, search or filters yet; no FTS5 index.
-- Software lists (`-listsoftware`) are not imported.
+- Machine/software compatibility (`filter` and `compatibility` values) is stored
+  but not evaluated.
+- Re-importing machines discards the software lists; there is no combined "full
+  update" yet.
 - Deferred XML data is listed above.
 - Imports cannot be cancelled during the final commit and file replacement.
 
-Planned: software list import, full-text search and combinable filters, favorites,
-collections, screenshots, artwork and metadata.
+Planned: full catalog update (machines and software lists in one operation),
+full-text search and combinable filters, favorites, collections, screenshots,
+artwork and metadata.
 
 ### Local storage — Implemented (partially)
 
@@ -327,7 +435,7 @@ Planned: user-configurable ROM, CHD and artwork directories.
 - SQLite is embedded through `rusqlite` with the `bundled` feature, so every
   platform uses the same SQLite version, without system libraries.
 - Explicit SQL, no ORM. Versioned migrations in `catalog/schema.rs`.
-- Implemented: the catalog database (see [Catalog](#catalog--implemented-machines-from--listxml)).
+- Implemented: the catalog database (see [Catalog](#catalog--implemented-machines-and-software-lists)).
 - Planned: a separate user database (favorites, collections, profiles, cache
   metadata) that survives catalog re-imports; full-text search with FTS5.
 

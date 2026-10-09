@@ -46,6 +46,7 @@ pub fn run() {
             commands::catalog::get_catalog_status,
             commands::catalog::get_catalog_import_status,
             commands::catalog::start_catalog_import,
+            commands::catalog::start_software_list_import,
             commands::catalog::cancel_catalog_import,
         ])
         .run(tauri::generate_context!())
