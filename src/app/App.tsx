@@ -1,4 +1,5 @@
 import { HealthCheck } from "../features/health-check/HealthCheck";
+import { MameInstallation } from "../features/mame-installation/MameInstallation";
 
 export function App() {
   return (
@@ -12,6 +13,7 @@ export function App() {
         </p>
       </header>
 
+      <MameInstallation />
       <HealthCheck />
     </main>
   );

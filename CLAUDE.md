@@ -57,6 +57,19 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   wrappers, tests). Components never call `invoke` directly.
 - `src-tauri/src/commands.rs`: thin Tauri command adapters delegating to plain,
   unit-testable functions in domain modules.
+- `src-tauri/src/commands/<area>.rs`: commands for one area. Commands return
+  `Result<T, CommandError>` (`commands/mod.rs`); expected domain outcomes (such as a
+  failed MAME validation) are part of `T`, not errors. Blocking work (processes,
+  native dialogs, slow I/O) goes through `run_blocking` in async commands.
+- `src-tauri/src/mame/`: MAME integration. Run external programs only through
+  `mame::process::run_with_timeout` (direct execution, never a shell, always a
+  timeout). Keep every OS-specific detail in `mame/platform.rs`.
+- `src-tauri/src/settings.rs`: the JSON settings file. Extend `Settings` with
+  `#[serde(default)]` fields so older files keep loading; bump `SCHEMA_VERSION` only
+  for incompatible changes.
+- Frontend IPC types mirror the serialized Rust types (camelCase fields, enums tagged
+  with `kind`); update both sides together and keep a serialization test in Rust.
+- MAME is executed only in response to explicit user actions; never at startup.
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
   from planned to implemented.
 

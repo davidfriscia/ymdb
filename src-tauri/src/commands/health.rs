@@ -1,7 +1,4 @@
-//! Tauri commands exposed to the frontend.
-//!
-//! Commands are thin adapters: they extract what they need from the Tauri
-//! runtime and delegate to plain, testable functions.
+//! Application health commands.
 
 use crate::health::{HealthReport, build_health_report};
 

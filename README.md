@@ -81,6 +81,55 @@ pnpm tauri build
 
 Bundles are written to `src-tauri/target/release/bundle/`.
 
+## Configuring MAME
+
+YMDB uses a MAME installation that already exists on your computer. It never
+downloads or installs MAME, and it does not require administrator privileges. Portable
+installations and custom builds are supported, as long as they support the
+`-version` option and print the standard MAME version line. This was verified with
+MAME 0.240 and 0.280; older releases such as MAME 0.162 do not support it.
+
+In the **MAME Installation** panel:
+
+- **Select executable…** opens the native file picker. Choose the MAME program file
+  (`mame.exe` on Windows, usually `mame` on macOS and Linux). YMDB validates it and
+  saves it only if validation succeeds.
+- **Detect installations** looks for MAME in the directories listed in `PATH` and in
+  a few standard installation directories (non-recursively), then validates each
+  candidate. Detection never changes your configuration: choose
+  **Use this installation** to adopt a detected executable.
+- **Verify** runs the configured executable again and shows the detected version,
+  the validation status, the time of the check and the raw output of the version
+  command.
+- **Remove configuration** forgets the configured executable.
+
+When YMDB starts, it shows the saved executable path without running it, and warns
+if the file no longer exists.
+
+### Validation
+
+Validation runs `<executable> -version` directly (never through a shell), with a
+20-second timeout, and accepts the executable only if it exits with code 0 and
+prints a MAME version line such as `0.280 (mame0280)`. A program that runs
+successfully but prints anything else is not accepted. Each failure is reported with
+a specific reason: file not found, not a file, not executable, failed to start, timed
+out, unexpected exit code, or unrecognized output. See
+[ARCHITECTURE.md](ARCHITECTURE.md#mame-integration--implemented-installation-management-only)
+for the exact rules.
+
+### Settings location
+
+Settings are stored in `settings.json` in the application configuration directory:
+
+| Platform | Location                                                                  |
+| -------- | ------------------------------------------------------------------------- |
+| Windows  | `%APPDATA%\io.github.davidfriscia.ymdb\settings.json`                     |
+| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/settings.json` |
+| Linux    | `~/.config/io.github.davidfriscia.ymdb/settings.json`                     |
+
+The file only contains the path of the selected MAME executable. The MAME version is
+read again on every verification and is not stored.
+
 ## Testing and quality checks
 
 | Command             | Description                               |
@@ -100,6 +149,13 @@ compiles (production frontend build plus Rust binary, without creating installer
 
 ```sh
 pnpm tauri build --debug --no-bundle
+```
+
+An optional end-to-end test validates a real MAME executable. It is ignored by
+default because it needs a local MAME installation:
+
+```sh
+YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --manifest-path src-tauri/Cargo.toml -- --ignored
 ```
 
 ## Continuous integration
@@ -140,14 +196,18 @@ The workflow does not publish releases or use any secrets.
 Implemented:
 
 - Tauri 2 + React + TypeScript project skeleton.
-- Minimal start screen showing the application name and version.
+- Start screen showing the application name and version.
+- MAME installation management: manual selection through the native file picker,
+  automatic detection, validation through `-version`, version display, and saving,
+  verifying and removing the configuration (see [Configuring MAME](#configuring-mame)).
+- Application settings persisted as JSON in the platform configuration directory.
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including the MAME catalog, database, search,
-launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including the MAME catalog import, database,
+search, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

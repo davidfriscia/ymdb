@@ -21,13 +21,13 @@ export function HealthCheck() {
   }
 
   return (
-    <section className="health-check" aria-labelledby="health-check-title">
-      <h2 id="health-check-title" className="health-check__title">
+    <section className="panel" aria-labelledby="health-check-title">
+      <h2 id="health-check-title" className="panel__title">
         Backend connection
       </h2>
       <button
         type="button"
-        className="health-check__button"
+        className="button"
         onClick={() => void runCheck()}
         disabled={state.kind === "loading"}
       >
@@ -35,7 +35,7 @@ export function HealthCheck() {
       </button>
 
       {state.kind === "success" && (
-        <dl className="health-check__result" aria-label="Backend status">
+        <dl className="details-list" aria-label="Backend status">
           <dt>Status</dt>
           <dd>{state.report.status}</dd>
           <dt>Operating system</dt>
@@ -48,7 +48,7 @@ export function HealthCheck() {
       )}
 
       {state.kind === "error" && (
-        <p className="health-check__error" role="alert">
+        <p className="message message--error" role="alert">
           Backend check failed: {state.message}
         </p>
       )}

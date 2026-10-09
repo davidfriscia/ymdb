@@ -42,36 +42,83 @@ Guiding principles:
 
 ## Components
 
-### Desktop UI — Implemented (bootstrap only)
+### Desktop UI — Implemented (partially)
 
 React + TypeScript application rendered by the system WebView through Tauri.
 
 - `src/app/` contains the application shell and global styles.
 - `src/features/<feature>/` groups each feature's components, IPC wrappers and tests.
-  IPC calls are wrapped in typed functions (for example `healthApi.ts`) so components
-  never call `invoke` directly.
-- Currently implemented: a start screen and the `health-check` feature, which calls
-  the `check_health` command.
+  IPC calls are wrapped in typed functions (for example `mameApi.ts`) so components
+  never call `invoke` directly. The TypeScript types in these wrappers mirror the
+  serialized Rust types field by field.
+- Implemented features:
+  - `mame-installation`: the MAME Installation panel (see below).
+  - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 Planned: catalog browser, search and filter panels, machine and software detail
-views, collections, settings, launch profiles.
+views, collections, launch profiles, navigation between screens.
 
-### Application Core — Implemented (bootstrap only)
+### Application Core — Implemented (partially)
 
 The Rust crate in `src-tauri/`.
 
-- `lib.rs` builds the Tauri application and registers commands.
-- `commands.rs` contains Tauri command adapters. Commands extract what they need from
-  the Tauri runtime and delegate to plain functions that can be unit-tested without
-  Tauri.
+- `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
+- `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`). Commands
+  extract what they need from the Tauri runtime and delegate to plain functions that
+  are unit-tested without Tauri. Blocking work (process execution, native dialogs)
+  runs on the blocking thread pool so the UI never freezes. Failures are returned as
+  a structured `CommandError` (`settings`, `notConfigured`, `internal`).
 - `health.rs` builds the health report returned by `check_health`.
+- `settings.rs` persists application settings (see [Local storage](#local-storage--implemented-partially)).
+- `mame/` implements the MAME integration (see below).
 
-Planned: one module per domain area (MAME integration, catalog, storage, cache),
-introduced only when the corresponding feature is implemented.
+### MAME integration — Implemented (installation management only)
 
-### MAME integration — Planned
+Implemented in `src-tauri/src/mame/`, as independent modules reusable by the
+planned catalog importer and launcher:
 
-- Locate and validate a local MAME executable and its version.
+- `process.rs`: runs a program directly (never through a shell) with closed stdin,
+  captured and size-bounded output, and a timeout after which the process is killed.
+- `version.rs`: recognizes the output of `mame -version`.
+- `validation.rs`: validates an executable and produces a `ValidationReport`.
+- `detection.rs`: finds candidate executables in well-known locations.
+- `platform.rs`: all OS-specific details (executable names, search directories,
+  executable checks, spawn error codes, console window suppression on Windows).
+
+**Validation** of a path proceeds in order and stops at the first failure:
+
+1. The path must be absolute and exist (`notFound`).
+2. It must be a regular file (`notAFile`).
+3. It must be directly executable: an `.exe` file on Windows (so `.bat`/`.cmd` files,
+   which require `cmd.exe`, are rejected), a file with an execute permission bit on
+   Unix (`notExecutable`).
+4. It is run as `<path> -version` from its own directory, with a 20-second timeout
+   (`launchFailed`, `timedOut`). A process that times out is killed and reaped.
+5. The exit code must be 0 (`invalidExitCode`).
+6. Standard output must be exactly one line in the format MAME prints,
+   `<major>.<minor> (<revision>)`, for example `0.280 (mame0280)` (`unrecognizedOutput`).
+   This format comes from `emulator_info::get_build_version()` in the MAME sources
+   and was verified against real MAME 0.240 and 0.280 builds. MAME versions that do not
+   support `-version` (for example 0.162) are reported as `invalidExitCode`.
+
+The `ValidationReport` contains the executable path, status, parsed version
+(`release` and `revision`), raw stdout/stderr/exit code and the check timestamp.
+
+**Detection** checks, without recursion, for files named `mame` (Unix) or
+`mame.exe`/`mame64.exe` (Windows) in: the configured path, every absolute directory in
+`PATH`, and conventional directories (for example `C:\mame`, `%ProgramFiles%\MAME`,
+Chocolatey and Scoop locations on Windows; `/opt/homebrew/bin` and `/usr/local/bin`
+on macOS; `/usr/games`, `/usr/bin`, `/snap/bin` on Linux). Candidates are deduplicated
+by canonical path, capped at 16, and validated concurrently. Detection only reports
+results; it never changes the saved configuration.
+
+**Execution policy:** MAME is only executed in response to an explicit user action
+(select, verify, detect), always with the fixed argument `-version`. Loading the
+configuration at startup never runs MAME. The frontend cannot pass arbitrary
+arguments.
+
+Planned:
+
 - Read MAME's machine and software list information (`-listxml`, `-getsoftlist`,
   or equivalent data files).
 - Build command lines and launch machines and software, supporting the full set of
@@ -86,11 +133,36 @@ introduced only when the corresponding feature is implemented.
 - Provide full-text search and combinable filters over the whole catalog.
 - Manage favorites, user collections, screenshots, artwork and metadata.
 
-### Local storage — Planned
+### Local storage — Implemented (partially)
 
-- Application data and configuration stored in the platform-specific application
-  data directories resolved through Tauri, never hard-coded paths.
-- User-configurable ROM, CHD and artwork directories.
+Implemented: application settings in a JSON file, `settings.json`, in the
+platform configuration directory resolved by Tauri (`app_config_dir`) for the
+bundle identifier `io.github.davidfriscia.ymdb`:
+
+| Platform | Location                                                                               |
+| -------- | -------------------------------------------------------------------------------------- |
+| Windows  | `%APPDATA%\io.github.davidfriscia.ymdb\settings.json`                                  |
+| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/settings.json`              |
+| Linux    | `$XDG_CONFIG_HOME/io.github.davidfriscia.ymdb/settings.json` (default `~/.config/...`) |
+
+Format:
+
+```json
+{
+  "schemaVersion": 1,
+  "mame": { "executablePath": "C:\Emulators\MAME\mame.exe" }
+}
+```
+
+- `mame` is `null` or absent when no executable is configured. The detected MAME
+  version is deliberately not stored; it is read again on every verification.
+- Writes are atomic: a temporary file in the same directory is written, synced and
+  renamed over `settings.json`.
+- A missing file means default settings. An invalid file is reported to the user
+  without crashing and is replaced the next time the configuration is saved.
+- Access to the file is serialized by a mutex held in Tauri managed state.
+
+Planned: user-configurable ROM, CHD and artwork directories.
 
 ### SQLite — Planned
 
@@ -122,7 +194,7 @@ introduced only when the corresponding feature is implemented.
 - File system paths are always handled with `std::path` types, never string
   concatenation.
 - MAME executable names and default locations differ per platform and are resolved
-  in the MAME integration module only.
+  in `src-tauri/src/mame/platform.rs` only.
 - Cross-platform compatibility is enforced by continuous integration
   (`.github/workflows/ci.yml`), which runs all checks and compiles the application
   on Windows, macOS and Linux for every change.
