@@ -1,0 +1,37 @@
+[package]
+name = "ymdb"
+version = "0.1.0"
+description = "Your MAME DB (YMDB) - a cross-platform desktop frontend for MAME"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+# The `_lib` suffix keeps the library name distinct from the binary name.
+# See https://github.com/rust-lang/cargo/issues/8519
+name = "ymdb_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# See https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
