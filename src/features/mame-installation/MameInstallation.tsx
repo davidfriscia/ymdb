@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
+import { describeError } from "../../shared/ipc";
 import {
   clearMameConfiguration,
   detectMameInstallations,
   getMameConfiguration,
-  MameCommandError,
   pickMameExecutable,
   setMameExecutable,
   verifyMameConfiguration,
@@ -11,23 +11,18 @@ import {
   type MameConfiguration,
   type ValidationReport,
 } from "./mameApi";
-import {
-  describeCommandError,
-  describeSource,
-  describeStatus,
-  formatTimestamp,
-  formatVersion,
-} from "./messages";
+import { describeSource, describeStatus, formatTimestamp, formatVersion } from "./messages";
 
 type PendingAction = "load" | "select" | "detect" | "verify" | "remove";
 
 const UNCONFIGURED: MameConfiguration = { executablePath: null, executableExists: false };
 
-function describeError(error: unknown): string {
-  return error instanceof MameCommandError ? describeCommandError(error.detail) : String(error);
+interface MameInstallationProps {
+  /** Called after the saved configuration was changed (saved or removed). */
+  onConfigurationChanged?: () => void;
 }
 
-export function MameInstallation() {
+export function MameInstallation({ onConfigurationChanged }: MameInstallationProps = {}) {
   const [configuration, setConfiguration] = useState<MameConfiguration>(UNCONFIGURED);
   const [report, setReport] = useState<ValidationReport | null>(null);
   const [detected, setDetected] = useState<DetectedInstallation[] | null>(null);
@@ -70,6 +65,7 @@ export function MameInstallation() {
     setReport(result);
     if (result.status.kind === "valid") {
       setConfiguration({ executablePath: result.executablePath, executableExists: true });
+      onConfigurationChanged?.();
     }
   }
 
@@ -97,6 +93,7 @@ export function MameInstallation() {
     run("remove", async () => {
       await clearMameConfiguration();
       setConfiguration(UNCONFIGURED);
+      onConfigurationChanged?.();
       setReport(null);
     });
 

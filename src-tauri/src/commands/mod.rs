@@ -5,9 +5,11 @@
 //! execution, native dialogs) runs on the blocking thread pool so the UI and
 //! the main thread stay responsive.
 
+pub mod catalog;
 pub mod health;
 pub mod mame;
 
+use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 
 use serde::Serialize;
@@ -27,6 +29,8 @@ pub enum CommandError {
     Settings { message: String },
     /// The operation requires a configured MAME executable.
     NotConfigured,
+    /// A catalog import is already running.
+    ImportInProgress,
     /// Unexpected failure (for example a native dialog error).
     Internal { message: String },
 }
@@ -52,6 +56,15 @@ impl SettingsState {
             store,
             lock: Mutex::new(()),
         }
+    }
+
+    /// Returns the configured MAME executable, if any.
+    pub fn configured_executable(&self) -> Result<Option<PathBuf>, CommandError> {
+        self.with_store(|store| {
+            store
+                .load()
+                .map(|settings| settings.mame.map(|mame| mame.executable_path))
+        })
     }
 
     fn with_store<T>(

@@ -1,4 +1,4 @@
-import type { CandidateSource, CommandError, MameVersion, ValidationStatus } from "./mameApi";
+import type { CandidateSource, MameVersion, ValidationStatus } from "./mameApi";
 
 export function describeStatus(status: ValidationStatus): string {
   switch (status.kind) {
@@ -20,17 +20,6 @@ export function describeStatus(status: ValidationStatus): string {
         : `The program exited with code ${String(status.exitCode)}. It may not be MAME, or it may be a MAME version too old to report its version.`;
     case "unrecognizedOutput":
       return "The program did not report a MAME version. It does not appear to be MAME.";
-  }
-}
-
-export function describeCommandError(error: CommandError): string {
-  switch (error.kind) {
-    case "settings":
-      return `Settings error: ${error.message}`;
-    case "notConfigured":
-      return "No MAME executable is configured.";
-    case "internal":
-      return `Unexpected error: ${error.message}`;
   }
 }
 

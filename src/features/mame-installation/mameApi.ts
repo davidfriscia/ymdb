@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand } from "../../shared/ipc";
 
 // These types mirror the Rust contracts in `src-tauri/src/mame/` and
 // `src-tauri/src/commands/`. Keep both sides in sync.
@@ -55,40 +55,7 @@ export interface MameConfiguration {
   executableExists: boolean;
 }
 
-/** Mirrors `CommandError` in `src-tauri/src/commands/mod.rs`. */
-export type CommandError =
-  | { kind: "settings"; message: string }
-  | { kind: "notConfigured" }
-  | { kind: "internal"; message: string };
-
-/** Error thrown by the wrappers below when a command fails. */
-export class MameCommandError extends Error {
-  readonly detail: CommandError;
-
-  constructor(detail: CommandError) {
-    super(detail.kind === "notConfigured" ? "MAME is not configured" : detail.message);
-    this.name = "MameCommandError";
-    this.detail = detail;
-  }
-}
-
-function isCommandError(value: unknown): value is CommandError {
-  if (typeof value !== "object" || value === null || !("kind" in value)) {
-    return false;
-  }
-  const { kind } = value;
-  return kind === "settings" || kind === "notConfigured" || kind === "internal";
-}
-
-async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  try {
-    return await invoke<T>(command, args);
-  } catch (error) {
-    throw new MameCommandError(
-      isCommandError(error) ? error : { kind: "internal", message: String(error) },
-    );
-  }
-}
+const call = invokeCommand;
 
 export function getMameConfiguration(): Promise<MameConfiguration> {
   return call("get_mame_configuration");

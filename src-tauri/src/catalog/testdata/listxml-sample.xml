@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<!DOCTYPE mame [
+<!ELEMENT mame (machine+)>
+	<!ATTLIST mame build CDATA #IMPLIED>
+	<!ATTLIST mame debug (yes|no) "no">
+	<!ATTLIST mame mameconfig CDATA #REQUIRED>
+	<!ELEMENT machine (description, year?, manufacturer?, biosset*, rom*, disk*, device_ref*, sample*, chip*, display*, sound?, input?, dipswitch*, configuration*, port*, adjuster*, driver?, feature*, device*, slot*, softwarelist*, ramoption*)>
+		<!ATTLIST machine name CDATA #REQUIRED>
+]>
+
+<mame build="0.280 (mame0280)" debug="no" mameconfig="10">
+	<machine name="neogeo" sourcefile="neogeo/neogeo.cpp" isbios="yes">
+		<description>Neo-Geo MV-6F</description>
+		<year>1990</year>
+		<manufacturer>SNK</manufacturer>
+		<biosset name="euro" description="Europe MVS (Ver. 2)"/>
+		<biosset name="japan" description="Japan MVS (Ver. 3)" default="yes"/>
+		<rom name="sp-s2.sp1" bios="euro" size="131072" crc="9036d879" sha1="4f5ed7105b7128794654ce82b51723e16e389543" region="mainbios" offset="0"/>
+		<rom name="sm1.sm1" size="131072" crc="94416d67" sha1="42f9d7ddd6c0931fd64226a60dc73602b2819dcf" region="audiobios" offset="0"/>
+		<device_ref name="z80"/>
+		<device_ref name="z80"/>
+		<chip type="cpu" tag="audiocpu" name="Zilog Z80" clock="4000000"/>
+		<display tag="screen" type="raster" rotate="0" width="320" height="224" refresh="59.185606" />
+		<sound channels="2"/>
+		<input players="2" coins="2" service="yes">
+			<control type="joy" player="1" buttons="4" ways="8"/>
+			<control type="joy" player="2" buttons="4" ways="8"/>
+		</input>
+		<dipswitch name="Test Switch" tag="DSW" mask="1">
+			<diplocation name="SW" number="1"/>
+			<dipvalue name="Off" value="1" default="yes"/>
+			<dipvalue name="On" value="0"/>
+		</dipswitch>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="kof98" sourcefile="neogeo/neogeo.cpp" romof="neogeo">
+		<description>The King of Fighters &apos;98 - The Slugfest</description>
+		<year>1998</year>
+		<manufacturer>SNK</manufacturer>
+		<rom name="242-p1.p1" size="2097152" crc="8893df89" sha1="0452d6bc5b1d8fd6d9b02b7d6f2e12e2e1c5e6a1" region="maincpu" offset="0"/>
+		<rom name="sp-s2.sp1" merge="sp-s2.sp1" bios="euro" size="131072" crc="9036d879" sha1="4f5ed7105b7128794654ce82b51723e16e389543" region="mainbios" offset="0"/>
+		<device_ref name="z80"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="pacman" sourcefile="pacman/pacman.cpp" cloneof="puckman" romof="puckman">
+		<description>Pac-Man (Midway)</description>
+		<year>1980</year>
+		<manufacturer>Namco (Midway license)</manufacturer>
+		<rom name="pacman.6e" size="4096" crc="c1e6ab10" sha1="e87e059c5be45753f7e9f33dff851f16d6751181" region="maincpu" offset="0"/>
+		<rom name="pal.bin" size="279" status="nodump" region="plds" offset="0" optional="yes"/>
+		<device_ref name="z80"/>
+		<display tag="screen" type="raster" rotate="90" width="288" height="224" refresh="60.606061" />
+		<input players="2" coins="2">
+			<control type="joy" player="1" ways="4"/>
+		</input>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="puckman" sourcefile="pacman/pacman.cpp">
+		<description>Puck Man (Japan set 1)</description>
+		<year>1980</year>
+		<manufacturer>Namco</manufacturer>
+		<rom name="pm1_prg1.6e" size="2048" crc="f36e88ab" sha1="813cecf44bf5464b1aed64b36f5047e4c79ba176" region="maincpu" offset="0"/>
+		<device_ref name="z80"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="005" sourcefile="sega/segag80r.cpp" sampleof="005">
+		<description>005</description>
+		<year>1981</year>
+		<manufacturer>Sega</manufacturer>
+		<sample name="lexplode"/>
+		<sample name="sexplode"/>
+		<driver status="imperfect" emulation="good" savestate="unsupported"/>
+		<feature type="sound" status="imperfect"/>
+	</machine>
+	<machine name="fruitbank" sourcefile="misc/fruit.cpp" ismechanical="yes" sampleof="fruitsamples">
+		<description>Fruit Bank &amp; Co &lt;Club&gt; &#169;</description>
+		<year>199?</year>
+		<manufacturer>&lt;unknown&gt;</manufacturer>
+		<disk name="fruit_hdd" sha1="e13da5f827df852e742b594729ee3f933b387410" region="ata" index="0" writable="yes"/>
+		<sample name="coin"/>
+		<input players="0"/>
+		<driver status="preliminary" emulation="preliminary" savestate="unsupported" requiresartwork="yes" incomplete="yes"/>
+		<feature type="mechanical-reels" overall="unemulated"/>
+		<future_element some="value"><nested/></future_element>
+	</machine>
+	<machine name="c64" sourcefile="commodore/c64.cpp" future_attribute="ignored">
+		<description>Commodore 64 (NTSC)</description>
+		<year>1982</year>
+		<manufacturer>Commodore Business Machines</manufacturer>
+		<rom name="901227-03.u4" size="8192" crc="dbe3e7c7" sha1="1d503e56df85a62fee696e7618dc5b4e781df1bb" region="kernal" offset="0"/>
+		<device_ref name="z80"/>
+		<chip type="cpu" tag="u7" name="MOS Technology 6510" clock="1022727"/>
+		<chip type="audio" tag="sid" name="MOS Technology 6581 SID"/>
+		<input players="1">
+			<control type="keyboard" buttons="66"/>
+		</input>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="cartridge" tag="exp" interface="c64_cart,vic10_cart" mandatory="1">
+			<instance name="cartridge" briefname="cart"/>
+			<extension name="80"/>
+			<extension name="crt"/>
+		</device>
+		<device type="quickload" tag="quickload"/>
+		<slot name="exp">
+			<slotoption name="standard" devname="c64_standard_cartridge" default="yes"/>
+		</slot>
+		<softwarelist tag="cart_list_c64" name="c64_cart" status="original" filter="NTSC"/>
+		<softwarelist name="vic10" status="compatible"/>
+		<ramoption name="64K" default="yes">65536</ramoption>
+		<ramoption>262144</ramoption>
+	</machine>
+	<machine name="z80" sourcefile="devices/cpu/z80/z80.cpp" isdevice="yes" runnable="no">
+		<description>Zilog Z80</description>
+	</machine>
+</mame>

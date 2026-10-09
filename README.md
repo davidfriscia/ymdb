@@ -130,6 +130,40 @@ Settings are stored in `settings.json` in the application configuration director
 The file only contains the path of the selected MAME executable. The MAME version is
 read again on every verification and is not stored.
 
+## MAME catalog
+
+Once MAME is configured, the **MAME Catalog** panel imports the list of all machines
+known to that MAME build:
+
+- **Import catalog** (or **Reimport catalog**) runs `<mame> -listxml`, reads its
+  output as a stream and stores the machines in a local SQLite database. With MAME
+  0.280 this takes a few seconds and stores 48,893 entries (including devices).
+- While importing, the panel shows an indeterminate progress bar and the number of
+  machines processed. **Cancel import** stops MAME and discards the partial import.
+- The panel shows the MAME version the catalog was built from, the import date and
+  a summary (machines, runnable systems, clones, BIOS sets, devices, mechanical
+  machines, ROMs, disks, software lists, database size).
+- If the configured MAME executable changes (another file, or the same file updated),
+  the panel warns that the catalog no longer matches it. Reimport to update it.
+
+Imports are atomic: a new catalog is built in a separate file and replaces the
+previous one only when the import succeeds. If MAME fails, the output cannot be
+parsed, the database cannot be written, or the import is cancelled, the previous
+catalog stays available.
+
+The catalog is stored in `catalog.sqlite` in the application local data directory:
+
+| Platform | Location                                                                   |
+| -------- | -------------------------------------------------------------------------- |
+| Windows  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb\catalog.sqlite`                |
+| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/catalog.sqlite` |
+| Linux    | `~/.local/share/io.github.davidfriscia.ymdb/catalog.sqlite`                |
+
+The file contains only data derived from MAME and can be deleted at any time; it is
+rebuilt by the next import. See
+[ARCHITECTURE.md](ARCHITECTURE.md#catalog--implemented-machines-from--listxml) for
+the schema, the imported and deferred information, and the import strategy.
+
 ## Testing and quality checks
 
 | Command             | Description                               |
@@ -151,11 +185,12 @@ compiles (production frontend build plus Rust binary, without creating installer
 pnpm tauri build --debug --no-bundle
 ```
 
-An optional end-to-end test validates a real MAME executable. It is ignored by
-default because it needs a local MAME installation:
+Optional end-to-end tests validate a real MAME executable and import its full catalog
+(printing the duration and the catalog summary). They are ignored by default because
+they need a local MAME installation:
 
 ```sh
-YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --manifest-path src-tauri/Cargo.toml -- --ignored
+YMDB_TEST_MAME_EXECUTABLE=/path/to/mame cargo test --release --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture
 ```
 
 ## Continuous integration
@@ -201,13 +236,16 @@ Implemented:
   automatic detection, validation through `-version`, version display, and saving,
   verifying and removing the configuration (see [Configuring MAME](#configuring-mame)).
 - Application settings persisted as JSON in the platform configuration directory.
+- MAME machine catalog: streaming import of `-listxml` into SQLite with versioned
+  schema, atomic replacement, cancellation, progress and a catalog summary
+  (see [MAME catalog](#mame-catalog)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including the MAME catalog import, database,
-search, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including the catalog browser, search and
+filters, software list import, launcher, ROM management and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

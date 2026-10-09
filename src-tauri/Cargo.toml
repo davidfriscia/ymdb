@@ -20,6 +20,8 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 tauri-plugin-dialog = "2"
 serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+quick-xml = "0.42"
 
 [dev-dependencies]
 tempfile = "3"

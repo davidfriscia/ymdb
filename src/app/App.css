@@ -199,3 +199,21 @@ body {
   color: var(--color-muted);
   font-size: 0.875rem;
 }
+
+.details-list__row {
+  display: contents;
+}
+
+.import-progress {
+  margin-top: 16px;
+}
+
+.import-progress__bar {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--color-accent);
+}
+
+.import-progress .message {
+  margin-top: 8px;
+}

@@ -69,6 +69,16 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   for incompatible changes.
 - Frontend IPC types mirror the serialized Rust types (camelCase fields, enums tagged
   with `kind`); update both sides together and keep a serialization test in Rust.
+  Feature API modules call `invokeCommand` from `src/shared/ipc.ts`.
+- Long-running operations (such as the catalog import) run on a dedicated thread,
+  expose a cheap in-memory status that the frontend polls, and support cancellation.
+  Never emit per-item events to the frontend.
+- `src-tauri/src/catalog/`: `catalog.sqlite` holds only data derived from MAME and is
+  rebuilt (not migrated) on every import, then swapped atomically. Never store user
+  data in it; user data must reference machines by their MAME short name.
+- Schema changes to a database go through a new migration in its `schema.rs`;
+  never edit a released migration.
+- Do not classify machines (arcade, console, computer) beyond what MAME's data states.
 - MAME is executed only in response to explicit user actions; never at startup.
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
   from planned to implemented.

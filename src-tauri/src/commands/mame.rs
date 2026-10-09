@@ -28,7 +28,7 @@ pub struct MameConfiguration {
 pub fn get_mame_configuration(
     state: State<'_, SettingsState>,
 ) -> Result<MameConfiguration, CommandError> {
-    let executable_path = configured_executable(&state)?;
+    let executable_path = state.configured_executable()?;
     let executable_exists = executable_path.as_ref().is_some_and(|path| path.is_file());
     Ok(MameConfiguration {
         executable_path,
@@ -79,7 +79,9 @@ pub async fn set_mame_executable(
 pub async fn verify_mame_configuration(
     state: State<'_, SettingsState>,
 ) -> Result<ValidationReport, CommandError> {
-    let path = configured_executable(&state)?.ok_or(CommandError::NotConfigured)?;
+    let path = state
+        .configured_executable()?
+        .ok_or(CommandError::NotConfigured)?;
     run_blocking(move || validate_executable(&path)).await
 }
 
@@ -95,15 +97,7 @@ pub async fn detect_mame_installations(
     state: State<'_, SettingsState>,
 ) -> Result<Vec<DetectedInstallation>, CommandError> {
     // An unreadable settings file must not prevent detection.
-    let configured = configured_executable(&state).ok().flatten();
+    let configured = state.configured_executable().ok().flatten();
     run_blocking(move || detect_installations(&SearchLocations::for_current_platform(configured)))
         .await
-}
-
-fn configured_executable(state: &SettingsState) -> Result<Option<PathBuf>, CommandError> {
-    state.with_store(|store| {
-        store
-            .load()
-            .map(|settings| settings.mame.map(|mame| mame.executable_path))
-    })
 }
