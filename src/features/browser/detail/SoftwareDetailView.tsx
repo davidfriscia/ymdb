@@ -1,3 +1,4 @@
+import { useInstallationScope } from "../../installations/installationsContext";
 import { useCallback } from "react";
 import { useLoader } from "../../../shared/useLoader";
 import { formatCount } from "../../catalog/catalogMessages";
@@ -40,7 +41,11 @@ export function SoftwareDetailView({
   onTab,
   onOpen,
 }: SoftwareDetailViewProps) {
-  const load = useCallback(() => getSoftwareDetail(list, name), [list, name]);
+  const installationId = useInstallationScope();
+  const load = useCallback(
+    () => getSoftwareDetail(installationId, list, name),
+    [installationId, list, name],
+  );
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status !== "ready" || state.value === null) {

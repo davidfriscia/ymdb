@@ -1,48 +1,30 @@
-//! Persistent application settings stored as a JSON file.
+//! `settings.json` of the single-installation layout (format version 1).
 //!
-//! The file lives in the platform-specific application configuration
-//! directory and is written atomically (see `atomic_file`).
+//! Older YMDB releases stored the one configured MAME executable here. The
+//! file is now only read by the migration to the installation registry
+//! (`installations::migration`) and is never written, so it remains a backup
+//! of the previous configuration.
 
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
-use crate::atomic_file;
+use serde::Deserialize;
 
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
-pub const SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    /// Version of the settings format, for future migrations.
-    #[serde(default = "default_schema_version")]
-    pub schema_version: u32,
     #[serde(default)]
     pub mame: Option<MameSettings>,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            mame: None,
-        }
-    }
-}
-
-fn default_schema_version() -> u32 {
-    SCHEMA_VERSION
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MameSettings {
-    /// Absolute path of the MAME executable selected by the user. The detected
-    /// version is not stored: it is read again on every verification.
+    /// Absolute path of the MAME executable selected by the user.
     pub executable_path: PathBuf,
 }
 
@@ -57,11 +39,6 @@ pub enum SettingsError {
         path: PathBuf,
         source: serde_json::Error,
     },
-    Write {
-        path: PathBuf,
-        source: io::Error,
-    },
-    Serialize(serde_json::Error),
 }
 
 impl fmt::Display for SettingsError {
@@ -77,21 +54,13 @@ impl fmt::Display for SettingsError {
             Self::Invalid { path, source } => {
                 write!(f, "settings file '{}' is invalid: {source}", path.display())
             }
-            Self::Write { path, source } => {
-                write!(
-                    f,
-                    "failed to write settings file '{}': {source}",
-                    path.display()
-                )
-            }
-            Self::Serialize(source) => write!(f, "failed to serialize settings: {source}"),
         }
     }
 }
 
 impl std::error::Error for SettingsError {}
 
-/// Reads and writes the settings file in a given directory.
+/// Reads the settings file in a given directory.
 #[derive(Debug, Clone)]
 pub struct SettingsStore {
     file: PathBuf,
@@ -123,135 +92,52 @@ impl SettingsStore {
             source,
         })
     }
-
-    /// Writes the settings atomically, creating the directory if needed.
-    pub fn save(&self, settings: &Settings) -> Result<(), SettingsError> {
-        let mut content = serde_json::to_vec_pretty(settings).map_err(SettingsError::Serialize)?;
-        content.push(b'\n');
-
-        atomic_file::write(&self.file, &content).map_err(|source| SettingsError::Write {
-            path: self.file.clone(),
-            source,
-        })
-    }
-
-    /// Loads the settings, applies `change` and saves the result.
-    ///
-    /// An invalid settings file is replaced with defaults plus the change,
-    /// so the user can always recover by saving a new configuration.
-    pub fn update(&self, change: impl FnOnce(&mut Settings)) -> Result<Settings, SettingsError> {
-        let mut settings = match self.load() {
-            Ok(settings) => settings,
-            Err(SettingsError::Invalid { .. }) => Settings::default(),
-            Err(error) => return Err(error),
-        };
-        change(&mut settings);
-        self.save(&settings)?;
-        Ok(settings)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn mame_settings(path: &str) -> Settings {
-        Settings {
-            schema_version: SCHEMA_VERSION,
-            mame: Some(MameSettings {
-                executable_path: PathBuf::from(path),
-            }),
-        }
-    }
-
     #[test]
-    fn serializes_to_documented_format() {
-        let json = serde_json::to_value(mame_settings("/opt/mame/mame")).expect("serialize");
-
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "schemaVersion": 1,
-                "mame": { "executablePath": "/opt/mame/mame" }
-            })
-        );
-    }
-
-    #[test]
-    fn deserializes_with_defaults_for_missing_fields() {
-        let settings: Settings = serde_json::from_str("{}").expect("deserialize");
-
-        assert_eq!(settings, Settings::default());
-    }
-
-    #[test]
-    fn missing_file_yields_default_settings() {
-        let dir = tempfile::tempdir().expect("temp dir");
-
-        let settings = SettingsStore::in_dir(dir.path()).load().expect("load");
-
-        assert_eq!(settings, Settings::default());
-    }
-
-    #[test]
-    fn saves_and_loads_paths_with_spaces_and_unicode() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = SettingsStore::in_dir(&dir.path().join("nested config"));
-        let settings = mame_settings("/home/user/Émulateurs MAME ✓/mame");
-
-        store.save(&settings).expect("save");
-
-        assert_eq!(store.load().expect("load"), settings);
-    }
-
-    #[test]
-    fn save_replaces_existing_file_without_leaving_temporary_files() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = SettingsStore::in_dir(dir.path());
-
-        store
-            .save(&mame_settings("/first/mame"))
-            .expect("first save");
-        store
-            .save(&mame_settings("/second/mame"))
-            .expect("second save");
-
-        assert_eq!(store.load().expect("load"), mame_settings("/second/mame"));
-        let entries: Vec<_> = fs::read_dir(dir.path())
-            .expect("read dir")
-            .map(|entry| entry.expect("entry").file_name())
-            .collect();
-        assert_eq!(entries, vec![SETTINGS_FILE_NAME]);
-    }
-
-    #[test]
-    fn invalid_json_is_reported_as_invalid() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        fs::write(dir.path().join(SETTINGS_FILE_NAME), "{ not json").expect("write");
-
-        let result = SettingsStore::in_dir(dir.path()).load();
-
-        assert!(
-            matches!(result, Err(SettingsError::Invalid { .. })),
-            "{result:?}"
-        );
-    }
-
-    #[test]
-    fn wrong_field_type_is_reported_as_invalid() {
+    fn reads_the_documented_format() {
         let dir = tempfile::tempdir().expect("temp dir");
         fs::write(
             dir.path().join(SETTINGS_FILE_NAME),
-            r#"{ "mame": { "executablePath": 42 } }"#,
+            r#"{ "schemaVersion": 1, "mame": { "executablePath": "/home/user/Émulateurs MAME ✓/mame" } }"#,
         )
         .expect("write");
 
-        let result = SettingsStore::in_dir(dir.path()).load();
+        let settings = SettingsStore::in_dir(dir.path()).load().expect("load");
 
-        assert!(
-            matches!(result, Err(SettingsError::Invalid { .. })),
-            "{result:?}"
+        assert_eq!(
+            settings.mame.map(|mame| mame.executable_path),
+            Some(PathBuf::from("/home/user/Émulateurs MAME ✓/mame"))
         );
+    }
+
+    #[test]
+    fn missing_file_or_fields_yield_no_executable() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = SettingsStore::in_dir(dir.path());
+        assert_eq!(store.load().expect("load"), Settings::default());
+
+        fs::write(dir.path().join(SETTINGS_FILE_NAME), "{}").expect("write");
+        assert_eq!(store.load().expect("load"), Settings::default());
+    }
+
+    #[test]
+    fn invalid_content_is_reported_as_invalid() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        for content in ["{ not json", r#"{ "mame": { "executablePath": 42 } }"#] {
+            fs::write(dir.path().join(SETTINGS_FILE_NAME), content).expect("write");
+
+            let result = SettingsStore::in_dir(dir.path()).load();
+
+            assert!(
+                matches!(result, Err(SettingsError::Invalid { .. })),
+                "{result:?}"
+            );
+        }
     }
 
     #[test]
@@ -264,48 +150,6 @@ mod tests {
 
         assert!(
             matches!(result, Err(SettingsError::Read { .. })),
-            "{result:?}"
-        );
-    }
-
-    #[test]
-    fn update_replaces_invalid_file() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = SettingsStore::in_dir(dir.path());
-        fs::write(dir.path().join(SETTINGS_FILE_NAME), "corrupted").expect("write");
-
-        let updated = store
-            .update(|settings| settings.mame = mame_settings("/opt/mame").mame)
-            .expect("update");
-
-        assert_eq!(updated, mame_settings("/opt/mame"));
-        assert_eq!(store.load().expect("load"), updated);
-    }
-
-    #[test]
-    fn update_can_remove_mame_configuration() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = SettingsStore::in_dir(dir.path());
-        store.save(&mame_settings("/opt/mame")).expect("save");
-
-        store
-            .update(|settings| settings.mame = None)
-            .expect("update");
-
-        assert_eq!(store.load().expect("load"), Settings::default());
-    }
-
-    #[test]
-    fn write_failure_is_reported_as_write_error() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        // The settings directory path is occupied by a regular file.
-        let blocked = dir.path().join("blocked");
-        fs::write(&blocked, "").expect("write");
-
-        let result = SettingsStore::in_dir(&blocked).save(&Settings::default());
-
-        assert!(
-            matches!(result, Err(SettingsError::Write { .. })),
             "{result:?}"
         );
     }

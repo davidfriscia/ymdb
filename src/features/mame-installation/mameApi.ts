@@ -1,7 +1,5 @@
-import { invokeCommand } from "../../shared/ipc";
-
-// These types mirror the Rust contracts in `src-tauri/src/mame/` and
-// `src-tauri/src/commands/`. Keep both sides in sync.
+// These types mirror the Rust contracts in `src-tauri/src/mame/`. Keep both
+// sides in sync. Installation commands are in `features/installations`.
 
 /** Mirrors `MameVersion` in `src-tauri/src/mame/version.rs`. */
 export interface MameVersion {
@@ -47,40 +45,4 @@ export type CandidateSource = "configured" | "path" | "conventional";
 export interface DetectedInstallation {
   source: CandidateSource;
   report: ValidationReport;
-}
-
-/** Mirrors `MameConfiguration` in `src-tauri/src/commands/mame.rs`. */
-export interface MameConfiguration {
-  executablePath: string | null;
-  executableExists: boolean;
-}
-
-const call = invokeCommand;
-
-export function getMameConfiguration(): Promise<MameConfiguration> {
-  return call("get_mame_configuration");
-}
-
-/** Opens the native file picker. Resolves to `null` when the user cancels. */
-export function pickMameExecutable(): Promise<string | null> {
-  return call("pick_mame_executable");
-}
-
-/** Validates the executable and saves it only if it is a valid MAME installation. */
-export function setMameExecutable(path: string): Promise<ValidationReport> {
-  return call("set_mame_executable", { path });
-}
-
-/** Validates the configured executable without changing the configuration. */
-export function verifyMameConfiguration(): Promise<ValidationReport> {
-  return call("verify_mame_configuration");
-}
-
-export function clearMameConfiguration(): Promise<void> {
-  return call("clear_mame_configuration");
-}
-
-/** Searches well-known locations. Never changes the configuration. */
-export function detectMameInstallations(): Promise<DetectedInstallation[]> {
-  return call("detect_mame_installations");
 }

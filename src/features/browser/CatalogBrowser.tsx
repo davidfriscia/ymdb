@@ -5,12 +5,15 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type Dispatch,
 } from "react";
 import { CommandFailedError, describeError } from "../../shared/ipc";
 import { useLoader, type Loader } from "../../shared/useLoader";
 import { getCatalogStatus, type CatalogStatus } from "../catalog/catalogApi";
 import { describeFreshness, formatCount } from "../catalog/catalogMessages";
+import { InstallationSelect } from "../installations/InstallationSelect";
+import { InstallationScope, useInstallations } from "../installations/installationsContext";
 import { searchMachines, searchSoftware, type FacetResult } from "../search/searchApi";
 import {
   activeFilters,
@@ -38,16 +41,22 @@ import type { ResultItem } from "./renderers/types";
 import { Toolbar } from "./Toolbar";
 
 interface CatalogBrowserProps {
-  /** Changes when the catalog or the MAME configuration may have changed. */
+  /** Changes when a catalog may have changed (for example after an import). */
   refreshKey: number;
   preferences: BrowserPreferences;
   onPreferencesChange: (change: Partial<BrowserPreferences>) => void;
-  /** Opens the MAME page, where catalogs are imported. */
+  /** Opens the MAME page, where installations are managed and catalogs imported. */
   onOpenMame: () => void;
   /** Delay after the last keystroke before searching. */
   debounceMs?: number;
 }
 
+/**
+ * Browses the catalog of the active MAME installation. Every request names
+ * that installation; switching to another one keeps the search text, filters
+ * and sorting, returns to the first page and closes the detail views, which
+ * belong to the previous catalog.
+ */
 export function CatalogBrowser({
   refreshKey,
   preferences,
@@ -56,7 +65,22 @@ export function CatalogBrowser({
   debounceMs = 300,
 }: CatalogBrowserProps) {
   const [state, dispatch] = useReducer(browserReducer, initialBrowserState);
-  const { state: status, reload } = useLoader(getCatalogStatus, refreshKey);
+  const installations = useInstallations();
+  const installationId = installations.activeId;
+
+  // Reset while rendering, so that a detail view of the previous catalog is
+  // never rendered for the new installation.
+  const [shownInstallation, setShownInstallation] = useState(installationId);
+  if (shownInstallation !== installationId) {
+    setShownInstallation(installationId);
+    if (shownInstallation !== null) dispatch({ type: "installationChanged" });
+  }
+
+  const loadStatus = useCallback(
+    () => (installationId === null ? Promise.resolve(null) : getCatalogStatus(installationId)),
+    [installationId],
+  );
+  const { state: status, latest, reload } = useLoader(loadStatus, refreshKey);
 
   // Applies the search text once typing pauses.
   useEffect(() => {
@@ -69,29 +93,72 @@ export function CatalogBrowser({
     };
   }, [state.text, state.appliedText, debounceMs]);
 
-  return (
-    <section className="browser" aria-labelledby="browser-title">
-      <h1 id="browser-title" className="visually-hidden">
-        Catalog
-      </h1>
-      {status.status === "loading" && (
-        <p className="message message--muted browser__state" role="status">
-          Loading catalog…
+  // While the status of a newly selected installation loads, the workspace
+  // stays visible when that installation has a catalog: its searches already
+  // name the new installation.
+  const switching =
+    status.status === "loading" &&
+    installations.active?.catalogImported === true &&
+    latest?.catalog != null;
+  const current = status.status === "ready" ? status.value : switching ? latest : null;
+
+  let content;
+  if (installations.view === null) {
+    content = installations.error ? (
+      <div className="state-message browser__state" role="alert">
+        <p className="message message--error">
+          The MAME installations could not be read: {describeError(installations.error)}
         </p>
-      )}
-      {status.status === "error" && (
-        <div className="state-message browser__state" role="alert">
-          <p className="message message--error">
-            The catalog status could not be read: {describeError(status.error)}
-          </p>
-          <button type="button" className="button button--secondary" onClick={reload}>
-            Retry
-          </button>
-        </div>
-      )}
-      {status.status === "ready" && (
+        <button
+          type="button"
+          className="button button--secondary"
+          onClick={() => void installations.reload()}
+        >
+          Retry
+        </button>
+      </div>
+    ) : (
+      <p className="message message--muted browser__state" role="status">
+        Loading catalog…
+      </p>
+    );
+  } else if (installationId === null) {
+    content = (
+      <div className="state-message browser__state">
+        <h2 className="panel__title">No MAME installation</h2>
+        <p className="message message--muted">
+          Add a MAME installation and import its catalog to browse it.
+        </p>
+        <button type="button" className="button" onClick={onOpenMame}>
+          Open MAME settings
+        </button>
+      </div>
+    );
+  } else if (status.status === "error") {
+    content = (
+      <div className="state-message browser__state" role="alert">
+        <p className="message message--error">
+          The catalog status could not be read: {describeError(status.error)}
+        </p>
+        <button type="button" className="button button--secondary" onClick={reload}>
+          Retry
+        </button>
+        <InstallationSelect onOpenMame={onOpenMame} />
+      </div>
+    );
+  } else if (current === null) {
+    content = (
+      <p className="message message--muted browser__state" role="status">
+        Loading catalog…
+      </p>
+    );
+  } else {
+    content = (
+      <InstallationScope value={installationId}>
         <CatalogContent
-          status={status.value}
+          installationId={installationId}
+          status={current}
+          stale={status.status !== "ready"}
           state={state}
           dispatch={dispatch}
           refreshKey={refreshKey}
@@ -100,13 +167,25 @@ export function CatalogBrowser({
           onOpenMame={onOpenMame}
           debounceMs={debounceMs}
         />
-      )}
+      </InstallationScope>
+    );
+  }
+
+  return (
+    <section className="browser" aria-labelledby="browser-title">
+      <h1 id="browser-title" className="visually-hidden">
+        Catalog
+      </h1>
+      {content}
     </section>
   );
 }
 
 interface CatalogContentProps {
+  installationId: string;
   status: CatalogStatus;
+  /** The status is the previous installation's, while switching. */
+  stale: boolean;
   state: BrowserState;
   dispatch: Dispatch<BrowserAction>;
   refreshKey: number;
@@ -116,7 +195,7 @@ interface CatalogContentProps {
   debounceMs: number;
 }
 
-function CatalogContent({ status, onOpenMame, ...props }: CatalogContentProps) {
+function CatalogContent({ status, stale, onOpenMame, ...props }: CatalogContentProps) {
   if (status.catalogError) {
     return (
       <div className="state-message browser__state" role="alert">
@@ -126,6 +205,7 @@ function CatalogContent({ status, onOpenMame, ...props }: CatalogContentProps) {
         <button type="button" className="button" onClick={onOpenMame}>
           Open MAME settings
         </button>
+        <InstallationSelect onOpenMame={onOpenMame} />
       </div>
     );
   }
@@ -134,20 +214,23 @@ function CatalogContent({ status, onOpenMame, ...props }: CatalogContentProps) {
       <div className="state-message browser__state">
         <h2 className="panel__title">No catalog yet</h2>
         <p className="message message--muted">
-          No catalog has been imported yet. Configure MAME and import its machine catalog to browse
-          it.
+          No catalog has been imported for this MAME installation yet. Import its machine catalog
+          from the MAME page to browse it, or choose another MAME version.
         </p>
         <button type="button" className="button" onClick={onOpenMame}>
           Open MAME settings
         </button>
+        <InstallationSelect onOpenMame={onOpenMame} />
       </div>
     );
   }
-  const freshness = status.freshness ? describeFreshness(status.freshness) : null;
+  const freshness = status.freshness && !stale ? describeFreshness(status.freshness) : null;
   return (
     <Workspace
       {...props}
-      softwareImported={status.catalog.software !== null}
+      // While switching, the software lists of the new catalog are not known
+      // yet: the search reports them missing if needed.
+      softwareImported={stale || status.catalog.software !== null}
       freshnessWarning={freshness?.warning ? freshness.message : null}
       onOpenMame={onOpenMame}
     />
@@ -155,12 +238,15 @@ function CatalogContent({ status, onOpenMame, ...props }: CatalogContentProps) {
 }
 
 interface SearchResult {
+  /** The installation whose catalog produced the results. */
+  installationId: string;
   scope: Scope;
   items: ResultItem[];
   meta: ResultMeta;
 }
 
 interface FacetsResult {
+  installationId: string;
   scope: Scope;
   facets: FacetResult<string>[];
 }
@@ -173,17 +259,22 @@ interface ResultMeta {
   elapsedMs: number;
 }
 
-async function runSearch({ scope, request }: BrowserRequest): Promise<SearchResult> {
+async function runSearch(
+  installationId: string,
+  { scope, request }: BrowserRequest,
+): Promise<SearchResult> {
   if (scope === "machines") {
-    const response = await searchMachines(request);
+    const response = await searchMachines(installationId, request);
     return {
+      installationId,
       scope,
       items: response.items.map((machine) => ({ kind: "machine", key: machine.name, machine })),
       meta: response,
     };
   }
-  const response = await searchSoftware(request);
+  const response = await searchSoftware(installationId, request);
   return {
+    installationId,
     scope,
     items: response.items.map((software) => ({
       kind: "software",
@@ -194,10 +285,15 @@ async function runSearch({ scope, request }: BrowserRequest): Promise<SearchResu
   };
 }
 
-async function runFacetSearch({ scope, request }: BrowserRequest): Promise<FacetsResult> {
+async function runFacetSearch(
+  installationId: string,
+  { scope, request }: BrowserRequest,
+): Promise<FacetsResult> {
   const response =
-    scope === "machines" ? await searchMachines(request) : await searchSoftware(request);
-  return { scope, facets: response.facets };
+    scope === "machines"
+      ? await searchMachines(installationId, request)
+      : await searchSoftware(installationId, request);
+  return { installationId, scope, facets: response.facets };
 }
 
 function targetOf(item: ResultItem): DetailTarget {
@@ -206,12 +302,13 @@ function targetOf(item: ResultItem): DetailTarget {
     : { kind: "software", list: item.software.listName, name: item.software.name };
 }
 
-interface WorkspaceProps extends Omit<CatalogContentProps, "status"> {
+interface WorkspaceProps extends Omit<CatalogContentProps, "status" | "stale"> {
   softwareImported: boolean;
   freshnessWarning: string | null;
 }
 
 function Workspace({
+  installationId,
   state,
   dispatch,
   refreshKey,
@@ -238,21 +335,25 @@ function Workspace({
     [scope, appliedText, filters, facetOptions],
   );
   const load = useCallback(
-    () => (softwareUnavailable ? Promise.resolve(null) : runSearch(request)),
-    [request, softwareUnavailable],
+    () => (softwareUnavailable ? Promise.resolve(null) : runSearch(installationId, request)),
+    [installationId, request, softwareUnavailable],
   );
   const search = useLoader(load, refreshKey);
   const current = search.state.status === "ready" ? search.state.value : null;
-  // While searching, keep showing the previous results of the same catalog type.
-  const shown = current ?? (search.latest?.scope === scope ? search.latest : null);
+  // While searching, keep showing the previous results of the same catalog
+  // and type; results of another installation are never shown.
+  const sameCatalog = (result: { installationId: string; scope: Scope } | null) =>
+    result?.installationId === installationId && result.scope === scope;
+  const shown = current ?? (sameCatalog(search.latest) ? search.latest : null);
   const loadFacets = useCallback(
-    () => (softwareUnavailable ? Promise.resolve(null) : runFacetSearch(facetRequest)),
-    [facetRequest, softwareUnavailable],
+    () =>
+      softwareUnavailable ? Promise.resolve(null) : runFacetSearch(installationId, facetRequest),
+    [installationId, facetRequest, softwareUnavailable],
   );
   const facetSearch = useLoader(loadFacets, refreshKey);
   const currentFacets = facetSearch.state.status === "ready" ? facetSearch.state.value : null;
   const shownFacets =
-    currentFacets ?? (facetSearch.latest?.scope === scope ? facetSearch.latest : null);
+    currentFacets ?? (sameCatalog(facetSearch.latest) ? facetSearch.latest : null);
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef(0);
@@ -296,6 +397,32 @@ function Workspace({
         <p className="message message--warning browser__banner" role="status">
           {freshnessWarning}
         </p>
+      )}
+      {state.filtersKept && showingResults && (
+        <div className="browser__banner browser__notice" role="status">
+          <p className="message message--muted">
+            The filters were kept after changing the MAME version. Values that do not exist in this
+            catalog match nothing.
+          </p>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              dispatch({ type: "clearFilters" });
+            }}
+          >
+            Clear all filters
+          </button>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              dispatch({ type: "dismissFiltersKept" });
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       <div className="browser__view" hidden={!showingResults}>
@@ -355,7 +482,12 @@ function Workspace({
             )}
           </div>
           {showViewOptions && (
-            <ViewOptionsPanel preferences={preferences} onPreferencesChange={onPreferencesChange} />
+            <ViewOptionsPanel preferences={preferences} onPreferencesChange={onPreferencesChange}>
+              <fieldset className="view-panel__section">
+                <legend className="view-panel__title">MAME Version</legend>
+                <InstallationSelect onOpenMame={onOpenMame} />
+              </fieldset>
+            </ViewOptionsPanel>
           )}
         </div>
       </div>

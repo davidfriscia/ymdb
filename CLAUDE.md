@@ -64,9 +64,20 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - `src-tauri/src/mame/`: MAME integration. Run external programs only through
   `mame::process::run_with_timeout` (direct execution, never a shell, always a
   timeout). Keep every OS-specific detail in `mame/platform.rs`.
-- `src-tauri/src/settings.rs`: the JSON settings file. Extend `Settings` with
-  `#[serde(default)]` fields so older files keep loading; bump `SCHEMA_VERSION` only
-  for incompatible changes.
+- `src-tauri/src/installations/`: the registered MAME installations
+  (`installations.json`). Extend persisted structs with `#[serde(default)]` fields so
+  older files keep loading; bump `SCHEMA_VERSION` only for incompatible changes.
+  Installations are identified by their opaque id, never by their version; an
+  installation's executable path never changes. `settings.rs` only reads the
+  single-installation `settings.json` for the migration: never write it.
+- Every command that reads a catalog or a launch configuration takes an explicit
+  `installationId` and resolves it once with `InstallationsState::resolve`; never read
+  the active installation in the middle of a request. Only the active installation
+  decides what the frontend shows and launches by default.
+- Per-installation data lives under `installations/<id>/` (catalog in the local data
+  directory, `launch.json` in the configuration directory). Never share or copy a
+  catalog, profiles or overrides between installations implicitly; media sources and
+  interface preferences stay global. Only join ids found in the registry into paths.
 - Frontend IPC types mirror the serialized Rust types (camelCase fields, enums tagged
   with `kind`); update both sides together and keep a serialization test in Rust.
   Feature API modules call `invokeCommand` from `src/shared/ipc.ts`.
@@ -130,7 +141,11 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   must not get renderer-specific code. Renderers only display the current page and
   never change the request. Do not register unimplemented renderers.
 - Interface preferences have a versioned key; a format change gets a new key and a
-  migration from the previous one in `src/app/preferences.ts`.
+  migration from the previous one in `src/app/preferences.ts`. The active MAME
+  installation is not an interface preference: it is saved in `installations.json`.
+- Catalog views read the installation they show from `InstallationScope`
+  (`features/installations/installationsContext.ts`), pass it to every request and
+  tag responses with it, so results of two installations are never shown together.
 - Images reach the webview only through the `ymdb-media` protocol, by category and
   MAME names; never enable the asset protocol or send file paths to be read. Media
   files are only read: never copied, modified or stored in the catalog.

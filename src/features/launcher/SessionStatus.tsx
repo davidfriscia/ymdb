@@ -34,8 +34,8 @@ export function SessionStatus({ session, onStop }: SessionStatusProps) {
       {state.state === "running" && (
         <>
           <p className="session-status__line">
-            <span className="badge badge--success">Running</span> MAME is running since{" "}
-            {timeFormat.format(session.startedAt)}.
+            <span className="badge badge--success">Running</span> {session.installationLabel} is
+            running since {timeFormat.format(session.startedAt)}.
           </p>
           {confirming ? (
             <div className="session-status__confirm">

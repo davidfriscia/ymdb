@@ -240,6 +240,43 @@ impl CatalogStore {
         self.dir.join(PARTIAL_FILE_NAME)
     }
 
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Closes the cached read connection, unless a query is using it. The
+    /// next query opens it again.
+    pub fn release_reader(&self) {
+        if let Ok(mut cached) = self.file_lock.try_lock() {
+            *cached = None;
+        }
+    }
+
+    #[cfg(test)]
+    pub fn has_open_reader(&self) -> bool {
+        self.file_lock.lock().is_ok_and(|cached| cached.is_some())
+    }
+
+    /// Deletes the leftover partial file of an interrupted import, if any.
+    pub fn remove_partial(&self) -> Result<(), StoreError> {
+        remove_if_exists(&self.partial_path())
+    }
+
+    /// Deletes the catalog and its directory (when empty). Fails, keeping the
+    /// catalog, when another program has it open.
+    pub fn delete_files(&self) -> Result<(), StoreError> {
+        let mut cached = self
+            .file_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        *cached = None;
+        remove_if_exists(&self.catalog_path())?;
+        remove_if_exists(&self.partial_path())?;
+        // Best effort: the directory may contain files YMDB did not create.
+        let _ = fs::remove_dir(&self.dir);
+        Ok(())
+    }
+
     /// Reads the metadata and statistics of the current catalog, or `None`
     /// when no catalog has been imported yet.
     pub fn read_info(&self) -> Result<Option<CatalogInfo>, StoreError> {

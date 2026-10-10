@@ -50,6 +50,7 @@ export interface LaunchConfig {
 
 /** Mirrors `LaunchConfigView` in `commands/launcher.rs`. */
 export interface LaunchConfigView {
+  installationId: string;
   config: LaunchConfig;
   definitions: OptionDefinition[];
   /** Set when `launch.json` could not be read; `config` is then the default. */
@@ -71,6 +72,8 @@ export interface MediaAssignment {
 
 /** Mirrors `LaunchRequest` in `launcher/mod.rs`. */
 export interface LaunchRequest {
+  /** The installation whose executable, catalog and launch options are used. */
+  installationId: string;
   machine: string;
   software?: { list: string; name: string; media: MediaAssignment[] };
   /** Omitted for the default profile. */
@@ -87,7 +90,14 @@ export type PlanArgument =
 
 /** Mirrors `LaunchPreview` in `launcher/mod.rs`. */
 export interface LaunchPreview {
-  plan: { executable: string; workingDirectory: string; arguments: PlanArgument[] };
+  plan: {
+    installationId: string;
+    /** The launch profile applied. */
+    profileId: string;
+    executable: string;
+    workingDirectory: string;
+    arguments: PlanArgument[];
+  };
   commandLine: string[];
   warnings: string[];
 }
@@ -155,6 +165,10 @@ export type SessionState =
 /** Mirrors `SessionInfo` in `session.rs`. */
 export interface SessionInfo {
   id: number;
+  /** The installation the session was started from. */
+  installationId: string;
+  /** Its name when the session started. */
+  installationLabel: string;
   target: LaunchTarget;
   title: string;
   commandLine: string[];
@@ -162,20 +176,25 @@ export interface SessionInfo {
   state: SessionState;
 }
 
-export function getLaunchConfig(): Promise<LaunchConfigView> {
-  return invokeCommand("get_launch_config");
+/** The launch configuration of one installation. */
+export function getLaunchConfig(installationId: string): Promise<LaunchConfigView> {
+  return invokeCommand("get_launch_config", { installationId });
 }
 
-export function saveLaunchConfig(config: LaunchConfig): Promise<LaunchConfigView> {
-  return invokeCommand("save_launch_config", { config });
+export function saveLaunchConfig(
+  installationId: string,
+  config: LaunchConfig,
+): Promise<LaunchConfigView> {
+  return invokeCommand("save_launch_config", { installationId, config });
 }
 
-/** Resolves to `null` when the software is not in the catalog. */
+/** Resolves to `null` when the software is not in the installation's catalog. */
 export function getSoftwareLaunchInfo(
+  installationId: string,
   list: string,
   name: string,
 ): Promise<SoftwareLaunchInfo | null> {
-  return invokeCommand("get_software_launch_info", { list, name });
+  return invokeCommand("get_software_launch_info", { installationId, list, name });
 }
 
 export function previewLaunch(request: LaunchRequest): Promise<LaunchPreview> {

@@ -77,12 +77,15 @@ impl Catalog {
     }
 }
 
+const INSTALLATION_ID: &str = "0123456789abcdef0123456789abcdef";
+
 fn executable() -> PathBuf {
     PathBuf::from("/home/user/Émulateurs MAME ✓/mame")
 }
 
 fn machine_request(machine: &str) -> LaunchRequest {
     LaunchRequest {
+        installation_id: INSTALLATION_ID.to_owned(),
         machine: machine.to_owned(),
         software: None,
         profile_id: None,
@@ -96,6 +99,7 @@ fn software_request(
     media: &[(&str, &str)],
 ) -> LaunchRequest {
     LaunchRequest {
+        installation_id: INSTALLATION_ID.to_owned(),
         machine: machine.to_owned(),
         software: Some(SoftwareSelection {
             list: list.to_owned(),

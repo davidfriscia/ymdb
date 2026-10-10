@@ -9,16 +9,20 @@ import type {
 import { sameTarget } from "./launcherApi";
 
 export interface LauncherContextValue {
-  /** `null` while loading or when it could not be loaded (see `error`). */
+  /**
+   * The launch configuration of the active installation; `null` while
+   * loading, without an active installation, or when it could not be loaded
+   * (see `error`). Check `view.installationId` before using it.
+   */
   view: LaunchConfigView | null;
   /** Why the launch configuration could not be loaded. */
   error: unknown;
   reloadConfig: () => void;
-  /** Incremented whenever the configuration is saved. */
+  /** Incremented whenever a configuration is saved. */
   configVersion: number;
-  /** Saves the whole configuration; rejects with the backend error. */
-  saveConfig: (config: LaunchConfig) => Promise<void>;
-  /** Sessions of this run, most recent first. */
+  /** Saves the whole configuration of an installation; rejects with the backend error. */
+  saveConfig: (installationId: string, config: LaunchConfig) => Promise<LaunchConfigView>;
+  /** Sessions of this run, from every installation, most recent first. */
   sessions: SessionInfo[];
   start: (request: LaunchRequest) => Promise<SessionInfo>;
   stop: (id: number) => Promise<void>;
@@ -34,10 +38,16 @@ export function useLauncher(): LauncherContextValue {
   return value;
 }
 
-/** The most recent session of a machine or software, if any. */
+/**
+ * The most recent session of a machine or software started from an
+ * installation, if any. The same target may run once per installation.
+ */
 export function latestSession(
   sessions: SessionInfo[],
   target: LaunchTarget,
+  installationId: string,
 ): SessionInfo | undefined {
-  return sessions.find((session) => sameTarget(session.target, target));
+  return sessions.find(
+    (session) => session.installationId === installationId && sameTarget(session.target, target),
+  );
 }

@@ -1,11 +1,12 @@
 //! Catalog search commands.
 //!
-//! Searches run on the blocking thread pool with the catalog store's cached
-//! read connection, so they never block the main thread.
+//! Every search names the installation whose catalog it reads. Searches run
+//! on the blocking thread pool with that catalog's cached read connection, so
+//! they never block the main thread.
 
 use tauri::State;
 
-use super::catalog::CatalogState;
+use super::installations::InstallationsState;
 use super::{CommandError, run_blocking};
 use crate::catalog::search::SearchError;
 use crate::catalog::search::machines::{MachineSearchResponse, search_machines};
@@ -15,31 +16,30 @@ use crate::catalog::store::CatalogStore;
 
 #[tauri::command]
 pub async fn search_catalog_machines(
+    installation_id: String,
     request: MachineSearchRequest,
-    catalog: State<'_, CatalogState>,
+    installations: State<'_, InstallationsState>,
 ) -> Result<MachineSearchResponse, CommandError> {
-    let store = catalog.store()?.clone();
+    let store = installations.resolve(&installation_id)?.catalog;
     run_blocking(move || search(&store, |connection| search_machines(connection, &request))).await?
 }
 
 #[tauri::command]
 pub async fn search_catalog_software(
+    installation_id: String,
     request: SoftwareSearchRequest,
-    catalog: State<'_, CatalogState>,
+    installations: State<'_, InstallationsState>,
 ) -> Result<SoftwareSearchResponse, CommandError> {
-    let store = catalog.store()?.clone();
+    let store = installations.resolve(&installation_id)?.catalog;
     run_blocking(move || search(&store, |connection| search_software(connection, &request))).await?
 }
 
-fn search<T>(
+pub(super) fn search<T>(
     store: &CatalogStore,
     query: impl FnOnce(&rusqlite::Connection) -> Result<T, SearchError>,
 ) -> Result<T, CommandError> {
     store
-        .with_reader(|connection| Ok(query(connection)))
-        .map_err(|error| CommandError::Internal {
-            message: error.to_string(),
-        })?
+        .with_reader(|connection| Ok(query(connection)))?
         .ok_or(CommandError::CatalogNotImported)?
         .map_err(|error| match error {
             SearchError::InvalidRequest(message) => CommandError::InvalidRequest { message },

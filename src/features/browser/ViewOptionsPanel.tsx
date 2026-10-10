@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { BrowserPreferences } from "./browserPreferences";
 import { RENDERERS, rendererById } from "./renderers/registry";
 import type { RendererOptionDefinition } from "./renderers/types";
@@ -5,13 +6,19 @@ import type { RendererOptionDefinition } from "./renderers/types";
 interface ViewOptionsPanelProps {
   preferences: BrowserPreferences;
   onPreferencesChange: (change: Partial<BrowserPreferences>) => void;
+  /** Sections shown before the view mode, such as the MAME version. */
+  children?: ReactNode;
 }
 
 /**
  * View mode and the options of the selected renderer, built from the renderer
  * definitions: registering a renderer needs no change here.
  */
-export function ViewOptionsPanel({ preferences, onPreferencesChange }: ViewOptionsPanelProps) {
+export function ViewOptionsPanel({
+  preferences,
+  onPreferencesChange,
+  children,
+}: ViewOptionsPanelProps) {
   const renderer = rendererById(preferences.renderer);
   const values = preferences.rendererOptions[renderer.id] ?? {};
 
@@ -26,6 +33,7 @@ export function ViewOptionsPanel({ preferences, onPreferencesChange }: ViewOptio
 
   return (
     <aside className="view-panel" aria-label="View options">
+      {children}
       <fieldset className="view-panel__section">
         <legend className="view-panel__title">View mode</legend>
         <div className="view-modes" role="radiogroup" aria-label="View mode">

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCatalogStatus } from "../test/catalogFixtures";
 import { launchConfigView } from "../test/launcherFixtures";
 import { mediaSourcesView } from "../test/mediaFixtures";
+import { installationsView, OLD_ID } from "../test/installationFixtures";
 import { App } from "./App";
 import { LEGACY_PREFERENCES_KEY, PREFERENCES_KEY } from "./preferences";
 
@@ -11,8 +12,10 @@ const invokeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
-const responses: Record<string, unknown> = {
-  get_mame_configuration: { executablePath: null, executableExists: false },
+let responses: Record<string, unknown> = {};
+
+const EMPTY: Record<string, unknown> = {
+  list_installations: installationsView([], null),
   get_catalog_status: emptyCatalogStatus,
   get_launch_config: launchConfigView(),
   get_launch_sessions: [],
@@ -25,6 +28,7 @@ function storedPreferences(): unknown {
 
 describe("App", () => {
   beforeEach(() => {
+    responses = EMPTY;
     localStorage.clear();
     delete document.documentElement.dataset.theme;
     invokeMock.mockReset();
@@ -49,20 +53,42 @@ describe("App", () => {
       "MAME",
       "Settings",
     ]);
-    expect(await screen.findByText("No catalog yet")).toBeInTheDocument();
+    expect(await screen.findByText("No MAME installation")).toBeInTheDocument();
   });
 
-  it("shows the MAME installation and catalog on the MAME page", async () => {
+  it("shows the MAME installations on the MAME page", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "Open MAME settings" }));
 
     expect(screen.getByRole("heading", { level: 1, name: "MAME" })).toBeVisible();
-    expect(screen.getByRole("heading", { level: 2, name: "MAME Installation" })).toBeVisible();
-    expect(screen.getByRole("heading", { level: 2, name: "MAME Catalog" })).toBeVisible();
-    expect(await screen.findByText("No MAME executable configured.")).toBeInTheDocument();
-    expect(await screen.findByText("No catalog has been imported yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "MAME Installations" })).toBeVisible();
+    expect(await screen.findByText(/No MAME installation is registered yet/)).toBeInTheDocument();
+  });
+
+  it("keeps interface preferences global when the MAME version changes", async () => {
+    responses = {
+      ...EMPTY,
+      list_installations: installationsView(),
+      set_active_installation: installationsView(undefined, OLD_ID),
+      get_catalog_status: emptyCatalogStatus,
+    };
+    localStorage.setItem(
+      PREFERENCES_KEY,
+      JSON.stringify({ theme: "dark", viewOptionsVisible: true, renderer: "mediaGrid" }),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    const before = storedPreferences();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "MAME version" }), OLD_ID);
+
+    expect(await screen.findByRole("combobox", { name: "MAME version" })).toHaveValue(OLD_ID);
+    expect(invokeMock).toHaveBeenCalledWith("set_active_installation", { installationId: OLD_ID });
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(storedPreferences()).toEqual(before);
+    expect(Object.keys(localStorage)).toEqual([PREFERENCES_KEY]);
   });
 
   it("shows the version and backend check in the settings", async () => {

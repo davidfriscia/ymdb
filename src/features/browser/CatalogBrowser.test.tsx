@@ -26,6 +26,10 @@ import { mediaSourcesView } from "../../test/mediaFixtures";
 import { CatalogBrowser } from "./CatalogBrowser";
 import { LauncherProvider } from "../launcher/LauncherProvider";
 import { launchConfigView } from "../../test/launcherFixtures";
+import { installation, installationsView, NEW_ID, OLD_ID } from "../../test/installationFixtures";
+import { InstallationsProvider } from "../installations/InstallationsProvider";
+import type { InstallationSummary } from "../installations/installationsApi";
+import { useInstallations } from "../installations/installationsContext";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -107,9 +111,21 @@ function machineSearch(
   };
 }
 
-function commands(overrides: Partial<Record<string, Handler>> = {}) {
+function commands(
+  overrides: Partial<Record<string, Handler>> = {},
+  installations: InstallationSummary[] = [
+    installation(NEW_ID, "0.280"),
+    installation(OLD_ID, "0.252"),
+  ],
+) {
+  let active: string | null = installations[0]?.id ?? null;
   backend({
-    get_catalog_status: () => catalogStatus(),
+    list_installations: () => installationsView(installations, active),
+    set_active_installation: (args) => {
+      active = args.installationId as string;
+      return installationsView(installations, active);
+    },
+    get_catalog_status: (args) => catalogStatus({ installationId: args.installationId as string }),
     search_catalog_machines: machineSearch(),
     get_launch_config: () => launchConfigView(),
     get_launch_sessions: () => [],
@@ -134,12 +150,41 @@ const lastRequest = () => resultRequests().at(-1);
 const lastFacetRequest = () => facetRequests().at(-1);
 const isResultRequest = (args: Args) => machineRequest(args).direction !== undefined;
 
+function ActiveLauncher({ children }: { children: ReactNode }) {
+  const { activeId } = useInstallations();
+  return (
+    <LauncherProvider
+      installationId={activeId}
+      showCommandPreview={false}
+      onShowCommandPreviewChange={() => undefined}
+    >
+      {children}
+    </LauncherProvider>
+  );
+}
+
+/** Switches the active installation from outside the browser, as the MAME page does. */
+function SwitchToOld() {
+  const { select } = useInstallations();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        select(OLD_ID);
+      }}
+    >
+      Activate MAME 0.252
+    </button>
+  );
+}
+
 function withLauncher(children: ReactNode) {
   return (
     <MediaProvider>
-      <LauncherProvider showCommandPreview={false} onShowCommandPreviewChange={() => undefined}>
-        {children}
-      </LauncherProvider>
+      <InstallationsProvider>
+        <SwitchToOld />
+        <ActiveLauncher>{children}</ActiveLauncher>
+      </InstallationsProvider>
     </MediaProvider>
   );
 }
@@ -629,7 +674,10 @@ describe("CatalogBrowser", () => {
       tile.focus();
       await user.keyboard("{Enter}");
       expect(await screen.findByRole("heading", { name: "Galaga" })).toBeInTheDocument();
-      expect(invokeMock).toHaveBeenCalledWith("get_machine_detail", { name: "galaga" });
+      expect(invokeMock).toHaveBeenCalledWith("get_machine_detail", {
+        installationId: NEW_ID,
+        name: "galaga",
+      });
     });
 
     it("requests software artwork by list and name", async () => {
@@ -715,7 +763,10 @@ describe("CatalogBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Next" }));
       expect(await screen.findByRole("heading", { name: "Ms. Pac-Man" })).toBeInTheDocument();
       expect(screen.getByText("2 / 3")).toBeInTheDocument();
-      expect(invokeMock).toHaveBeenCalledWith("get_machine_detail", { name: "mspacman" });
+      expect(invokeMock).toHaveBeenCalledWith("get_machine_detail", {
+        installationId: NEW_ID,
+        name: "mspacman",
+      });
     });
 
     it("shows the detail sections", async () => {
@@ -864,7 +915,11 @@ describe("CatalogBrowser", () => {
 
       await openCard("Super Mario Bros.");
       expect(await screen.findByRole("heading", { name: "Super Mario Bros." })).toBeInTheDocument();
-      expect(invokeMock).toHaveBeenCalledWith("get_software_detail", { list: "nes", name: "smb" });
+      expect(invokeMock).toHaveBeenCalledWith("get_software_detail", {
+        installationId: NEW_ID,
+        list: "nes",
+        name: "smb",
+      });
       await user.click(screen.getByRole("tab", { name: /Parts/ }));
       expect(screen.getByText("smb.prg")).toBeInTheDocument();
 
@@ -931,6 +986,221 @@ describe("CatalogBrowser", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent("could not be read");
       await user.click(screen.getByRole("button", { name: "Retry" }));
       expect(await screen.findByText("1–3 of 3 machines")).toBeInTheDocument();
+    });
+  });
+
+  describe("MAME versions", () => {
+    const withViewOptions: BrowserPreferences = { ...PREFERENCES, viewOptionsVisible: true };
+    const versionSelect = () =>
+      within(screen.getByRole("complementary", { name: "View options" })).getByRole("combobox", {
+        name: "MAME version",
+      });
+    /** The 0.252 catalog only has Pac-Man. */
+    const byInstallation: Handler = (args) =>
+      args.installationId === OLD_ID
+        ? machineSearch(MACHINES.slice(0, 1), { facets: facets([{ value: "Namco", count: 1 }]) })(
+            args,
+          )
+        : machineSearch()(args);
+    const searchCalls = () =>
+      invokeMock.mock.calls
+        .filter(([name]) => name === "search_catalog_machines")
+        .map(([, args]) => args as Args);
+
+    it("switches the catalog from the view options, keeping the search and the view", async () => {
+      commands({ search_catalog_machines: byInstallation });
+      const { user, onPreferencesChange } = renderBrowser({
+        preferences: withViewOptions,
+        debounceMs: 60_000,
+      });
+      await user.type(await screen.findByLabelText("Search text"), "pac{Enter}");
+      await waitFor(() => {
+        expect(lastRequest()?.text).toBe("pac");
+      });
+      const select = versionSelect();
+      expect(
+        within(select)
+          .getAllByRole("option")
+          .map((option) => option.textContent),
+      ).toEqual(["MAME 0.280", "MAME 0.252"]);
+      expect(select).toHaveValue(NEW_ID);
+
+      await user.selectOptions(select, OLD_ID);
+
+      expect(await screen.findByText("1–1 of 1 machines")).toBeInTheDocument();
+      expect(versionSelect()).toHaveValue(OLD_ID);
+      expect(invokeMock).toHaveBeenCalledWith("set_active_installation", {
+        installationId: OLD_ID,
+      });
+      expect(invokeMock).toHaveBeenCalledWith("get_catalog_status", { installationId: OLD_ID });
+      // Results and facets come from the new catalog, with the same search.
+      const latest = searchCalls().slice(-2);
+      expect(latest.map((args) => args.installationId)).toEqual([OLD_ID, OLD_ID]);
+      expect(lastRequest()?.text).toBe("pac");
+      expect(screen.getByLabelText("Search text")).toHaveValue("pac");
+      const filters = within(screen.getByRole("complementary", { name: "Filters" }));
+      expect(filters.getByRole("checkbox", { name: /Namco/ })).toHaveAccessibleName(/^Namco\s*1$/);
+      expect(filters.queryByRole("checkbox", { name: /Midway/ })).not.toBeInTheDocument();
+      // The renderer and its options are interface preferences: unchanged.
+      expect(onPreferencesChange).not.toHaveBeenCalled();
+    });
+
+    it("never shows results of the previously selected catalog", async () => {
+      const slow = deferred<unknown>();
+      let delayed = false;
+      commands({
+        search_catalog_machines: (args) => {
+          if (args.installationId === NEW_ID && isResultRequest(args) && !delayed) {
+            delayed = true;
+            return slow.promise;
+          }
+          return byInstallation(args);
+        },
+      });
+      const { user } = renderBrowser({ preferences: withViewOptions });
+      await user.selectOptions(
+        await screen.findByRole("combobox", { name: "MAME version" }),
+        OLD_ID,
+      );
+      expect(await screen.findByText("1–1 of 1 machines")).toBeInTheDocument();
+
+      // The response for 0.280 arrives after the switch: it is ignored.
+      slow.resolve(response(MACHINES, { facets: facets() }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(screen.getByText("1–1 of 1 machines")).toBeInTheDocument();
+      expect(results().queryByText("Galaga")).not.toBeInTheDocument();
+    });
+
+    it("does not keep the previous catalog's results while the new one is searched", async () => {
+      const slow = deferred<unknown>();
+      commands({
+        search_catalog_machines: (args) =>
+          args.installationId === OLD_ID && isResultRequest(args)
+            ? slow.promise
+            : byInstallation(args),
+      });
+      const { user } = renderBrowser({ preferences: withViewOptions });
+      expect(await screen.findByText("1–3 of 3 machines")).toBeInTheDocument();
+
+      await user.selectOptions(versionSelect(), OLD_ID);
+      expect(await screen.findByText("Searching…")).toBeInTheDocument();
+      expect(screen.queryByText("Galaga")).not.toBeInTheDocument();
+
+      slow.resolve(
+        machineSearch(MACHINES.slice(0, 1))({ request: { page: 0, direction: "ascending" } }),
+      );
+      expect(await screen.findByText("1–1 of 1 machines")).toBeInTheDocument();
+    });
+
+    it("closes the details of the previous catalog", async () => {
+      commands({
+        search_catalog_machines: byInstallation,
+        get_machine_detail: (args) => machineDetail(args.name as string),
+      });
+      const { user } = renderBrowser();
+      await openCard("Galaga");
+      expect(
+        await screen.findByRole("heading", { name: "galaga description" }),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Activate MAME 0.252" }));
+
+      expect(await screen.findByText("1–1 of 1 machines")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "galaga description" })).not.toBeInTheDocument();
+      expect(invokeMock).not.toHaveBeenCalledWith("get_machine_detail", {
+        installationId: OLD_ID,
+        name: "galaga",
+      });
+    });
+
+    it("keeps the filters and says that missing values match nothing", async () => {
+      commands({ search_catalog_machines: byInstallation });
+      const { user } = renderBrowser({ preferences: withViewOptions });
+      await screen.findByText("1–3 of 3 machines");
+      await user.click(screen.getByRole("checkbox", { name: /Midway/ }));
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({ manufacturers: ["Midway"] });
+      });
+
+      await user.selectOptions(versionSelect(), OLD_ID);
+
+      expect(
+        await screen.findByText(/The filters were kept after changing the MAME version/),
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(searchCalls().at(-1)?.installationId).toBe(OLD_ID);
+      });
+      expect(lastRequest()).toMatchObject({ page: 0, filters: { manufacturers: ["Midway"] } });
+      // A kept value missing from the new catalog stays visible, without a count.
+      expect(screen.getByRole("checkbox", { name: /Midway/ })).toBeChecked();
+
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(
+        screen.queryByText(/The filters were kept after changing the MAME version/),
+      ).not.toBeInTheDocument();
+      expect(lastRequest()?.filters).toEqual({ manufacturers: ["Midway"] });
+    });
+
+    it("shows an installation without catalog and lets the user switch back", async () => {
+      commands(
+        {
+          search_catalog_machines: byInstallation,
+          get_catalog_status: (args) =>
+            args.installationId === OLD_ID
+              ? { ...emptyCatalogStatus, installationId: OLD_ID }
+              : catalogStatus(),
+        },
+        [installation(NEW_ID, "0.280"), installation(OLD_ID, "0.252", { catalogImported: false })],
+      );
+      const { user } = renderBrowser({ preferences: withViewOptions });
+      await screen.findByText("1–3 of 3 machines");
+      expect(
+        within(versionSelect()).getByRole("option", { name: "MAME 0.252 — no catalog" }),
+      ).toBeInTheDocument();
+
+      await user.selectOptions(versionSelect(), OLD_ID);
+
+      expect(await screen.findByText("No catalog yet")).toBeInTheDocument();
+      expect(searchCalls().some((args) => args.installationId === OLD_ID)).toBe(false);
+      await user.selectOptions(screen.getByRole("combobox", { name: "MAME version" }), NEW_ID);
+      expect(await screen.findByText("1–3 of 3 machines")).toBeInTheDocument();
+    });
+
+    it("saves quick successive selections in order", async () => {
+      const first = deferred<unknown>();
+      const saved: string[] = [];
+      commands({
+        search_catalog_machines: byInstallation,
+        set_active_installation: (args) => {
+          saved.push(args.installationId as string);
+          const view = installationsView(undefined, args.installationId as string);
+          return saved.length === 1 ? first.promise.then(() => view) : view;
+        },
+      });
+      const { user } = renderBrowser({ preferences: withViewOptions });
+      await screen.findByText("1–3 of 3 machines");
+
+      await user.selectOptions(versionSelect(), OLD_ID);
+      await user.selectOptions(versionSelect(), NEW_ID);
+      // The second selection waits for the first one to be saved.
+      expect(saved).toEqual([OLD_ID]);
+      expect(versionSelect()).toHaveValue(NEW_ID);
+      first.resolve(undefined);
+      await waitFor(() => {
+        expect(saved).toEqual([OLD_ID, NEW_ID]);
+      });
+      expect(versionSelect()).toHaveValue(NEW_ID);
+      expect(await screen.findByText("1–3 of 3 machines")).toBeInTheDocument();
+    });
+
+    it("explains that no installation is registered", async () => {
+      commands({}, []);
+      const { user, onOpenMame } = renderBrowser();
+
+      expect(await screen.findByText("No MAME installation")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Open MAME settings" }));
+      expect(onOpenMame).toHaveBeenCalled();
+      expect(invokeMock).not.toHaveBeenCalledWith("get_catalog_status", expect.anything());
     });
   });
 });

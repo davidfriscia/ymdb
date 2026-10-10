@@ -30,7 +30,7 @@ export function formatVersion(version: MameVersion): string {
 export function describeSource(source: CandidateSource): string {
   switch (source) {
     case "configured":
-      return "Current configuration";
+      return "Active installation";
     case "path":
       return "Found in PATH";
     case "conventional":

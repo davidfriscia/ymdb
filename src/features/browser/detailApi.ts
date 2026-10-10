@@ -231,15 +231,25 @@ export interface SoftwareListDetail {
   compatibleMachineCount: number;
 }
 
-/** Resolves to `null` when the machine is not in the catalog. */
-export function getMachineDetail(name: string): Promise<MachineDetail | null> {
-  return invokeCommand("get_machine_detail", { name });
+/** Resolves to `null` when the machine is not in the installation's catalog. */
+export function getMachineDetail(
+  installationId: string,
+  name: string,
+): Promise<MachineDetail | null> {
+  return invokeCommand("get_machine_detail", { installationId, name });
 }
 
-export function getSoftwareDetail(list: string, name: string): Promise<SoftwareDetail | null> {
-  return invokeCommand("get_software_detail", { list, name });
+export function getSoftwareDetail(
+  installationId: string,
+  list: string,
+  name: string,
+): Promise<SoftwareDetail | null> {
+  return invokeCommand("get_software_detail", { installationId, list, name });
 }
 
-export function getSoftwareListDetail(name: string): Promise<SoftwareListDetail | null> {
-  return invokeCommand("get_software_list_detail", { name });
+export function getSoftwareListDetail(
+  installationId: string,
+  name: string,
+): Promise<SoftwareListDetail | null> {
+  return invokeCommand("get_software_list_detail", { installationId, name });
 }

@@ -4,6 +4,7 @@ import { useLoader } from "../../../shared/useLoader";
 import { formatCount } from "../../catalog/catalogMessages";
 import { searchMachines, searchSoftware } from "../../search/searchApi";
 import type { DetailTarget } from "../browserState";
+import { useInstallationScope } from "../../installations/installationsContext";
 
 const RELATED_PAGE_SIZE = 20;
 
@@ -24,6 +25,7 @@ interface RelatedPage {
 }
 
 async function loadRelated(
+  installationId: string,
   kind: RelatedKind,
   name: string,
   list: string,
@@ -31,7 +33,7 @@ async function loadRelated(
 ): Promise<RelatedPage> {
   const common = { page, pageSize: RELATED_PAGE_SIZE, sort: "description" } as const;
   if (kind === "machineClones" || kind === "listMachines") {
-    const response = await searchMachines({
+    const response = await searchMachines(installationId, {
       ...common,
       filters: kind === "machineClones" ? { cloneOf: name } : { softwareLists: [list] },
     });
@@ -46,7 +48,7 @@ async function loadRelated(
       })),
     };
   }
-  const response = await searchSoftware({
+  const response = await searchSoftware(installationId, {
     ...common,
     filters: kind === "softwareClones" ? { lists: [list], cloneOf: name } : { lists: [list] },
   });
@@ -82,7 +84,11 @@ export function RelatedList({
   onOpen,
 }: RelatedListProps) {
   const [page, setPage] = useState(0);
-  const load = useCallback(() => loadRelated(kind, name, list, page), [kind, name, list, page]);
+  const installationId = useInstallationScope();
+  const load = useCallback(
+    () => loadRelated(installationId, kind, name, list, page),
+    [installationId, kind, name, list, page],
+  );
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status === "loading") {

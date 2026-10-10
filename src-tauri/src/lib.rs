@@ -4,6 +4,7 @@ mod atomic_file;
 mod catalog;
 mod commands;
 mod health;
+mod installations;
 mod launcher;
 mod mame;
 mod media;
@@ -14,15 +15,13 @@ use std::path::PathBuf;
 
 use tauri::Manager;
 
-use crate::catalog::store::CatalogStore;
-use crate::commands::SettingsState;
 use crate::commands::catalog::CatalogState;
+use crate::commands::installations::InstallationsState;
 use crate::commands::launcher::LauncherState;
 use crate::commands::media::MediaState;
-use crate::launcher::store::LaunchConfigStore;
+use crate::installations::AppLayout;
 use crate::media::config::MediaConfigStore;
 use crate::media::protocol::SCHEME;
-use crate::settings::SettingsStore;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,27 +39,31 @@ pub fn run() {
             // Missing directories are reported by the commands that need them
             // instead of preventing the application from starting.
             let (config_dir, data_dir) = app_dirs(app.path());
-            let settings = config_dir.as_deref().map(SettingsStore::in_dir);
-            // The catalog is large, machine-specific derived data: it belongs
-            // in the local (non-roaming) data directory.
-            let catalog = data_dir.as_deref().map(CatalogStore::in_dir);
-            let launch_config = config_dir.as_deref().map(LaunchConfigStore::in_dir);
+            // Catalogs are large, machine-specific derived data: they belong
+            // in the local (non-roaming) data directory. Loading the registry
+            // upgrades the single-installation layout if needed; MAME is not run.
+            let layout = config_dir
+                .as_deref()
+                .zip(data_dir.as_deref())
+                .map(|(config, data)| AppLayout::new(config, data));
             let launch_logs = data_dir.as_ref().map(|dir| dir.join("launch-logs"));
             let media = config_dir.as_deref().map(MediaConfigStore::in_dir);
-            app.manage(SettingsState::new(settings));
-            app.manage(CatalogState::new(catalog));
-            app.manage(LauncherState::new(launch_config, launch_logs));
+            app.manage(InstallationsState::new(layout));
+            app.manage(CatalogState::default());
+            app.manage(LauncherState::new(launch_logs));
             app.manage(MediaState::new(media));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::check_health,
-            commands::mame::get_mame_configuration,
             commands::mame::pick_mame_executable,
-            commands::mame::set_mame_executable,
-            commands::mame::verify_mame_configuration,
-            commands::mame::clear_mame_configuration,
             commands::mame::detect_mame_installations,
+            commands::installations::list_installations,
+            commands::installations::add_installation,
+            commands::installations::verify_installation,
+            commands::installations::rename_installation,
+            commands::installations::set_active_installation,
+            commands::installations::remove_installation,
             commands::catalog::get_catalog_status,
             commands::catalog::get_catalog_import_status,
             commands::catalog::start_catalog_import,

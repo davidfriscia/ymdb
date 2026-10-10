@@ -1,8 +1,8 @@
-//! Whether a catalog still matches the configured MAME executable.
+//! Whether a catalog still matches the executable of its MAME installation.
 //!
 //! The check never runs MAME: it compares the path, size and modification
-//! time recorded at import time with the configured executable. A catalog is
-//! never assumed to be valid for a different executable or an updated one.
+//! time recorded at import time with the installation's executable. A catalog
+//! is never assumed to be valid for a different executable or an updated one.
 
 use std::fs;
 use std::path::Path;
@@ -11,30 +11,26 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 
 use super::store::CatalogInfo;
+use crate::mame::platform;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CatalogFreshness {
-    /// Imported from the configured executable, which has not changed since.
+    /// Imported from the installation's executable, which has not changed since.
     Current,
-    /// The configured executable was modified (for example updated in place).
+    /// The executable was modified (for example updated in place).
     ExecutableChanged,
     /// The catalog was imported from another executable.
     DifferentExecutable,
-    /// The configured executable no longer exists.
+    /// The executable no longer exists.
     ExecutableMissing,
-    /// No MAME executable is configured.
-    MameNotConfigured,
 }
 
-pub fn check_freshness(info: &CatalogInfo, configured: Option<&Path>) -> CatalogFreshness {
-    let Some(configured) = configured else {
-        return CatalogFreshness::MameNotConfigured;
-    };
-    if configured != info.executable_path {
+pub fn check_freshness(info: &CatalogInfo, executable: &Path) -> CatalogFreshness {
+    if !platform::same_executable(executable, &info.executable_path) {
         return CatalogFreshness::DifferentExecutable;
     }
-    let Ok(metadata) = fs::metadata(configured) else {
+    let Ok(metadata) = fs::metadata(executable) else {
         return CatalogFreshness::ExecutableMissing;
     };
     let modified_at = metadata
@@ -102,27 +98,23 @@ mod tests {
         let info = info_for(&executable);
 
         assert_eq!(
-            check_freshness(&info, Some(&executable)),
+            check_freshness(&info, &executable),
             CatalogFreshness::Current
         );
         assert_eq!(
-            check_freshness(&info, None),
-            CatalogFreshness::MameNotConfigured
-        );
-        assert_eq!(
-            check_freshness(&info, Some(&PathBuf::from("/other/mame"))),
+            check_freshness(&info, &PathBuf::from("/other/mame")),
             CatalogFreshness::DifferentExecutable
         );
 
         fs::write(&executable, "build 2 with a different size").expect("rewrite");
         assert_eq!(
-            check_freshness(&info, Some(&executable)),
+            check_freshness(&info, &executable),
             CatalogFreshness::ExecutableChanged
         );
 
         fs::remove_file(&executable).expect("remove");
         assert_eq!(
-            check_freshness(&info, Some(&executable)),
+            check_freshness(&info, &executable),
             CatalogFreshness::ExecutableMissing
         );
     }

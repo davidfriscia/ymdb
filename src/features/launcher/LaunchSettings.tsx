@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { describeError } from "../../shared/ipc";
+import { useLoader } from "../../shared/useLoader";
+import {
+  InstallationScope,
+  useInstallationScope,
+  useInstallations,
+} from "../installations/installationsContext";
 import {
   DEFAULT_PROFILE_ID,
+  getLaunchConfig,
   profileId,
   type LaunchConfig,
   type OptionDefinition,
@@ -12,11 +19,19 @@ import { useLauncher } from "./launcherContext";
 import { OptionSetEditor } from "./OptionSetEditor";
 import { describeValue, omit } from "./optionValues";
 
-/** Settings page section: global options, profiles and overrides. */
+/**
+ * Settings page section: global options, profiles and overrides of one MAME
+ * installation. Each installation has its own; changing one never changes
+ * another.
+ */
 export function LaunchSettings() {
-  const { view, error, reloadConfig, configVersion } = useLauncher();
-  // Kept here: the sections below are remounted after each save.
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const { installations, activeId, labels } = useInstallations();
+  const [chosenId, setChosenId] = useState<string | null>(null);
+  // The active installation until the user chooses another one.
+  const selectedId =
+    chosenId !== null && installations.some((installation) => installation.id === chosenId)
+      ? chosenId
+      : activeId;
   return (
     <section className="panel" aria-labelledby="launch-settings-title">
       <h2 id="launch-settings-title" className="panel__title">
@@ -27,36 +42,86 @@ export function LaunchSettings() {
         (mame.ini), which YMDB never modifies. Precedence, from lowest to highest: MAME
         configuration, global options, launch profile, machine options, software options.
       </p>
-      {error !== null && (
-        <div className="state-message" role="alert">
-          <p className="message message--error">
-            The launch options could not be loaded: {describeError(error)}
+      {installations.length === 0 ? (
+        <p className="message message--muted">
+          Add a MAME installation on the MAME page to configure its launch options.
+        </p>
+      ) : (
+        <>
+          <label className="field">
+            <span className="field__label">Installation</span>
+            <select
+              className="input"
+              value={selectedId ?? ""}
+              onChange={(event) => {
+                setChosenId(event.target.value);
+              }}
+            >
+              {selectedId === null && <option value="">Select an installation</option>}
+              {installations.map((installation) => (
+                <option key={installation.id} value={installation.id}>
+                  {labels.get(installation.id)}
+                  {installation.id === activeId ? " (active)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="message message--muted">
+            Each MAME installation has its own global options, profiles and overrides, because
+            option and device names can change between versions.
           </p>
-          <button type="button" className="button button--secondary" onClick={reloadConfig}>
-            Retry
-          </button>
-        </div>
+          {selectedId !== null && (
+            <InstallationScope value={selectedId}>
+              <InstallationLaunchSettings key={selectedId} installationId={selectedId} />
+            </InstallationScope>
+          )}
+        </>
       )}
-      {view?.loadError && (
+    </section>
+  );
+}
+
+function InstallationLaunchSettings({ installationId }: { installationId: string }) {
+  const { configVersion } = useLauncher();
+  const load = useCallback(() => getLaunchConfig(installationId), [installationId]);
+  // Saved options (here or in a detail view) are read again.
+  const { state, reload } = useLoader(load, configVersion);
+  // Kept here: the sections below are remounted after each save.
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+
+  if (state.status === "loading") return <p className="message message--muted">Loading…</p>;
+  if (state.status === "error") {
+    return (
+      <div className="state-message" role="alert">
+        <p className="message message--error">
+          The launch options could not be loaded: {describeError(state.error)}
+        </p>
+        <button type="button" className="button button--secondary" onClick={reload}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  const view = state.value;
+  return (
+    <>
+      {view.loadError && (
         <p className="message message--warning" role="alert">
           {view.loadError}. The defaults are shown; saving replaces the file.
         </p>
       )}
-      {view === null && error === null && <p className="message message--muted">Loading…</p>}
-      {view && (
-        // Remounted after each save so that drafts start from the saved configuration.
-        <div key={configVersion}>
-          <GlobalOptions config={view.config} definitions={view.definitions} />
-          <Profiles
-            config={view.config}
-            definitions={view.definitions}
-            selectedId={selectedProfileId ?? view.config.defaultProfileId}
-            onSelect={setSelectedProfileId}
-          />
-          <Overrides config={view.config} />
-        </div>
-      )}
-    </section>
+      {/* Remounted after each save so that drafts start from the saved configuration. */}
+      <div key={configVersion}>
+        <GlobalOptions config={view.config} definitions={view.definitions} />
+        <Profiles
+          config={view.config}
+          definitions={view.definitions}
+          selectedId={selectedProfileId ?? view.config.defaultProfileId}
+          onSelect={setSelectedProfileId}
+        />
+        <Overrides config={view.config} />
+      </div>
+    </>
   );
 }
 
@@ -66,6 +131,7 @@ interface SectionProps {
 }
 
 function useSave() {
+  const installationId = useInstallationScope();
   const { saveConfig } = useLauncher();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +139,7 @@ function useSave() {
     setSaving(true);
     setError(null);
     try {
-      await saveConfig(config);
+      await saveConfig(installationId, config);
       return true;
     } catch (saveError) {
       setError(describeError(saveError));

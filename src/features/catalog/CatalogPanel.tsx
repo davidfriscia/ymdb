@@ -22,9 +22,13 @@ import {
   importSubject,
   itemsLabel,
 } from "./catalogMessages";
+import type { InstallationSummary } from "../installations/installationsApi";
+import { useInstallations } from "../installations/installationsContext";
 
 interface CatalogPanelProps {
-  /** Changes whenever the MAME configuration changes, to refresh the status. */
+  /** The installation whose catalog is shown and imported. */
+  installation: InstallationSummary;
+  /** Changes whenever a catalog may have changed, to refresh the status. */
   refreshKey?: number;
   /** Interval between import status queries while an import runs. */
   pollIntervalMs?: number;
@@ -33,6 +37,7 @@ interface CatalogPanelProps {
 }
 
 export function CatalogPanel({
+  installation,
   refreshKey = 0,
   pollIntervalMs = 500,
   onCatalogChanged,
@@ -41,11 +46,16 @@ export function CatalogPanel({
   const [importStatus, setImportStatus] = useState<ImportStatus>({ state: "idle" });
   const [pending, setPending] = useState<"start" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { labels } = useInstallations();
+  const installationId = installation.id;
   const running = importStatus.state === "running";
+  // Only one import runs at a time, possibly for another installation.
+  const importHere =
+    importStatus.state === "idle" || importStatus.installationId === installationId;
 
   useEffect(() => {
     let active = true;
-    getCatalogStatus().then(
+    getCatalogStatus(installationId).then(
       (loaded) => {
         if (!active) return;
         setStatus(loaded);
@@ -58,7 +68,7 @@ export function CatalogPanel({
     return () => {
       active = false;
     };
-  }, [refreshKey]);
+  }, [installationId, refreshKey]);
 
   useEffect(() => {
     if (!running) return;
@@ -78,7 +88,7 @@ export function CatalogPanel({
         // The import ended: read the (possibly new) catalog before leaving the
         // running state, which stops this effect.
         if (!isActive()) return;
-        const refreshed = await getCatalogStatus();
+        const refreshed = await getCatalogStatus(installationId);
         if (!isActive()) return;
         setStatus(refreshed);
         setImportStatus(next);
@@ -93,7 +103,7 @@ export function CatalogPanel({
       polling.active = false;
       window.clearTimeout(polling.timer);
     };
-  }, [running, pollIntervalMs, onCatalogChanged]);
+  }, [running, installationId, pollIntervalMs, onCatalogChanged]);
 
   async function run(action: "start" | "cancel", work: () => Promise<ImportStatus>) {
     setPending(action);
@@ -111,14 +121,14 @@ export function CatalogPanel({
   const software = catalog?.software ?? null;
   const freshness = status?.freshness ? describeFreshness(status.freshness) : null;
   const idle = !running && pending === null;
-  const canImportMachines = status?.mameConfigured === true && idle;
+  const canImportMachines = status !== null && installation.executableStatus !== "missing" && idle;
   // Software lists must come from the executable the machines came from.
   const canImportSoftware = catalog !== null && status?.freshness === "current" && idle;
 
   return (
     <section className="panel" aria-labelledby="catalog-title" aria-busy={running}>
       <h2 id="catalog-title" className="panel__title">
-        MAME Catalog
+        Catalog of {labels.get(installationId) ?? installation.label}
       </h2>
 
       {status === null && error === null && (
@@ -165,7 +175,16 @@ export function CatalogPanel({
         </>
       )}
 
-      <ImportState status={importStatus} />
+      {importHere ? (
+        <ImportState status={importStatus} />
+      ) : (
+        running && (
+          <p className="message message--muted" role="status">
+            An import of {labels.get(importStatus.installationId) ?? "another installation"} is
+            running. Only one import runs at a time.
+          </p>
+        )
+      )}
 
       {error && (
         <p className="message message--error" role="alert">
@@ -177,7 +196,7 @@ export function CatalogPanel({
         <button
           type="button"
           className="button"
-          onClick={() => void run("start", startCatalogImport)}
+          onClick={() => void run("start", () => startCatalogImport(installationId))}
           disabled={!canImportMachines}
         >
           {catalog ? "Reimport machines" : "Import catalog"}
@@ -185,12 +204,12 @@ export function CatalogPanel({
         <button
           type="button"
           className="button"
-          onClick={() => void run("start", startSoftwareListImport)}
+          onClick={() => void run("start", () => startSoftwareListImport(installationId))}
           disabled={!canImportSoftware}
         >
           {software ? "Update software lists" : "Import software lists"}
         </button>
-        {running && (
+        {running && importHere && (
           <button
             type="button"
             className="button button--secondary"

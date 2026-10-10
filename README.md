@@ -85,30 +85,55 @@ To run YMDB with separate, empty data (for tests or a portable setup), set
 `YMDB_DATA_DIR` to a directory: settings, catalog, launch and media configuration are
 then stored in its `config/` and `data/` subdirectories instead of the user's.
 
-## Configuring MAME
+## MAME installations
 
-YMDB uses a MAME installation that already exists on your computer. It never
-downloads or installs MAME, and it does not require administrator privileges. Portable
+YMDB uses MAME installations that already exist on your computer. It never downloads
+or installs MAME, and it does not require administrator privileges. Portable
 installations and custom builds are supported, as long as they support the
 `-version` option and print the standard MAME version line. This was verified with
-MAME 0.240 and 0.280; older releases such as MAME 0.162 do not support it.
+MAME 0.240, 0.252 and 0.280; older releases such as MAME 0.162 do not support it.
 
-On the **MAME** page, in the **MAME Installation** panel:
+You can register any number of installations, including several builds of the same
+version: each one is identified by an internal id, never by its version. Each
+installation has its own catalog and its own launch options; media sources and
+interface preferences are shared by all of them. One installation is **active**: the
+catalog browser shows its catalog and new launches use its executable.
 
-- **Select executable…** opens the native file picker. Choose the MAME program file
+On the **MAME** page, the **MAME Installations** panel lists the registered
+installations with their version, executable, catalog and status:
+
+- **Add installation…** opens the native file picker. Choose the MAME program file
   (`mame.exe` on Windows, usually `mame` on macOS and Linux). YMDB validates it and
-  saves it only if validation succeeds.
+  registers it only if validation succeeds. Adding an installation never changes the
+  others, and its catalog is not imported until you ask for it. The same executable
+  cannot be registered twice (paths are compared with the operating system's rules:
+  case-insensitively on Windows and macOS, after resolving links).
 - **Detect installations** looks for MAME in the directories listed in `PATH` and in
   a few standard installation directories (non-recursively), then validates each
-  candidate. Detection never changes your configuration: choose
-  **Use this installation** to adopt a detected executable.
-- **Verify** runs the configured executable again and shows the detected version,
-  the validation status, the time of the check and the raw output of the version
-  command.
-- **Remove configuration** forgets the configured executable.
+  candidate. Detection never changes the registered installations: choose **Add** to
+  register a detected executable.
+- **Manage** selects an installation; the panels below then apply to it only:
+  - **Set as active** makes it the active installation (MAME is not started).
+  - **Verify** runs its executable again and shows the detected version, the
+    validation status, the time of the check and the raw output of the version
+    command. A valid result updates the recorded version.
+  - **Rename…** gives it a name; an empty name shows the version again.
+  - **Remove…** asks for confirmation and unregisters it. You choose whether to also
+    delete its imported catalog (checked by default: it is derived data that can be
+    imported again) and its launch options (unchecked by default). The MAME
+    executable and MAME's own files (ROMs, CHDs, artwork, INI files) are never
+    deleted. Removal is refused while a catalog import of the installation or a MAME
+    session started from it is running. When the active installation is removed,
+    the first remaining installation in registration order becomes active.
+  - **Catalog of …** imports and shows that installation's catalog (see below).
 
-When YMDB starts, it shows the saved executable path without running it, and warns
-if the file no longer exists.
+The executable of an installation never changes. To use another executable (for
+example a new MAME release in another folder), add it as a new installation. If an
+executable is updated in place, the installation shows that it changed: verify it
+and import its catalog again.
+
+When YMDB starts, it shows the registered installations without running MAME, and
+warns about executables that no longer exist or have changed.
 
 ### Validation
 
@@ -118,26 +143,40 @@ prints a MAME version line such as `0.280 (mame0280)`. A program that runs
 successfully but prints anything else is not accepted. Each failure is reported with
 a specific reason: file not found, not a file, not executable, failed to start, timed
 out, unexpected exit code, or unrecognized output. See
-[ARCHITECTURE.md](ARCHITECTURE.md#mame-integration--implemented-installation-management-only)
-for the exact rules.
+[ARCHITECTURE.md](ARCHITECTURE.md#mame-integration--implemented) for the exact rules.
 
-### Settings location
+### Where installations are stored
 
-Settings are stored in `settings.json` in the application configuration directory:
+The registered installations and the active one are stored in `installations.json`
+in the application configuration directory:
 
-| Platform | Location                                                                  |
-| -------- | ------------------------------------------------------------------------- |
-| Windows  | `%APPDATA%\io.github.davidfriscia.ymdb\settings.json`                     |
-| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/settings.json` |
-| Linux    | `~/.config/io.github.davidfriscia.ymdb/settings.json`                     |
+| Platform | Location                                                                       |
+| -------- | ------------------------------------------------------------------------------ |
+| Windows  | `%APPDATA%\io.github.davidfriscia.ymdb\installations.json`                     |
+| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/installations.json` |
+| Linux    | `~/.config/io.github.davidfriscia.ymdb/installations.json`                     |
 
-The file only contains the path of the selected MAME executable. The MAME version is
-read again on every verification and is not stored.
+Each installation's launch options are in `installations/<id>/launch.json` next to it,
+and its catalog in `installations/<id>/catalog.sqlite` in the local data directory
+(see below).
+
+### Upgrading from a single installation
+
+Earlier versions of YMDB managed one executable (`settings.json`), one catalog and one
+`launch.json`. On the first start, YMDB registers that executable as an installation
+and gives it the existing catalog (moved, not imported again) and launch options
+(copied). The old `settings.json` and `launch.json` are left untouched as a backup.
+MAME is not run: the version comes from the catalog. If the catalog was imported
+from another executable than the configured one, it is given to a separate
+installation for that executable. If the upgrade cannot complete (for example because
+another program has the catalog open), nothing is deleted and YMDB retries on the next
+attempt. See [ARCHITECTURE.md](ARCHITECTURE.md#migration-from-the-single-installation-layout).
 
 ## MAME catalog
 
-Once MAME is configured, the **MAME Catalog** panel of the **MAME** page imports the machines and the
-software lists known to that MAME build:
+Every installation has its own catalog. The **Catalog of …** panel of the **MAME**
+page imports, for the installation selected there, the machines and the software
+lists known to its MAME build:
 
 - **Import catalog** (or **Reimport machines**) runs `<mame> -listxml`, reads its
   output as a stream and stores the machines in a local SQLite database. With MAME
@@ -152,30 +191,32 @@ software lists known to that MAME build:
   keeping the kind of relation (original or compatible) and the machine's filter.
 - While importing, the panel shows an indeterminate progress bar and the number of
   machines or software processed. **Cancel import** stops MAME and discards the
-  partial import.
+  partial import. One import runs at a time; it stays attached to its installation
+  even if you change the active installation meanwhile.
 - The panel shows the MAME version, import date and a summary for machines and for
   software lists.
-- If the configured MAME executable changes (another file, or the same file updated),
-  the panel warns that the catalog no longer matches it. Reimport to update it.
-  Reimporting machines starts a new catalog without software lists; import the
-  software lists again afterwards.
+- If the installation's executable changes (the same file updated), the panel warns
+  that the catalog no longer matches it. Reimport to update it. Reimporting machines
+  starts a new catalog without software lists; import the software lists again
+  afterwards.
 
 Imports are atomic: a new catalog is built in a separate file and replaces the
 previous one only when the import succeeds. If MAME fails, the output cannot be
 parsed, the database cannot be written, or the import is cancelled, the previous
-catalog (machines and software lists) stays available. If another program keeps the
-catalog file open, Windows prevents its replacement: the import fails with a message
-asking to close that program, and the previous catalog is kept.
+catalog (machines and software lists) stays available. Importing one installation
+never changes another installation's catalog. If another program keeps the catalog
+file open, Windows prevents its replacement: the import fails with a message asking to
+close that program, and the previous catalog is kept.
 
-The catalog is stored in `catalog.sqlite` in the application local data directory:
+Catalogs are stored in the application local data directory, one per installation:
 
-| Platform | Location                                                                   |
-| -------- | -------------------------------------------------------------------------- |
-| Windows  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb\catalog.sqlite`                |
-| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/catalog.sqlite` |
-| Linux    | `~/.local/share/io.github.davidfriscia.ymdb/catalog.sqlite`                |
+| Platform | Location                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------- |
+| Windows  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb\installations\<id>\catalog.sqlite`                |
+| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/installations/<id>/catalog.sqlite` |
+| Linux    | `~/.local/share/io.github.davidfriscia.ymdb/installations/<id>/catalog.sqlite`                |
 
-The file contains only data derived from MAME and can be deleted at any time; it is
+A catalog contains only data derived from MAME and can be deleted at any time; it is
 rebuilt by the next import. See
 [ARCHITECTURE.md](ARCHITECTURE.md#catalog--implemented-machines-and-software-lists) for
 the schema, the imported and deferred information, and the import strategy.
@@ -202,7 +243,8 @@ are opened.
 
 ## Browsing the catalog
 
-The **Catalog** page (the start page) browses the imported machines or software:
+The **Catalog** page (the start page) browses the imported machines or software of
+the active MAME installation:
 
 - Choose **Machines** or **Software**, type a text (the search starts when you pause
   typing, or press Enter or **Search**), pick a sort order and direction.
@@ -214,7 +256,15 @@ The **Catalog** page (the start page) browses the imported machines or software:
   search and **Show more**. Active filters appear as chips above the results; remove
   them one by one or with **Clear all filters**. The **Filters** button hides the
   panel to give the results the whole width; the filters stay active.
-- The **View** button opens the **View Options** panel on the right. **View mode**
+- The **View** button opens the **View Options** panel on the right. Its **MAME
+  Version** menu lists the registered installations (with their folder when two have
+  the same name, and "no catalog" for those not imported yet) and switches the
+  active installation without importing anything: the results, filters and details
+  then come from that installation's catalog, and new launches use its executable.
+  The search text, filters and sort order are kept and the results return to the
+  first page; filter values that do not exist in the new catalog match nothing
+  (a notice offers to clear them). Open details are closed, because they belong to
+  the previous catalog. Results of two catalogs are never shown together. **View mode**
   switches between **Classic Cards** (text cards; **Card size**) and **Media Grid**
   (artwork tiles; **Tile size**, **Artwork** category, **Image fit**, and whether to
   show the title, the technical name and the status badge). Changing the view never
@@ -231,12 +281,14 @@ The **Catalog** page (the start page) browses the imported machines or software:
 - ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
   and a software list declared by a machine does not guarantee compatibility.
 
-The **MAME** page holds the MAME installation and catalog import panels. The
+The **MAME** page holds the MAME installations and their catalog import panels. The
 **Settings** page selects the **Light** (default) or **Dark** theme, applied
 immediately to the whole application, holds the MAME launch options and shows the
 version and a backend connection check. Theme, panel visibility, view mode, the
 options of each view and the command line preview are saved in the application's
-web storage, separately from the MAME, launch and media configuration.
+web storage, separately from the MAME, launch and media configuration; they are the
+same for every MAME installation. The active installation is saved with the
+installations, not with these preferences.
 
 ## Artwork and screenshots
 
@@ -256,13 +308,15 @@ Images are found by name:
 
 When a title has no image, its tile shows a placeholder: YMDB never shows the image
 of another title, not even of the parent of a clone. Zipped collections are not
-supported yet.
+supported yet. Media sources are shared by all MAME installations: switching the MAME
+version uses the same directories (a title missing from one version's catalog is
+simply not listed).
 
 ## Launching MAME
 
-YMDB starts the configured MAME executable for a machine or a software. It needs a
-catalog imported from that same executable (reimport it after changing or updating
-MAME). YMDB does not check that ROMs, CHDs or software media are present: when files
+YMDB starts the executable of the active MAME installation for a machine or a
+software, with that installation's launch options. It needs a catalog imported from
+that same executable (reimport it after updating MAME in place). YMDB does not check that ROMs, CHDs or software media are present: when files
 are missing, MAME refuses to start and YMDB shows its message and output.
 
 - **Machines:** open a machine and press **Play**. YMDB runs
@@ -280,15 +334,19 @@ are missing, MAME refuses to start and YMDB shows its message and output.
 apple2_flop_orig:ultima4:flop2`; the assignment can be changed before launching.
 - **Command line** shows the exact command that **Play** runs, with the origin of
   every option.
-- While MAME runs, the detail page shows the session; **Stop** terminates MAME after
-  a confirmation (unsaved progress and NVRAM changes are lost). Closing YMDB never
-  closes MAME.
+- While MAME runs, the detail page shows the session and the installation it was
+  started from; **Stop** terminates MAME after a confirmation (unsaved progress and
+  NVRAM changes are lost). Closing YMDB or switching the MAME version never closes
+  MAME, and the same machine can run from two installations at once.
 
 ### Launch options
 
 YMDB passes only the options you set; everything else follows MAME's own
-configuration, which YMDB never modifies. Options are set at four levels, the later
-ones taking precedence:
+configuration, which YMDB never modifies. Each MAME installation has its own options,
+profiles and overrides (choose the installation at the top of **Settings → MAME
+launch options**), because option, device and machine names can change between
+versions; they are never shared or copied between installations. Options are set at
+four levels, the later ones taking precedence:
 
 1. **Global options** (Settings page).
 2. **Launch profiles** (Settings page): named sets of options, chosen with the
@@ -298,8 +356,8 @@ ones taking precedence:
 
 The available options cover display, performance, sound, search paths and output
 directories, BIOS and RAM size and session options (for example `seconds_to_run`).
-Values are checked before saving. They are saved in `launch.json`, next to
-`settings.json`. Controller and input device settings are not managed by YMDB yet.
+Values are checked before saving. They are saved in the installation's `launch.json`
+(`installations/<id>/launch.json` in the configuration directory). Controller and input device settings are not managed by YMDB yet.
 
 ## Testing and quality checks
 
@@ -377,10 +435,13 @@ Implemented:
 
 - Tauri 2 + React + TypeScript project skeleton.
 - Application shell with Catalog, MAME and Settings pages; light and dark themes.
-- MAME installation management: manual selection through the native file picker,
-  automatic detection, validation through `-version`, version display, and saving,
-  verifying and removing the configuration (see [Configuring MAME](#configuring-mame)).
-- Application settings persisted as JSON in the platform configuration directory.
+- Multi-version MAME installation management: any number of installations (also of
+  the same version) added through the native file picker or detection, validated
+  through `-version`, verified, renamed, removed and selected as active from the MAME
+  page or the catalog's **MAME Version** menu; each with its own catalog and launch
+  options, and an automatic upgrade of the single-installation configuration (see
+  [MAME installations](#mame-installations)).
+- Installations persisted as JSON in the platform configuration directory.
 - MAME catalog: streaming import of machines (`-listxml`) and software lists
   (`-listsoftware`) into SQLite with versioned schema and migrations, version
   consistency checks, atomic replacement, cancellation, progress and summaries
@@ -393,7 +454,8 @@ Implemented:
   sources (see [Artwork and screenshots](#artwork-and-screenshots)).
 - MAME launcher: machines and software, with machine selection, part assignment,
   command line preview, global options, launch profiles, machine and software
-  options, and session monitoring (see [Launching MAME](#launching-mame)).
+  options per installation, and session monitoring across installations (see
+  [Launching MAME](#launching-mame)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.

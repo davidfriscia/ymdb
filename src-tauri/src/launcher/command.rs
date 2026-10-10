@@ -41,6 +41,10 @@ pub struct PlanArgument {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchPlan {
+    /// The MAME installation the plan was prepared for.
+    pub installation_id: String,
+    /// The launch profile applied.
+    pub profile_id: String,
     pub executable: PathBuf,
     /// The executable's directory, so MAME finds its `mame.ini` and relative paths.
     pub working_directory: PathBuf,
@@ -54,10 +58,17 @@ pub struct SoftwareMedia<'a> {
     pub media: &'a [MediaAssignment],
 }
 
+/// The installation and profile a plan is prepared with.
+pub struct PlanOrigin<'a> {
+    pub installation_id: &'a str,
+    pub profile_id: &'a str,
+}
+
 impl LaunchPlan {
     /// Builds `mame <machine> [-<device> <list>:<software>:<part>]... [options]`.
     /// Inputs must already be validated.
     pub fn build(
+        origin: &PlanOrigin<'_>,
         executable: &Path,
         machine: &str,
         software: Option<&SoftwareMedia<'_>>,
@@ -90,6 +101,8 @@ impl LaunchPlan {
             tokens: options::to_arguments(&option.name, &option.value),
         }));
         Self {
+            installation_id: origin.installation_id.to_owned(),
+            profile_id: origin.profile_id.to_owned(),
             executable: executable.to_path_buf(),
             working_directory: executable
                 .parent()
@@ -122,6 +135,11 @@ mod tests {
     use super::*;
     use crate::launcher::options::OptionValue;
 
+    const ORIGIN: PlanOrigin<'static> = PlanOrigin {
+        installation_id: "0123456789abcdef0123456789abcdef",
+        profile_id: "default",
+    };
+
     fn option(name: &str, value: OptionValue, source: OptionSource) -> ResolvedOption {
         ResolvedOption {
             name: name.to_owned(),
@@ -134,6 +152,7 @@ mod tests {
     fn builds_a_machine_command_line() {
         let executable = Path::new("/opt/Émulateurs MAME ✓/mame");
         let plan = LaunchPlan::build(
+            &ORIGIN,
             executable,
             "pacman",
             None,
@@ -178,6 +197,7 @@ mod tests {
             },
         ];
         let plan = LaunchPlan::build(
+            &ORIGIN,
             Path::new("C:\\MAME\\mame.exe"),
             "apple2e",
             Some(&SoftwareMedia {
@@ -212,6 +232,7 @@ mod tests {
             part: "cart".to_owned(),
         }];
         let plan = LaunchPlan::build(
+            &ORIGIN,
             Path::new("/opt/mame/mame"),
             "nes",
             Some(&SoftwareMedia {
@@ -235,5 +256,7 @@ mod tests {
             ])
         );
         assert_eq!(json["workingDirectory"], "/opt/mame");
+        assert_eq!(json["installationId"], ORIGIN.installation_id);
+        assert_eq!(json["profileId"], "default");
     }
 }

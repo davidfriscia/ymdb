@@ -808,3 +808,40 @@
     border-bottom-color: var(--color-accent);
   }
 }
+
+/* MAME version */
+
+.installation-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.installation-select .input {
+  width: 100%;
+}
+
+.installation-select__status {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.state-message .installation-select {
+  width: min(320px, 100%);
+  margin-top: 8px;
+}
+
+.browser__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  background: var(--color-surface-elevated);
+}
+
+.browser__notice .message {
+  margin: 0;
+}

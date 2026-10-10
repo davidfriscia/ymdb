@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::is_short_name;
-use command::{LaunchPlan, SoftwareMedia};
+use command::{LaunchPlan, PlanOrigin, SoftwareMedia};
 use config::LaunchConfig;
 use resolve::{ListRelation, MediaAssignment};
 use session::{LaunchTarget, SoftwareRef};
@@ -34,6 +34,9 @@ use session::{LaunchTarget, SoftwareRef};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LaunchRequest {
+    /// The MAME installation whose executable, catalog and launch
+    /// configuration are used.
+    pub installation_id: String,
     pub machine: String,
     #[serde(default)]
     pub software: Option<SoftwareSelection>,
@@ -106,8 +109,9 @@ impl From<rusqlite::Error> for LaunchError {
     }
 }
 
-/// Validates a request against the catalog and the launch configuration and
-/// builds its command line.
+/// Validates a request against the catalog and the launch configuration of
+/// its installation and builds its command line. `executable` is the
+/// installation's executable.
 pub fn prepare(
     connection: &Connection,
     executable: &Path,
@@ -199,15 +203,23 @@ pub fn prepare(
         .software
         .as_ref()
         .map(|software| (software.list.as_str(), software.name.as_str()));
+    let profile_id = request
+        .profile_id
+        .as_deref()
+        .unwrap_or(&config.default_profile_id);
     let options = config
-        .resolve(request.profile_id.as_deref(), &machine.name, software)
+        .resolve(Some(profile_id), &machine.name, software)
         .map_err(|error| invalid(error.0))?;
     let media = request.software.as_ref().map(|selection| SoftwareMedia {
         list: &selection.list,
         software: &selection.name,
         media: &selection.media,
     });
-    let plan = LaunchPlan::build(executable, &machine.name, media.as_ref(), &options);
+    let origin = PlanOrigin {
+        installation_id: &request.installation_id,
+        profile_id,
+    };
+    let plan = LaunchPlan::build(&origin, executable, &machine.name, media.as_ref(), &options);
     Ok(PreparedLaunch {
         plan,
         target,

@@ -13,9 +13,9 @@
 //! happen to exit successfully are not mistaken for MAME: the output must
 //! consist of exactly one non-empty line in this format.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MameVersion {
     /// Release number, for example `0.280`.

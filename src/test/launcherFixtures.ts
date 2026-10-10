@@ -1,3 +1,4 @@
+import { NEW_ID } from "./installationFixtures";
 import type {
   LaunchConfig,
   LaunchConfigView,
@@ -57,8 +58,11 @@ export function launchConfig(overrides: Partial<LaunchConfig> = {}): LaunchConfi
   };
 }
 
-export function launchConfigView(config: LaunchConfig = launchConfig()): LaunchConfigView {
-  return { config, definitions: OPTION_DEFINITIONS, loadError: null };
+export function launchConfigView(
+  config: LaunchConfig = launchConfig(),
+  installationId: string = NEW_ID,
+): LaunchConfigView {
+  return { installationId, config, definitions: OPTION_DEFINITIONS, loadError: null };
 }
 
 export function session(
@@ -66,9 +70,12 @@ export function session(
   machine: string,
   state: SessionState = { state: "running" },
   software: { list: string; name: string } | null = null,
+  installationId: string = NEW_ID,
 ): SessionInfo {
   return {
     id,
+    installationId,
+    installationLabel: installationId === NEW_ID ? "MAME 0.280" : "MAME 0.252",
     target: { machine, software },
     title: `${machine} description`,
     commandLine: [machine],

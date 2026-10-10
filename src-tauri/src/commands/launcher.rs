@@ -1,8 +1,9 @@
 //! MAME launcher commands.
 //!
 //! MAME is started only by an explicit Play action. The frontend sends a
-//! structured request (machine, software, mounted parts, profile); the command
-//! line is always built by the backend from the catalog and validated options.
+//! structured request (installation, machine, software, mounted parts,
+//! profile); the command line is always built by the backend from the
+//! installation's catalog and launch configuration and validated options.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -10,45 +11,42 @@ use std::sync::{Mutex, PoisonError};
 use serde::Serialize;
 use tauri::State;
 
-use super::catalog::CatalogState;
-use super::{CommandError, SettingsState, run_blocking};
+use super::installations::{InstallationsState, ResolvedInstallation};
+use super::{CommandError, run_blocking};
 use crate::catalog::freshness::{CatalogFreshness, check_freshness};
 use crate::catalog::store::CatalogInfo;
 use crate::launcher::config::LaunchConfig;
 use crate::launcher::options::{DEFINITIONS, OptionDefinition};
 use crate::launcher::resolve::{SoftwareLaunchInfo, software_launch_info};
 use crate::launcher::session::{SessionError, SessionInfo, SessionManager};
-use crate::launcher::store::{LaunchConfigStore, LaunchStoreError};
+use crate::launcher::store::LaunchStoreError;
 use crate::launcher::{LaunchError, LaunchPreview, LaunchRequest, PreparedLaunch, prepare};
 
-/// Managed state of the launcher.
+/// Managed state of the launcher: the sessions of every installation and a
+/// lock serializing access to the launch configuration files.
 pub struct LauncherState {
-    /// `None` when the configuration directory could not be resolved.
-    store: Option<LaunchConfigStore>,
     lock: Mutex<()>,
     sessions: SessionManager,
 }
 
 impl LauncherState {
-    pub fn new(store: Option<LaunchConfigStore>, log_dir: Option<PathBuf>) -> Self {
+    pub fn new(log_dir: Option<PathBuf>) -> Self {
         Self {
-            store,
             lock: Mutex::new(()),
             sessions: SessionManager::new(log_dir),
         }
     }
 
-    fn store(&self) -> Result<&LaunchConfigStore, CommandError> {
-        self.store.as_ref().ok_or_else(|| CommandError::Settings {
-            message: "the application configuration directory is unavailable".to_owned(),
-        })
+    /// Reads an installation's `launch.json`; the error means the file is
+    /// unreadable or invalid.
+    fn load(&self, resolved: &ResolvedInstallation) -> Result<LaunchConfig, LaunchStoreError> {
+        let _guard = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
+        resolved.launch_config.load()
     }
 
-    /// Reads `launch.json`; the inner error means the file is unreadable or invalid.
-    fn load(&self) -> Result<Result<LaunchConfig, LaunchStoreError>, CommandError> {
-        let store = self.store()?;
-        let _guard = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
-        Ok(store.load())
+    /// Running sessions started from an installation.
+    pub fn running_sessions(&self, installation_id: &str) -> usize {
+        self.sessions.running_for(installation_id)
     }
 }
 
@@ -63,10 +61,11 @@ fn store_error(error: &LaunchStoreError) -> CommandError {
     }
 }
 
-/// The launch configuration and the options it may contain.
+/// The launch configuration of an installation and the options it may contain.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchConfigView {
+    pub installation_id: String,
     pub config: LaunchConfig,
     pub definitions: &'static [OptionDefinition],
     /// Set when `launch.json` could not be read: `config` is then the default
@@ -76,29 +75,40 @@ pub struct LaunchConfigView {
 
 #[tauri::command]
 pub fn get_launch_config(
+    installation_id: String,
+    installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
 ) -> Result<LaunchConfigView, CommandError> {
-    let (config, load_error) = match launcher.load()? {
+    let resolved = installations.resolve(&installation_id)?;
+    let (config, load_error) = match launcher.load(&resolved) {
         Ok(config) => (config, None),
         Err(error) => (LaunchConfig::default(), Some(error.to_string())),
     };
     Ok(LaunchConfigView {
+        installation_id,
         config,
         definitions: DEFINITIONS,
         load_error,
     })
 }
 
-/// Validates and saves the whole launch configuration.
+/// Validates and saves the whole launch configuration of an installation.
+/// Other installations are not affected.
 #[tauri::command]
 pub fn save_launch_config(
+    installation_id: String,
     config: LaunchConfig,
+    installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
 ) -> Result<LaunchConfigView, CommandError> {
-    let store = launcher.store()?;
+    let resolved = installations.resolve(&installation_id)?;
     let _guard = launcher.lock.lock().unwrap_or_else(PoisonError::into_inner);
-    let saved = store.save(config).map_err(|error| store_error(&error))?;
+    let saved = resolved
+        .launch_config
+        .save(config)
+        .map_err(|error| store_error(&error))?;
     Ok(LaunchConfigView {
+        installation_id,
         config: saved,
         definitions: DEFINITIONS,
         load_error: None,
@@ -106,18 +116,18 @@ pub fn save_launch_config(
 }
 
 /// Candidate machines and parts for launching a software; `null` when the
-/// software is not in the catalog.
+/// software is not in the installation's catalog.
 #[tauri::command]
 pub async fn get_software_launch_info(
+    installation_id: String,
     list: String,
     name: String,
-    catalog: State<'_, CatalogState>,
+    installations: State<'_, InstallationsState>,
 ) -> Result<Option<SoftwareLaunchInfo>, CommandError> {
-    let store = catalog.store()?.clone();
+    let store = installations.resolve(&installation_id)?.catalog;
     run_blocking(move || {
         store
-            .with_reader(|connection| Ok(software_launch_info(connection, &list, &name)))
-            .map_err(|error| internal(&error))?
+            .with_reader(|connection| Ok(software_launch_info(connection, &list, &name)))?
             .ok_or(CommandError::CatalogNotImported)?
             .map_err(|error| internal(&error))
     })
@@ -128,12 +138,12 @@ pub async fn get_software_launch_info(
 #[tauri::command]
 pub async fn preview_launch(
     request: LaunchRequest,
-    settings: State<'_, SettingsState>,
-    catalog: State<'_, CatalogState>,
+    installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
 ) -> Result<LaunchPreview, CommandError> {
-    Ok(prepare_request(request, &settings, &catalog, &launcher)
+    Ok(prepare_request(request, &installations, &launcher)
         .await?
+        .0
         .into())
 }
 
@@ -141,18 +151,18 @@ pub async fn preview_launch(
 #[tauri::command]
 pub async fn start_launch(
     request: LaunchRequest,
-    settings: State<'_, SettingsState>,
-    catalog: State<'_, CatalogState>,
+    installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
 ) -> Result<SessionInfo, CommandError> {
-    let prepared = prepare_request(request, &settings, &catalog, &launcher).await?;
+    let (prepared, label) = prepare_request(request, &installations, &launcher).await?;
     launcher
         .sessions
-        .start(prepared.target, prepared.title, &prepared.plan)
+        .start(prepared.target, prepared.title, label, &prepared.plan)
         .map_err(session_error)
 }
 
-/// Sessions started during this run, most recent first. Cheap: suitable for polling.
+/// Sessions started during this run, from every installation, most recent
+/// first. Cheap: suitable for polling.
 #[tauri::command]
 pub fn get_launch_sessions(launcher: State<'_, LauncherState>) -> Vec<SessionInfo> {
     launcher.sessions.list()
@@ -167,46 +177,54 @@ pub fn stop_launch_session(
     launcher.sessions.stop(id).map_err(session_error)
 }
 
+/// Prepares a launch with the installation named by the request (not the
+/// active one, which may change meanwhile). Also returns the installation's label.
 async fn prepare_request(
     request: LaunchRequest,
-    settings: &SettingsState,
-    catalog: &CatalogState,
+    installations: &InstallationsState,
     launcher: &LauncherState,
-) -> Result<PreparedLaunch, CommandError> {
-    let executable = settings
-        .configured_executable()?
-        .ok_or(CommandError::NotConfigured)?;
-    let config = launcher.load()?.map_err(|error| CommandError::Settings {
-        message: format!("{error}. Fix or save the launch options in Settings."),
-    })?;
-    let store = catalog.store()?.clone();
-    run_blocking(move || {
-        let info = store
-            .read_info()
-            .map_err(|error| internal(&error))?
-            .ok_or(CommandError::CatalogNotImported)?;
-        ensure_catalog_matches(&info, &executable, request.software.is_some())?;
-        store
-            .with_reader(|connection| Ok(prepare(connection, &executable, &config, &request)))
-            .map_err(|error| internal(&error))?
-            .ok_or(CommandError::CatalogNotImported)?
-            .map_err(|error| match error {
-                LaunchError::Invalid(message) => CommandError::InvalidRequest { message },
-                LaunchError::NotFound(message) => CommandError::NotFound { message },
-                LaunchError::Database(error) => internal(&error),
-            })
-    })
-    .await?
+) -> Result<(PreparedLaunch, String), CommandError> {
+    let resolved = installations.resolve(&request.installation_id)?;
+    let config = launcher
+        .load(&resolved)
+        .map_err(|error| CommandError::Settings {
+            message: format!("{error}. Fix or save the launch options in Settings."),
+        })?;
+    let label = resolved.installation.label();
+    let prepared = run_blocking(move || prepare_resolved(&resolved, &config, &request)).await??;
+    Ok((prepared, label))
 }
 
-/// A launch needs a catalog from the configured, unchanged executable, with
-/// software lists when a software is launched.
+pub(super) fn prepare_resolved(
+    resolved: &ResolvedInstallation,
+    config: &LaunchConfig,
+    request: &LaunchRequest,
+) -> Result<PreparedLaunch, CommandError> {
+    let executable = &resolved.installation.executable_path;
+    let info = resolved
+        .catalog
+        .read_info()?
+        .ok_or(CommandError::CatalogNotImported)?;
+    ensure_catalog_matches(&info, executable, request.software.is_some())?;
+    resolved
+        .catalog
+        .with_reader(|connection| Ok(prepare(connection, executable, config, request)))?
+        .ok_or(CommandError::CatalogNotImported)?
+        .map_err(|error| match error {
+            LaunchError::Invalid(message) => CommandError::InvalidRequest { message },
+            LaunchError::NotFound(message) => CommandError::NotFound { message },
+            LaunchError::Database(error) => internal(&error),
+        })
+}
+
+/// A launch needs a catalog from the installation's unchanged executable,
+/// with software lists when a software is launched.
 fn ensure_catalog_matches(
     info: &CatalogInfo,
     executable: &Path,
     needs_software: bool,
 ) -> Result<(), CommandError> {
-    let freshness = check_freshness(info, Some(executable));
+    let freshness = check_freshness(info, executable);
     if freshness != CatalogFreshness::Current {
         return Err(CommandError::CatalogMismatch { freshness });
     }

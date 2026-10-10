@@ -6,14 +6,14 @@ export function describeImportError(error: ImportError): string {
     case "cancelled":
       return "The import was cancelled.";
     case "invalidMame":
-      return `The configured MAME executable cannot be used: ${describeStatus(error.status)}`;
+      return `The MAME executable of this installation cannot be used: ${describeStatus(error.status)}`;
     case "machineCatalogRequired":
       return "Import the machine catalog before importing software lists.";
     case "catalogMismatch":
       return error.catalogRelease === error.executableRelease &&
         error.catalogRevision === error.executableRevision
-        ? "The configured MAME executable has changed since the machine catalog was imported. Reimport the machine catalog first."
-        : `The machine catalog comes from MAME ${error.catalogRelease} (${error.catalogRevision}) but the configured executable is MAME ${error.executableRelease} (${error.executableRevision}). Reimport the machine catalog first.`;
+        ? "The MAME executable has changed since the machine catalog was imported. Reimport the machine catalog first."
+        : `The machine catalog comes from MAME ${error.catalogRelease} (${error.catalogRevision}) but the executable is MAME ${error.executableRelease} (${error.executableRevision}). Reimport the machine catalog first.`;
     case "launchFailed":
       return `MAME could not be started: ${error.message}`;
     case "mameFailed": {
@@ -68,18 +68,13 @@ export function describeFreshness(
     case "differentExecutable":
       return {
         message:
-          "This catalog was imported from a different MAME executable than the one configured. Import the catalog again to match it.",
+          "This catalog was imported from a different MAME executable than the one of this installation. Import the catalog again to match it.",
         warning: true,
       };
     case "executableMissing":
       return {
         message: "The MAME executable used for this catalog no longer exists.",
         warning: true,
-      };
-    case "mameNotConfigured":
-      return {
-        message: "Configure a MAME executable to import or update the catalog.",
-        warning: false,
       };
   }
 }

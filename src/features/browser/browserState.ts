@@ -69,6 +69,11 @@ export interface BrowserState {
   queries: Record<Scope, ScopeQuery>;
   /** Detail views opened on top of the results; empty shows the results. */
   stack: DetailEntry[];
+  /**
+   * Set when the MAME version changed while filters were active: they are
+   * kept, but values missing from the new catalog match nothing.
+   */
+  filtersKept: boolean;
 }
 
 const emptyQuery = (): ScopeQuery => ({
@@ -86,6 +91,7 @@ export const initialBrowserState: BrowserState = {
   appliedText: "",
   queries: { machines: emptyQuery(), software: emptyQuery() },
   stack: [],
+  filtersKept: false,
 };
 
 export type BrowserAction =
@@ -106,7 +112,9 @@ export type BrowserAction =
   | { type: "replaceDetail"; target: DetailTarget; resultIndex: number | null }
   | { type: "setDetailTab"; tab: string }
   | { type: "back" }
-  | { type: "backToResults" };
+  | { type: "backToResults" }
+  | { type: "installationChanged" }
+  | { type: "dismissFiltersKept" };
 
 function updateQuery(state: BrowserState, update: (query: ScopeQuery) => ScopeQuery): BrowserState {
   const query = state.queries[state.scope];
@@ -168,7 +176,10 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
         values: without(filters.values, action.facet),
       }));
     case "clearFilters":
-      return updateFilters(state, () => ({ values: {}, flags: {} }));
+      return {
+        ...updateFilters(state, () => ({ values: {}, flags: {} })),
+        filtersKept: false,
+      };
     case "setSort":
       return updateQuery(state, (query) => ({ ...query, sort: action.sort, page: 0 }));
     case "setDirection":
@@ -227,6 +238,23 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
       return { ...state, stack: state.stack.slice(0, -1) };
     case "backToResults":
       return { ...state, stack: [] };
+    case "installationChanged":
+      // Detail views and pages belong to the previous catalog. The search
+      // text, filters and sorting are kept.
+      return {
+        ...state,
+        stack: [],
+        queries: {
+          machines: { ...state.queries.machines, page: 0 },
+          software: { ...state.queries.software, page: 0 },
+        },
+        filtersKept:
+          countActiveFilters(state.queries.machines.filters) +
+            countActiveFilters(state.queries.software.filters) >
+          0,
+      };
+    case "dismissFiltersKept":
+      return { ...state, filtersKept: false };
   }
 }
 

@@ -1,24 +1,41 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { describeError } from "../../shared/ipc";
 import { CommandPreview } from "./CommandPreview";
-import type { LaunchConfig, LaunchRequest, LaunchTarget, OptionSet } from "./launcherApi";
+import type {
+  LaunchConfig,
+  LaunchRequest,
+  LaunchTarget,
+  OptionDefinition,
+  OptionSet,
+} from "./launcherApi";
 import { softwareKey } from "./launcherApi";
 import { latestSession, useLauncher } from "./launcherContext";
 import { OptionSetEditor } from "./OptionSetEditor";
 import { SessionStatus } from "./SessionStatus";
+import { useInstallationScope } from "../installations/installationsContext";
 
 interface LaunchControlsProps {
   target: LaunchTarget;
-  /** The launch without the profile; `null` while the user must still choose. */
-  request: Omit<LaunchRequest, "profileId"> | null;
+  /**
+   * The launch without the installation and the profile; `null` while the
+   * user must still choose.
+   */
+  request: Omit<LaunchRequest, "profileId" | "installationId"> | null;
   /** Shown before the buttons, for example the machine selection. */
   children?: ReactNode;
 }
 
-/** Play button, profile, overrides, command line preview and session status. */
+/**
+ * Play button, profile, overrides, command line preview and session status,
+ * for the installation whose catalog is browsed.
+ */
 export function LaunchControls({ target, request, children }: LaunchControlsProps) {
+  const installationId = useInstallationScope();
   const launcher = useLauncher();
-  const { view, sessions, start, stop, showCommandPreview, setShowCommandPreview } = launcher;
+  const { sessions, start, stop, showCommandPreview, setShowCommandPreview } = launcher;
+  // The configuration of another installation is never used, even briefly
+  // while switching.
+  const view = launcher.view?.installationId === installationId ? launcher.view : null;
   const [profileId, setProfileId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -30,10 +47,16 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
     profileId !== null && profiles.some((profile) => profile.id === profileId) ? profileId : null;
   const fullRequest = useMemo<LaunchRequest | null>(
     () =>
-      request ? { ...request, ...(selectedProfile ? { profileId: selectedProfile } : {}) } : null,
-    [request, selectedProfile],
+      request
+        ? {
+            ...request,
+            installationId,
+            ...(selectedProfile ? { profileId: selectedProfile } : {}),
+          }
+        : null,
+    [request, installationId, selectedProfile],
   );
-  const session = latestSession(sessions, target);
+  const session = latestSession(sessions, target, installationId);
   const running = session?.state.state === "running";
   const overrideLabel = target.software ? "this software" : "this machine";
   const overrides = view ? overridesOf(view.config, target) : {};
@@ -138,6 +161,8 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
         <OverrideEditor
           key={launcher.configVersion}
           label={`Options for ${overrideLabel}`}
+          installationId={installationId}
+          definitions={view.definitions}
           config={view.config}
           target={target}
           onClose={() => {
@@ -178,13 +203,22 @@ function withOverrides(
 
 interface OverrideEditorProps {
   label: string;
+  installationId: string;
+  definitions: OptionDefinition[];
   config: LaunchConfig;
   target: LaunchTarget;
   onClose: () => void;
 }
 
-function OverrideEditor({ label, config, target, onClose }: OverrideEditorProps) {
-  const { view, saveConfig } = useLauncher();
+function OverrideEditor({
+  label,
+  installationId,
+  definitions,
+  config,
+  target,
+  onClose,
+}: OverrideEditorProps) {
+  const { saveConfig } = useLauncher();
   const [draft, setDraft] = useState<OptionSet>(() => overridesOf(config, target));
   const [valid, setValid] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -194,7 +228,7 @@ function OverrideEditor({ label, config, target, onClose }: OverrideEditorProps)
     setSaving(true);
     setError(null);
     try {
-      await saveConfig(withOverrides(config, target, draft));
+      await saveConfig(installationId, withOverrides(config, target, draft));
       onClose();
     } catch (saveError) {
       setError(describeError(saveError));
@@ -211,7 +245,7 @@ function OverrideEditor({ label, config, target, onClose }: OverrideEditorProps)
       </p>
       <OptionSetEditor
         label={label}
-        definitions={view?.definitions ?? []}
+        definitions={definitions}
         options={draft}
         onChange={setDraft}
         onValidityChange={setValid}

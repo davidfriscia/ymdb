@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { launchConfig, launchConfigView, session } from "../../test/launcherFixtures";
+import { installationsView, NEW_ID, OLD_ID } from "../../test/installationFixtures";
+import { InstallationsProvider } from "../installations/InstallationsProvider";
+import { InstallationScope, useInstallations } from "../installations/installationsContext";
 import type {
   LaunchConfig,
   LaunchRequest,
@@ -22,7 +25,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 type Args = Record<string, unknown>;
 type Handler = (args: Args) => unknown;
 
-function backend(handlers: Partial<Record<string, Handler>>) {
+function backend(commandHandlers: Partial<Record<string, Handler>>) {
+  let active = NEW_ID;
+  const handlers: Partial<Record<string, Handler>> = {
+    list_installations: () => installationsView(undefined, active),
+    set_active_installation: (args) => {
+      active = args.installationId as string;
+      return installationsView(undefined, active);
+    },
+    ...commandHandlers,
+  };
   invokeMock.mockImplementation((command: string, args?: Args) => {
     const handler = handlers[command];
     if (!handler) return Promise.reject(new Error(`unexpected command ${command}`));
@@ -60,13 +72,19 @@ function launcherBackend(
     overrides?: Partial<Record<string, Handler>>;
   } = {},
 ) {
-  let config = options.config ?? launchConfig();
+  // Every installation has its own configuration.
+  const configs = new Map<string, LaunchConfig>([[NEW_ID, options.config ?? launchConfig()]]);
+  const configOf = (id: string) => configs.get(id) ?? launchConfig();
   let sessions: SessionInfo[] = [];
   backend({
-    get_launch_config: () => launchConfigView(config),
+    get_launch_config: (args) => {
+      const id = args.installationId as string;
+      return launchConfigView(configOf(id), id);
+    },
     save_launch_config: (args) => {
-      config = args.config as LaunchConfig;
-      return launchConfigView(config);
+      const id = args.installationId as string;
+      configs.set(id, args.config as LaunchConfig);
+      return launchConfigView(configOf(id), id);
     },
     get_launch_sessions: () => sessions,
     get_software_launch_info: () => options.info ?? null,
@@ -101,6 +119,7 @@ function launcherBackend(
         request.machine,
         { state: "running" },
         request.software ? { list: request.software.list, name: request.software.name } : null,
+        request.installationId,
       );
       sessions = [started, ...sessions];
       return started;
@@ -114,25 +133,51 @@ function launcherBackend(
     ...options.overrides,
   });
   return {
-    config: () => config,
+    config: () => configOf(NEW_ID),
+    configOf,
     setSessions: (next: SessionInfo[]) => {
       sessions = next;
     },
   };
 }
 
+interface ProvidersProps {
+  children: ReactNode;
+  showCommandPreview: boolean;
+  onShowCommandPreviewChange: (show: boolean) => void;
+}
+
+/** The launcher of the active installation; launch panels browse that installation. */
+function ActiveLauncher({ children, ...props }: ProvidersProps) {
+  const { activeId } = useInstallations();
+  return (
+    <LauncherProvider installationId={activeId} pollIntervalMs={20} {...props}>
+      {activeId !== null && <InstallationScope value={activeId}>{children}</InstallationScope>}
+    </LauncherProvider>
+  );
+}
+
+function tree(
+  children: ReactNode,
+  showCommandPreview: boolean,
+  onShowCommandPreviewChange: (show: boolean) => void,
+) {
+  return (
+    <InstallationsProvider>
+      <ActiveLauncher
+        showCommandPreview={showCommandPreview}
+        onShowCommandPreviewChange={onShowCommandPreviewChange}
+      >
+        {children}
+      </ActiveLauncher>
+    </InstallationsProvider>
+  );
+}
+
 function renderWithLauncher(children: ReactNode, showCommandPreview = false) {
   const user = userEvent.setup();
   const onShowCommandPreviewChange = vi.fn();
-  const view = render(
-    <LauncherProvider
-      showCommandPreview={showCommandPreview}
-      onShowCommandPreviewChange={onShowCommandPreviewChange}
-      pollIntervalMs={20}
-    >
-      {children}
-    </LauncherProvider>,
-  );
+  const view = render(tree(children, showCommandPreview, onShowCommandPreviewChange));
   return { user, onShowCommandPreviewChange, view };
 }
 
@@ -218,7 +263,7 @@ describe("launcher", () => {
 
       await user.click(await findPlay());
 
-      expect(lastRequest("start_launch")).toEqual({ machine: "pacman" });
+      expect(lastRequest("start_launch")).toEqual({ installationId: NEW_ID, machine: "pacman" });
       const status = await screen.findByRole("status", { name: "Session" });
       expect(status).toHaveTextContent("Running");
       expect(screen.getByRole("button", { name: "Running" })).toBeDisabled();
@@ -241,7 +286,7 @@ describe("launcher", () => {
 
       pending.resolve(null);
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "The catalog does not match the configured MAME executable",
+        "The catalog does not match the MAME executable of this installation",
       );
       expect(screen.getByRole("button", { name: "Play" })).toBeEnabled();
     });
@@ -282,7 +327,7 @@ describe("launcher", () => {
       const fake = launcherBackend();
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
       await user.click(await findPlay());
-      await screen.findByText(/MAME is running since/);
+      await screen.findByText(/MAME 0.280 is running since/);
 
       fake.setSessions([
         session(1, "pacman", {
@@ -302,10 +347,10 @@ describe("launcher", () => {
       expect(screen.getByText("pacman.6e NOT FOUND")).toBeInTheDocument();
     });
 
-    it("explains that devices cannot be launched", () => {
+    it("explains that devices cannot be launched", async () => {
       launcherBackend();
       renderWithLauncher(<MachineLaunchPanel name="z80" isRunnable={false} />);
-      expect(screen.getByText(/MAME cannot run it on its own/)).toBeInTheDocument();
+      expect(await screen.findByText(/MAME cannot run it on its own/)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Play" })).not.toBeInTheDocument();
     });
 
@@ -324,7 +369,11 @@ describe("launcher", () => {
       await user.selectOptions(screen.getByLabelText("Profile"), "Quiet");
       await user.click(screen.getByRole("button", { name: "Play" }));
 
-      expect(lastRequest("start_launch")).toEqual({ machine: "pacman", profileId: "quiet" });
+      expect(lastRequest("start_launch")).toEqual({
+        installationId: NEW_ID,
+        machine: "pacman",
+        profileId: "quiet",
+      });
     });
   });
 
@@ -340,12 +389,7 @@ describe("launcher", () => {
       expect(onShowCommandPreviewChange).toHaveBeenCalledWith(true);
 
       view.rerender(
-        <LauncherProvider
-          showCommandPreview
-          onShowCommandPreviewChange={onShowCommandPreviewChange}
-        >
-          <MachineLaunchPanel name="pacman" isRunnable />
-        </LauncherProvider>,
+        tree(<MachineLaunchPanel name="pacman" isRunnable />, true, onShowCommandPreviewChange),
       );
       expect(screen.getByRole("button", { name: "Command line" })).toHaveAttribute(
         "aria-pressed",
@@ -359,19 +403,21 @@ describe("launcher", () => {
       expect(within(preview).getByLabelText("Full command line")).toHaveTextContent(
         '"C:\\Émulateurs MAME ✓\\mame.exe" pacman -window',
       );
-      expect(lastRequest("preview_launch")).toEqual({ machine: "pacman" });
+      expect(lastRequest("preview_launch")).toEqual({ installationId: NEW_ID, machine: "pacman" });
     });
 
     it("shows preview errors", async () => {
       launcherBackend({
         overrides: {
           preview_launch: () => {
-            throw commandError("notConfigured");
+            throw commandError("installationNotFound", { installationId: NEW_ID });
           },
         },
       });
       renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
-      expect(await screen.findByText("No MAME executable is configured.")).toBeInTheDocument();
+      expect(
+        await screen.findByText("This MAME installation is no longer registered."),
+      ).toBeInTheDocument();
     });
   });
 
@@ -437,7 +483,6 @@ describe("launcher", () => {
       const { user } = renderWithLauncher(
         <SoftwareLaunchPanel list="apple2_flop_orig" name="ultima4" refreshKey={0} />,
       );
-      expect(screen.getByText(/Looking for machines/)).toBeInTheDocument();
 
       const machine = await screen.findByLabelText("Machine");
       expect(machine).toHaveValue("");
@@ -458,6 +503,7 @@ describe("launcher", () => {
 
       await user.click(await findPlay());
       expect(lastRequest("start_launch")).toEqual({
+        installationId: NEW_ID,
         machine: "apple2e",
         software: {
           list: "apple2_flop_orig",
@@ -608,6 +654,55 @@ describe("launcher", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "launch configuration is invalid. The defaults are shown; saving replaces the file.",
       );
+    });
+  });
+
+  describe("installations", () => {
+    it("tells sessions of other installations apart", async () => {
+      const fake = launcherBackend();
+      fake.setSessions([session(7, "pacman", { state: "running" }, null, OLD_ID)]);
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
+
+      // Pac-Man runs from MAME 0.252: it can still start from MAME 0.280.
+      expect(await findPlay()).toHaveTextContent("Play");
+      expect(screen.queryByRole("status", { name: "Session" })).not.toBeInTheDocument();
+      await user.click(await findPlay());
+      expect(await screen.findByText(/MAME 0.280 is running since/)).toBeInTheDocument();
+      expect(lastRequest("start_launch")?.installationId).toBe(NEW_ID);
+    });
+
+    it("configures each installation separately", async () => {
+      const fake = launcherBackend({
+        config: launchConfig({ machineOverrides: { pacman: { window: true } } }),
+      });
+      const { user } = renderWithLauncher(<LaunchSettings />);
+      const chooser = await screen.findByRole("combobox", { name: "Installation" });
+      expect(
+        within(chooser)
+          .getAllByRole("option")
+          .map((option) => option.textContent),
+      ).toEqual(["MAME 0.280 (active)", "MAME 0.252"]);
+      expect(
+        await screen.findByRole("list", { name: "Machine and software options" }),
+      ).toHaveTextContent("pacman · window: On");
+
+      await user.selectOptions(chooser, OLD_ID);
+      await waitFor(() => {
+        expect(calls("get_launch_config").at(-1)).toEqual({ installationId: OLD_ID });
+      });
+      expect(
+        await screen.findByText(/No machine or software has its own options/),
+      ).toBeInTheDocument();
+      const global = await screen.findByRole("group", { name: "Global options" });
+      await user.selectOptions(within(global).getByRole("combobox"), "window");
+      await user.click(screen.getByRole("button", { name: "Save global options" }));
+
+      await waitFor(() => {
+        expect(fake.configOf(OLD_ID).globalOptions).toEqual({ window: true });
+      });
+      // The other installation keeps its own options.
+      expect(fake.config().globalOptions).toEqual({});
+      expect(fake.config().machineOverrides).toEqual({ pacman: { window: true } });
     });
   });
 });

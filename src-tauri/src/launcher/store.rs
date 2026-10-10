@@ -91,6 +91,28 @@ impl LaunchConfigStore {
         Ok(config)
     }
 
+    pub fn exists(&self) -> bool {
+        self.file.is_file()
+    }
+
+    pub fn dir(&self) -> &Path {
+        self.file.parent().unwrap_or(&self.file)
+    }
+
+    /// Deletes the file and its directory (when empty).
+    pub fn delete(&self) -> io::Result<()> {
+        match fs::remove_file(&self.file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if let Some(dir) = self.file.parent() {
+            // Best effort: the directory may contain files YMDB did not create.
+            let _ = fs::remove_dir(dir);
+        }
+        Ok(())
+    }
+
     /// Validates, normalizes and saves the configuration atomically.
     pub fn save(&self, config: LaunchConfig) -> Result<LaunchConfig, LaunchStoreError> {
         let config = config.normalized();

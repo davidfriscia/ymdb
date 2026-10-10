@@ -8,6 +8,7 @@ import {
   type SoftwareLaunchInfo,
 } from "./launcherApi";
 import { LaunchControls } from "./LaunchControls";
+import { useInstallationScope } from "../installations/installationsContext";
 
 interface SoftwareLaunchPanelProps {
   list: string;
@@ -17,7 +18,11 @@ interface SoftwareLaunchPanelProps {
 
 /** Launches a software on a machine chosen by the user. */
 export function SoftwareLaunchPanel({ list, name, refreshKey }: SoftwareLaunchPanelProps) {
-  const load = useCallback(() => getSoftwareLaunchInfo(list, name), [list, name]);
+  const installationId = useInstallationScope();
+  const load = useCallback(
+    () => getSoftwareLaunchInfo(installationId, list, name),
+    [installationId, list, name],
+  );
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status === "loading") {

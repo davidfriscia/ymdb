@@ -135,3 +135,21 @@ pub fn configure_background_process(command: &mut Command) {
     #[cfg(not(windows))]
     let _ = command;
 }
+
+/// Whether two paths name the same executable, following the platform's
+/// comparison rules: symbolic links and relative components are resolved
+/// when the file exists, and names are compared case-insensitively on Windows
+/// and macOS, whose default file systems ignore case.
+pub fn same_executable(a: &Path, b: &Path) -> bool {
+    a == b || path_key(a) == path_key(b)
+}
+
+fn path_key(path: &Path) -> String {
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let text = resolved.to_string_lossy();
+    if cfg!(any(windows, target_os = "macos")) {
+        text.to_lowercase()
+    } else {
+        text.into_owned()
+    }
+}

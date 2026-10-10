@@ -3,6 +3,7 @@ import { useLoader } from "../../../shared/useLoader";
 import { formatCount } from "../../catalog/catalogMessages";
 import type { DetailTarget } from "../browserState";
 import { getSoftwareListDetail } from "../detailApi";
+import { useInstallationScope } from "../../installations/installationsContext";
 import { DetailFrame, DetailStatus, Fields, Section, type DetailTab } from "./DetailParts";
 import { RelatedList } from "./RelatedList";
 
@@ -24,7 +25,11 @@ export function SoftwareListDetailView({
   onTab,
   onOpen,
 }: SoftwareListDetailViewProps) {
-  const load = useCallback(() => getSoftwareListDetail(name), [name]);
+  const installationId = useInstallationScope();
+  const load = useCallback(
+    () => getSoftwareListDetail(installationId, name),
+    [installationId, name],
+  );
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status !== "ready" || state.value === null) {

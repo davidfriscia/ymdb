@@ -67,11 +67,7 @@ export interface CatalogInfo {
 
 /** Mirrors `CatalogFreshness` in `src-tauri/src/catalog/freshness.rs`. */
 export type CatalogFreshness =
-  | "current"
-  | "executableChanged"
-  | "differentExecutable"
-  | "executableMissing"
-  | "mameNotConfigured";
+  "current" | "executableChanged" | "differentExecutable" | "executableMissing";
 
 /** Mirrors `ImportKind` in `src-tauri/src/commands/catalog.rs`. */
 export type ImportKind = "machines" | "softwareLists";
@@ -102,6 +98,8 @@ export type ImportStatus =
   | { state: "idle" }
   | {
       state: "running";
+      /** The installation whose catalog is imported. */
+      installationId: string;
       kind: ImportKind;
       phase: ImportPhase;
       /** Machines or software stored so far, depending on `kind`. */
@@ -111,28 +109,36 @@ export type ImportStatus =
     }
   | {
       state: "completed";
+      installationId: string;
       kind: ImportKind;
       items: number;
       durationMs: number;
       finishedAt: number;
     }
-  | { state: "failed"; kind: ImportKind; error: ImportError; finishedAt: number }
-  | { state: "cancelled"; kind: ImportKind; finishedAt: number };
+  | {
+      state: "failed";
+      installationId: string;
+      kind: ImportKind;
+      error: ImportError;
+      finishedAt: number;
+    }
+  | { state: "cancelled"; installationId: string; kind: ImportKind; finishedAt: number };
 
 /** Mirrors `CatalogStatus` in `src-tauri/src/commands/catalog.rs`. */
 export interface CatalogStatus {
+  installationId: string;
   catalog: CatalogInfo | null;
   catalogError: string | null;
   freshness: CatalogFreshness | null;
-  mameConfigured: boolean;
+  /** The current or last import, of any installation. */
   import: ImportStatus;
 }
 
 const call = invokeCommand;
 
-/** Reads the catalog summary. Reads the catalog database: avoid polling it. */
-export function getCatalogStatus(): Promise<CatalogStatus> {
-  return call("get_catalog_status");
+/** Reads the catalog summary of an installation. Reads the catalog database: avoid polling it. */
+export function getCatalogStatus(installationId: string): Promise<CatalogStatus> {
+  return call("get_catalog_status", { installationId });
 }
 
 /** Cheap in-memory status of the current or last import, suitable for polling. */
@@ -140,14 +146,17 @@ export function getCatalogImportStatus(): Promise<ImportStatus> {
   return call("get_catalog_import_status");
 }
 
-/** Imports the machine catalog; replaces the whole catalog, software lists included. */
-export function startCatalogImport(): Promise<ImportStatus> {
-  return call("start_catalog_import");
+/**
+ * Imports the machine catalog of an installation; replaces its whole catalog,
+ * software lists included. Other installations are not affected.
+ */
+export function startCatalogImport(installationId: string): Promise<ImportStatus> {
+  return call("start_catalog_import", { installationId });
 }
 
-/** Imports the software lists into the current machine catalog. */
-export function startSoftwareListImport(): Promise<ImportStatus> {
-  return call("start_software_list_import");
+/** Imports the software lists into the machine catalog of an installation. */
+export function startSoftwareListImport(installationId: string): Promise<ImportStatus> {
+  return call("start_software_list_import", { installationId });
 }
 
 export function cancelCatalogImport(): Promise<ImportStatus> {

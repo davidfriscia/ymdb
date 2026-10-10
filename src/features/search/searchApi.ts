@@ -133,10 +133,18 @@ export interface SoftwareSummary {
 
 export type SoftwareSearchResponse = SearchResponse<SoftwareSummary, SoftwareFacet>;
 
-export function searchMachines(request: MachineSearchRequest): Promise<MachineSearchResponse> {
-  return invokeCommand("search_catalog_machines", { request });
+/** Searches the machines of an installation's catalog. */
+export function searchMachines(
+  installationId: string,
+  request: MachineSearchRequest,
+): Promise<MachineSearchResponse> {
+  return invokeCommand("search_catalog_machines", { installationId, request });
 }
 
-export function searchSoftware(request: SoftwareSearchRequest): Promise<SoftwareSearchResponse> {
-  return invokeCommand("search_catalog_software", { request });
+/** Searches the software of an installation's catalog. */
+export function searchSoftware(
+  installationId: string,
+  request: SoftwareSearchRequest,
+): Promise<SoftwareSearchResponse> {
+  return invokeCommand("search_catalog_software", { installationId, request });
 }

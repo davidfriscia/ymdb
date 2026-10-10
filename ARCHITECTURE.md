@@ -26,7 +26,8 @@ direction, not commitments; details will be decided when each component is built
 └──────────┼───────────────────────────────────────────────────┘
            │ process execution
 ┌──────────▼──────────┐
-│ Local MAME install  │
+│ Local MAME installs │
+│ (one or more)       │
 └─────────────────────┘
 ```
 
@@ -107,8 +108,9 @@ results and open detail when their sum changes.
 `localStorage` under the versioned key `ymdb.preferences.v2`: theme, visibility of
 the Filters and View Options panels, selected renderer, the options of every
 renderer (kept separately, so switching renderer keeps each one's sizes and
-settings) and the command line preview. They are separate from `settings.json`
-(MAME), `launch.json` (launcher), `media.json` (media sources) and the catalog.
+settings) and the command line preview. They are separate from `installations.json`
+(MAME installations and the active one), the launch configurations, `media.json`
+(media sources) and the catalogs, and are the same for every MAME installation.
 Every field is validated when read: unknown themes or renderers, wrong types and
 malformed JSON fall back to the default of that field, and renderer options are
 normalized against the renderer definitions (ranges clamped to their bounds and
@@ -121,9 +123,11 @@ Planned: collections, input devices.
 
 ### Catalog browser — Implemented
 
-`src/features/browser/` browses machines or software with the
-[search engine](#catalog-search--implemented). The frontend never searches,
-filters, sorts, counts or paginates itself: it only builds typed requests.
+`src/features/browser/` browses machines or software of the active MAME installation
+with the [search engine](#catalog-search--implemented). The frontend never searches,
+filters, sorts, counts or paginates itself: it only builds typed requests, each naming
+the installation (see [Version selection](#version-selection-in-the-interface) for
+what happens when the active installation changes).
 
 - **State.** `browserState.ts` holds the query in a reducer: catalog type, search
   box text and applied text, per catalog type the filters, sort, direction, page,
@@ -215,8 +219,9 @@ filters, sorts, counts or paginates itself: it only builds typed requests.
     page) served by the search engine (`cloneOf`, `lists`, `softwareLists`).
   - Unresolved references (a parent or device missing from the catalog) are shown
     as plain text.
-- **States.** Loading, no catalog (with a link to the MAME page), catalog
-  unreadable, catalog not matching the configured executable (warning banner, the
+- **States.** Loading, no MAME installation, no catalog for the active installation
+  (with a link to the MAME page and the version menu), catalog unreadable, catalog
+  not matching the installation's executable (warning banner, the
   catalog stays browsable), software lists not imported, no results (with "Clear
   all filters"), search or detail errors with Retry, a page past the end, and a
   record that is no longer in the catalog after a reimport.
@@ -233,18 +238,26 @@ manufacturers about 0.1 s; JavaScript heap about 4 MB after a full session.
 The Rust crate in `src-tauri/`.
 
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
-- `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`, `catalog.rs`,
-  `search.rs`, `detail.rs`, `launcher.rs`, `media.rs`). Commands extract what they need from the Tauri runtime and delegate
+- `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`,
+  `installations.rs`, `catalog.rs`, `search.rs`, `detail.rs`, `launcher.rs`,
+  `media.rs`). Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
   long-running work (catalog import) on a dedicated thread, so the UI never freezes.
-  Failures are returned as a structured `CommandError` (`settings`, `notConfigured`,
-  `importInProgress`, `invalidRequest`, `catalogNotImported`,
-  `softwareListsNotImported`, `catalogMismatch`, `notFound`, `alreadyRunning`,
-  `launchFailed`, `internal`).
+  Failures are returned as a structured `CommandError` (`settings`,
+  `installationNotFound`, `duplicateInstallation`, `removalNotAllowed`,
+  `migrationFailed`, `importInProgress`, `invalidRequest`, `catalogNotImported`,
+  `catalogUnreadable`, `softwareListsNotImported`, `catalogMismatch`, `notFound`,
+  `alreadyRunning`, `launchFailed`, `internal`). A problem with one installation
+  (missing executable, unreadable catalog) is reported for that installation only.
 - `health.rs` builds the health report returned by `check_health`.
-- `atomic_file.rs` writes small files atomically (`settings.json`, `launch.json`).
-- `settings.rs` persists application settings (see [Local storage](#local-storage--implemented-partially)).
+- `atomic_file.rs` writes small files atomically (`installations.json`, `launch.json`,
+  `media.json`).
+- `installations/` manages the registered MAME installations, the active one and the
+  migration from the single-installation layout (see
+  [MAME installations](#mame-installations--implemented)).
+- `settings.rs` reads the `settings.json` of the single-installation layout, only for
+  the migration.
 - `mame/` implements the MAME integration (see below).
 - `catalog/` implements the machine and software list catalog (see [Catalog](#catalog--implemented-machines-and-software-lists)).
 - `launcher/` builds and runs MAME command lines (see [Launcher](#launcher--implemented)).
@@ -307,6 +320,208 @@ pass arbitrary arguments.
 Planned:
 
 - Verify ROM sets, BIOS and CHD requirements.
+
+### MAME installations — Implemented
+
+Implemented in `src-tauri/src/installations/` (model, persistence, migration) and
+`commands/installations.rs`, typed in `src/features/installations/`. YMDB manages any
+number of MAME installations side by side; one of them is active.
+
+#### Model and identifiers
+
+A `MameInstallation` (`installations/registry.rs`) has:
+
+- `id`: 32 lowercase hexadecimal digits (a random UUID), stable for the life of the
+  installation. It is never derived from the version, so two installations may have
+  the same version with different executables. Ids are only used as path segments
+  after being found in the registry.
+- `executablePath`: absolute path of the executable. It never changes: another
+  executable is another installation, so a catalog can never be silently associated
+  with a build it was not imported from. Duplicates are refused by
+  `mame::platform::same_executable`: the canonical path when the file exists, and
+  case-insensitive comparison on Windows and macOS.
+- `displayName`: optional name chosen by the user (at most 60 characters); the label
+  is otherwise `MAME <release>`.
+- `version`, `identity` (file size and modification time) and `verifiedAt`: recorded
+  by the last successful verification. The executable status (`verified`,
+  `notVerified`, `changed`, `missing`) is computed from the identity without running
+  MAME.
+- `addedAt`.
+
+`installations.json` (configuration directory, `schemaVersion` 1, atomic writes,
+validated on load and save) holds the installations in registration order, the
+`activeInstallationId` and the record of the legacy migration:
+
+```json
+{
+  "schemaVersion": 1,
+  "installations": [
+    {
+      "id": "3f2a…",
+      "executablePath": "C:\\Emulators\\MAME 0.280\\mame.exe",
+      "displayName": null,
+      "version": { "release": "0.280", "revision": "mame0280" },
+      "identity": { "size": 123456789, "modifiedAt": 1760000000000 },
+      "addedAt": 1760000000000,
+      "verifiedAt": 1760000000000
+    }
+  ],
+  "activeInstallationId": "3f2a…"
+}
+```
+
+An invalid file is reported and never replaced implicitly, because it references
+the files of every installation. Rules: the first installation added becomes active;
+adding one never changes the others; when the active installation is removed, the
+first remaining one in registration order becomes active (none when the list is
+empty, which shows the empty state with a link to add one). Selecting an
+installation never starts MAME.
+
+#### Files of an installation
+
+| File                                        | Directory                         |
+| ------------------------------------------- | --------------------------------- |
+| `installations/<id>/catalog.sqlite`         | local data (`app_local_data_dir`) |
+| `installations/<id>/catalog.sqlite.partial` | local data, during an import      |
+| `installations/<id>/launch.json`            | configuration (`app_config_dir`)  |
+
+Each catalog is a separate SQLite database built by the unchanged parser, migrations,
+`CatalogStore` and search engine; there is no database mixing versions. It keeps the
+version and executable identity of the build it was imported from
+(`catalog_metadata`). `media.json` and the interface preferences are global.
+
+#### Resolving requests
+
+Every command that reads a catalog or a launch configuration receives an explicit
+`installationId` and resolves it once (`InstallationsState::resolve`) into the
+installation, its `CatalogStore` and its `LaunchConfigStore`. A request therefore
+always reads the catalog it started with, even if the active installation changes
+meanwhile; nothing reads a mutable "current installation" in the middle of a
+request. Unknown ids fail with `installationNotFound`.
+
+One `CatalogStore` per installation used since startup is kept, each with its own
+lock and cached read connection, so the atomic replacement on Windows works as
+before. Only the catalogs of the requested and of the active installation keep a
+read connection open; the others are closed (`release_reader`) whenever another
+catalog is requested or the active installation changes, so browsing many
+installations does not keep every database open.
+
+#### Imports
+
+`start_catalog_import(installationId)` and `start_software_list_import(installationId)`
+run on a dedicated thread with the store and executable of that installation, and
+the import status names it (`installationId`). Changing the active installation does
+not affect a running import. Only one import runs at a time (any installation):
+it bounds MAME's memory and disk use and keeps the existing job model. Streaming,
+partial file, atomic commit, cancellation, integrity checks, migrations and the
+machine/software list consistency check are unchanged.
+
+#### Version selection in the interface
+
+`InstallationsProvider` loads the list and exposes the active installation. Selecting
+another one (MAME page or the **MAME Version** menu of the catalog's View Options)
+switches the interface immediately and saves the selection with
+`set_active_installation`; selections are saved one after the other so the last one
+wins. The catalog browser:
+
+- names the installation in every search, facet, detail, related list and launch
+  request, and tags responses with it: `useLoader` ignores superseded responses and
+  results of another installation are never shown, not even while the new catalog is
+  being searched;
+- keeps the search text, filters and sort order, returns to the first page and closes
+  the detail views (they belong to the previous catalog; the rule is applied while
+  rendering, so no detail is requested from the new catalog by mistake);
+- keeps filter values that do not exist in the new catalog (they match nothing and
+  are listed without a count) and shows a notice offering to clear them;
+- keeps showing the workspace while the new catalog status loads when that
+  installation has a catalog, and shows the empty state (with the version menu)
+  otherwise;
+- keeps the renderer and its options, which are global interface preferences.
+
+#### Launch configuration per installation
+
+`launch.json` is per installation, with the same format and validation. Global
+options, profiles, machine overrides and software overrides are therefore isolated:
+option, device and machine names can change between versions, so they are never
+shared or copied automatically. The precedence is unchanged: MAME configuration,
+global options of the installation, profile, machine override, software override.
+**Settings → MAME launch options** chooses the installation to configure (the active
+one by default).
+
+`LaunchRequest` contains `installationId`; preview and launch resolve that
+installation, check its catalog against its executable and build a `LaunchPlan`
+that records `installationId`, `profileId` (the applied profile), the executable,
+the working directory and the arguments with their roles.
+
+#### Sessions
+
+Each session records `installationId` and `installationLabel` (the name when it
+started), shown by the session status. Switching the active installation never stops
+a session. The same machine or software may run once per installation at a time
+(two installations can run it concurrently). Removing an installation is refused
+(`removalNotAllowed`) while a session started from it or an import of it is running;
+nothing is terminated implicitly.
+
+#### Removal
+
+`remove_installation(installationId, deleteCatalog, deleteLaunchConfig)` unregisters
+the installation after a confirmation in the interface. The catalog is deleted only
+when requested (default in the interface: yes, it is derived data) and the launch
+configuration only when requested (default: no); kept directories are reported. Files
+are deleted before the registry changes: if one cannot be deleted, the installation
+stays registered. The MAME executable and MAME's files (ROMs, CHDs, artwork, INI,
+cfg, nvram) are never touched.
+
+#### Migration from the single-installation layout
+
+Sessions 1-9 stored one executable in `settings.json`, one `catalog.sqlite` in the
+local data directory and one `launch.json`. When `installations.json` does not exist,
+`installations::migration` upgrades this layout at startup without running MAME:
+
+1. **Plan.** Read `settings.json` and the old catalog's metadata. The configured
+   executable becomes an installation; when the catalog was imported from it (same
+   executable by the platform rules), the catalog's release, revision and executable
+   identity become the installation's version and identity, so it starts verified.
+   A catalog imported from another executable gets its own installation for that
+   executable (never associated with the configured one). The launch configuration
+   goes to the configured installation. The registry is saved with a `pending`
+   migration record naming these installations and the catalog's expected release
+   and machine count.
+2. **Move** `catalog.sqlite` into `installations/<id>/` with a rename on the same
+   volume (no copy, no re-import) and delete the old partial file of an interrupted
+   import, if any. **Copy** `launch.json` atomically.
+3. **Verify** the moved catalog (readable, same release and machine count) and the
+   copied launch configuration (same bytes).
+4. Mark the record `completed`.
+
+Every step can run again: an interrupted migration resumes from the saved record with
+the same installation ids, and a completed one never runs again. A failure (for
+example another program keeping the old catalog open) leaves the record `pending`,
+moves nothing else and is reported as `migrationFailed`; every access retries, so the
+migration completes once the cause is gone. `settings.json` and `launch.json` are
+never modified and remain as a backup. Without any old configuration or catalog, no
+file is written. Media sources and interface preferences need no migration.
+
+#### Commands
+
+- `list_installations`, `set_active_installation(installationId)`,
+  `rename_installation(installationId, displayName)`.
+- `add_installation(path)`: validates with `-version`, then registers; refuses
+  duplicates (`duplicateInstallation`) before running MAME.
+- `verify_installation(installationId)`: validates again and records the version.
+- `remove_installation(installationId, deleteCatalog, deleteLaunchConfig)`.
+- `pick_mame_executable`, `detect_mame_installations` (each candidate reports the
+  installation that already registers it).
+
+#### Limitations
+
+- One import at a time across installations.
+- Profiles and overrides cannot be copied between installations yet.
+- The executable of an installation cannot be changed; add another installation.
+- After a downgrade to an older YMDB, the moved catalog is not found and must be
+  imported again (the old `settings.json` and `launch.json` are still there).
+- Paths are compared case-insensitively on macOS, which assumes the default
+  case-insensitive file system.
 
 ### Launcher — Implemented
 
@@ -437,17 +652,17 @@ devices empty. At least one part must be mounted, and a part is mounted once.
   immediately, so MAME does not save NVRAM or its configuration for that session.
 - Closing YMDB never terminates running sessions: MAME keeps running on its own and
   YMDB forgets it. Nothing is killed implicitly.
-- Before launching, the configured executable must exist and the catalog must be
-  `current` for it: a catalog from another or a modified executable is refused
+- Before launching, the executable of the request's installation must exist and its
+  catalog must be `current` for it: a catalog from another or a modified executable is refused
   (`catalogMismatch`), because machine, device and software names may differ. YMDB
   does not check whether ROM files are present: MAME reports missing files (exit
   code 2) and the session shows that error.
 
 #### Persistence
 
-`launch.json` lives next to `settings.json` in the application configuration
-directory. It has its own `schemaVersion`, is written atomically with the same
-helper as the settings and is validated when loaded: a missing file gives the
+Each MAME installation has its own `launch.json`, in `installations/<id>/` of the
+application configuration directory. It has its own `schemaVersion`, is written
+atomically and is validated when loaded: a missing file gives the
 default configuration; an invalid file is reported and replaced only when the user
 saves. It is separate from the catalog (derived data) and from the interface
 preferences (web storage).
@@ -471,17 +686,19 @@ or lists of paths):
 
 #### Commands
 
-- `get_launch_config` / `save_launch_config`: the whole configuration, validated
-  and saved atomically, with the option definitions for the interface.
-- `get_software_launch_info(list, name)`: parts and candidate machines of a
-  software.
+- `get_launch_config(installationId)` / `save_launch_config(installationId, config)`:
+  the whole configuration of an installation, validated and saved atomically, with
+  the option definitions for the interface.
+- `get_software_launch_info(installationId, list, name)`: parts and candidate
+  machines of a software.
 - `preview_launch(request)`: the plan of a launch, without running it.
 - `start_launch(request)`: starts MAME and returns the session.
 - `get_launch_sessions`: in-memory statuses, polled while a session runs.
 - `stop_launch_session(id)`: kills a running session.
 
-A request names the machine, optionally the software with its part assignments,
-and optionally a profile; the backend always rebuilds the command line from it.
+A request names the installation, the machine, optionally the software with its part
+assignments, and optionally a profile; the backend always rebuilds the command line
+from it.
 
 #### Interface
 
@@ -496,7 +713,8 @@ and optionally a profile; the backend always rebuilds the command line from it.
   (machines that cannot are disabled), a note on the limits of the catalog data,
   the media assignment (one selector per compatible device) and **Options for this
   software**.
-- Settings: global options, profiles (create, rename, edit, make default, delete;
+- Settings: the installation to configure, then its global options, profiles
+  (create, rename, edit, make default, delete;
   the `default` profile cannot be deleted) and the list of machine and software
   overrides, which can be removed there.
 - The option editor only lists supported options, grouped by category, and checks
@@ -553,7 +771,8 @@ image in the catalog.
   no remote protocol is implemented. Paths must be absolute; a directory that is
   missing, not a directory or unreadable is kept and shown with that status (an
   offline share is not an error).
-- `media.json` (next to `settings.json`, `schemaVersion` 1, atomic writes, validated
+- `media.json` (configuration directory, shared by all MAME installations,
+  `schemaVersion` 1, atomic writes, validated
   on load and save):
 
   ```json
@@ -654,7 +873,7 @@ Implemented in `src-tauri/src/catalog/`:
 - `store.rs`: catalog database files, inserts and atomic replacement.
 - `import.rs`: orchestration (validate, run MAME, parse, store, swap). Machines and
   software lists share `stream_mame_output`, built on `mame::process::spawn_streaming`.
-- `freshness.rs`: whether the catalog matches the configured executable.
+- `freshness.rs`: whether a catalog matches its installation's executable.
 - `search/`: full-text search and faceted filtering (see
   [Catalog search](#catalog-search--implemented)).
 
@@ -792,10 +1011,11 @@ launcher. For software, part DIP switches (allowed by the DTD, not output by MAM
 
 #### Import strategy
 
-The catalog is a separate database file, `catalog.sqlite`, containing only data
-derived from MAME. An import:
+Each installation's catalog is a separate database file,
+`installations/<id>/catalog.sqlite`, containing only data derived from MAME. An
+import of an installation:
 
-1. Validates the configured executable with `-version` and records its release,
+1. Validates the installation's executable with `-version` and records its release,
    revision, path, size and modification time.
 2. Creates `catalog.sqlite.partial` from scratch (journaling off, foreign keys on),
    applies the migrations and opens a single transaction.
@@ -821,7 +1041,7 @@ watchdog uses to kill MAME; it is honored until the final commit.
 
 A **software list import** uses the same replacement mechanism:
 
-1. Validates the configured executable and requires a machine catalog built from
+1. Validates the installation's executable and requires a machine catalog built from
    the same MAME release and revision, read from the same unchanged executable
    (path, size and modification time); otherwise it fails with `catalogMismatch`
    (or `machineCatalogRequired`) before running `-listsoftware`.
@@ -845,7 +1065,7 @@ one build are never attached to machines of another. A future "full update" can
 write machines and software lists into the same partial file with the same
 `CatalogWriter` before a single swap.
 
-Only one import (of either kind) runs at a time. On Windows a file cannot be
+Only one import (of either kind, for any installation) runs at a time. On Windows a file cannot be
 renamed over while a handle to it is open: every connection to `catalog.sqlite` is
 opened and closed under the store's file lock, which the rename also holds, so the
 application never blocks its own replacement. If another program keeps the file
@@ -861,10 +1081,10 @@ reference machines by short name and software by list and short name.
 A catalog is tied to the MAME build it was imported from (`catalog_metadata`); its
 software lists, when present, record their own build in `software_catalog_metadata`
 and are only accepted from the same build and executable. The catalog status
-compares the catalog, without running MAME, with the configured executable:
+compares the catalog, without running MAME, with its installation's executable:
 `current`, `executableChanged` (same path, different size or modification time,
-for example after an in-place update), `differentExecutable`, `executableMissing` or
-`mameNotConfigured`. The catalog is never treated as valid for another executable;
+for example after an in-place update), `differentExecutable` or
+`executableMissing`. The catalog is never treated as valid for another executable;
 the UI asks to import again, and software lists can only be imported when the
 status is `current`.
 
@@ -875,15 +1095,17 @@ reported as unreadable and must be imported again.
 
 #### Interface
 
-The MAME Catalog panel shows, for machines, whether a catalog exists, its MAME
+The **Catalog of …** panel of the MAME page, for the installation selected there,
+shows, for machines, whether a catalog exists, its MAME
 version, import date and statistics (entries, runnable systems, clones, BIOS sets,
 devices, mechanical, ROMs, disks, referenced software lists, database size, import
 duration) and the freshness warning; for software lists, whether they are imported,
 their MAME version, import date and statistics (lists, software, clones, partially
 supported, unsupported, parts, ROMs, disks, referenced lists not provided by MAME,
 import duration). Buttons import or reimport machines, import or update software
-lists (enabled only when the catalog matches the configured executable) and cancel
-the running import. While importing it polls an in-memory status every 500 ms and
+lists (enabled only when the catalog matches the installation's executable) and
+cancel the running import; while another installation imports, it says so and
+waits. While importing it polls an in-memory status every 500 ms and
 shows an indeterminate progress bar with the number of machines or software
 processed: totals are not known in advance, so no percentage is shown. Summaries are
 read from the database only when an import ends.
@@ -1096,54 +1318,43 @@ indexes 15 MiB), for a total of 231 MB.
 
 ### Local storage — Implemented (partially)
 
-Implemented: application settings in a JSON file, `settings.json`, in the
-platform configuration directory resolved by Tauri (`app_config_dir`) for the
-bundle identifier `io.github.davidfriscia.ymdb`:
+The application uses two platform directories resolved by Tauri for the bundle
+identifier `io.github.davidfriscia.ymdb`: the configuration directory
+(`app_config_dir`) for small user files, and the local data directory
+(`app_local_data_dir`) for large, machine-specific derived data that should not roam.
 
-| Platform | Location                                                                               |
-| -------- | -------------------------------------------------------------------------------------- |
-| Windows  | `%APPDATA%\io.github.davidfriscia.ymdb\settings.json`                                  |
-| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/settings.json`              |
-| Linux    | `$XDG_CONFIG_HOME/io.github.davidfriscia.ymdb/settings.json` (default `~/.config/...`) |
+| Platform | Configuration directory                                                  | Local data directory                                                        |
+| -------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Windows  | `%APPDATA%\io.github.davidfriscia.ymdb`                                  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb`                                |
+| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb`              | `~/Library/Application Support/io.github.davidfriscia.ymdb`                 |
+| Linux    | `$XDG_CONFIG_HOME/io.github.davidfriscia.ymdb` (default `~/.config/...`) | `$XDG_DATA_HOME/io.github.davidfriscia.ymdb` (default `~/.local/share/...`) |
 
-Format:
+Configuration directory:
 
-```json
-{
-  "schemaVersion": 1,
-  "mame": { "executablePath": "C:\\Emulators\\MAME\\mame.exe" }
-}
-```
+- `installations.json`: the registered MAME installations and the active one (see
+  [MAME installations](#mame-installations--implemented)).
+- `installations/<id>/launch.json`: the launch configuration of each installation
+  (see [Launcher](#launcher--implemented)).
+- `media.json`: the media sources, shared by all installations (see
+  [Media sources](#media-sources--implemented)).
+- `settings.json` and `launch.json`: files of the single-installation layout. They are
+  only read by the migration and never written again, so they remain as a backup.
 
-- `mame` is `null` or absent when no executable is configured. The detected MAME
-  version is deliberately not stored; it is read again on every verification.
-- Writes are atomic: a temporary file in the same directory is written, synced and
-  renamed over `settings.json`.
-- A missing file means default settings. An invalid file is reported to the user
-  without crashing and is replaced the next time the configuration is saved.
-- Access to the file is serialized by a mutex held in Tauri managed state.
+Local data directory:
 
-Implemented: the catalog database, `catalog.sqlite`, in the platform local data
-directory resolved by Tauri (`app_local_data_dir`), because it is large,
-machine-specific derived data that should not roam:
+- `installations/<id>/catalog.sqlite`: the catalog of each installation (see
+  [Catalog](#catalog--implemented-machines-and-software-lists)).
+- `launch-logs/`: the output of MAME sessions (the 20 most recent are kept).
 
-| Platform | Location                                                                                   |
-| -------- | ------------------------------------------------------------------------------------------ |
-| Windows  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb\catalog.sqlite`                                |
-| macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/catalog.sqlite`                 |
-| Linux    | `$XDG_DATA_HOME/io.github.davidfriscia.ymdb/catalog.sqlite` (default `~/.local/share/...`) |
+All JSON files are written atomically (a temporary file in the same directory is
+written, synced and renamed over the target) and validated when read. Access is
+serialized by mutexes held in Tauri managed state. `YMDB_DATA_DIR` replaces both
+directories with one directory (`config/` and `data/`), for isolated test runs.
 
-Implemented: the media sources, `media.json`, next to `settings.json` (see
-[Media sources](#media-sources--implemented)). `YMDB_DATA_DIR` replaces all these
-locations with one directory, for isolated test runs.
-
-Implemented: the launch configuration, `launch.json`, next to `settings.json` (see
-[Launcher](#launcher--implemented)), and the MAME session logs in
-`launch-logs/` in the local data directory (the 20 most recent are kept).
-
-Implemented: interface preferences (theme, card size, filter panel, result renderer,
-command line preview) in the webview `localStorage` (see [Interface preferences](#interface-preferences)).
-They live in the webview data directory and are not part of `settings.json`.
+Implemented: interface preferences (theme, panels, result renderer and options,
+command line preview) in the webview `localStorage` (see
+[Interface preferences](#interface-preferences)). They live in the webview data
+directory and are shared by all MAME installations.
 
 Planned: user-configurable ROM, CHD and artwork directories.
 

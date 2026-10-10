@@ -1,3 +1,4 @@
+import { NEW_ID } from "./installationFixtures";
 import type { CatalogStatus } from "../features/catalog/catalogApi";
 import type {
   MachineDetail,
@@ -108,19 +109,19 @@ export function catalogStatus(overrides: Partial<CatalogStatus> = {}): CatalogSt
         },
       },
     },
+    installationId: NEW_ID,
     catalogError: null,
     freshness: "current",
-    mameConfigured: true,
     import: { state: "idle" },
     ...overrides,
   };
 }
 
 export const emptyCatalogStatus: CatalogStatus = {
+  installationId: NEW_ID,
   catalog: null,
   catalogError: null,
   freshness: null,
-  mameConfigured: false,
   import: { state: "idle" },
 };
 

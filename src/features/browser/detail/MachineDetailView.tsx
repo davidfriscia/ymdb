@@ -4,6 +4,7 @@ import { formatCount } from "../../catalog/catalogMessages";
 import { DriverStatusBadge, Badge, StatusBadge } from "../badges";
 import type { DetailTarget } from "../browserState";
 import { getMachineDetail, type MachineDetail } from "../detailApi";
+import { useInstallationScope } from "../../installations/installationsContext";
 import {
   DataTable,
   DetailFrame,
@@ -33,7 +34,8 @@ export function MachineDetailView({
   onTab,
   onOpen,
 }: MachineDetailViewProps) {
-  const load = useCallback(() => getMachineDetail(name), [name]);
+  const installationId = useInstallationScope();
+  const load = useCallback(() => getMachineDetail(installationId, name), [installationId, name]);
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status !== "ready" || state.value === null) {

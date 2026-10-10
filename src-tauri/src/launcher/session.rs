@@ -67,6 +67,11 @@ pub enum SessionState {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: u64,
+    /// The installation the session was started from.
+    pub installation_id: String,
+    /// Name of that installation when the session started, for display
+    /// even after the installation is renamed or removed.
+    pub installation_label: String,
     pub target: LaunchTarget,
     /// Description of the machine or software, for display.
     pub title: String,
@@ -78,7 +83,7 @@ pub struct SessionInfo {
 
 #[derive(Debug)]
 pub enum SessionError {
-    /// A session for the same target is still running.
+    /// A session for the same target and installation is still running.
     AlreadyRunning(u64),
     Spawn(io::Error),
     NotFound,
@@ -115,16 +120,20 @@ impl SessionManager {
         }
     }
 
-    /// Starts MAME for `plan` and begins monitoring it.
+    /// Starts MAME for `plan` and begins monitoring it. The same target may
+    /// run once per installation at a time.
     pub fn start(
         &self,
         target: LaunchTarget,
         title: String,
+        installation_label: String,
         plan: &LaunchPlan,
     ) -> Result<SessionInfo, SessionError> {
         let mut sessions = self.lock();
         if let Some(running) = sessions.iter().find(|session| {
-            session.info.target == target && session.info.state == SessionState::Running
+            session.info.target == target
+                && session.info.installation_id == plan.installation_id
+                && session.info.state == SessionState::Running
         }) {
             return Err(SessionError::AlreadyRunning(running.info.id));
         }
@@ -141,6 +150,8 @@ impl SessionManager {
         })?;
         let info = SessionInfo {
             id,
+            installation_id: plan.installation_id.clone(),
+            installation_label,
             target,
             title,
             command_line: plan.command_line(),
@@ -166,6 +177,17 @@ impl SessionManager {
             .rev()
             .map(|session| session.info.clone())
             .collect()
+    }
+
+    /// Number of running sessions started from an installation.
+    pub fn running_for(&self, installation_id: &str) -> usize {
+        self.lock()
+            .iter()
+            .filter(|session| {
+                session.info.installation_id == installation_id
+                    && session.info.state == SessionState::Running
+            })
+            .count()
     }
 
     /// Kills a running session. MAME cannot save NVRAM or its configuration.
@@ -329,7 +351,16 @@ mod tests {
 
     /// A plan running a test program from `dir` instead of MAME.
     fn plan(program: &str, args: &[&str], dir: &Path) -> LaunchPlan {
+        plan_for(FIRST, program, args, dir)
+    }
+
+    const FIRST: &str = "0123456789abcdef0123456789abcdef";
+    const SECOND: &str = "fedcba9876543210fedcba9876543210";
+
+    fn plan_for(installation_id: &str, program: &str, args: &[&str], dir: &Path) -> LaunchPlan {
         LaunchPlan {
+            installation_id: installation_id.to_owned(),
+            profile_id: "default".to_owned(),
             executable: PathBuf::from(program),
             working_directory: dir.to_path_buf(),
             arguments: args
@@ -344,10 +375,14 @@ mod tests {
 
     /// Runs for a long time without output.
     fn long_running(dir: &Path) -> LaunchPlan {
+        long_running_for(FIRST, dir)
+    }
+
+    fn long_running_for(installation_id: &str, dir: &Path) -> LaunchPlan {
         if cfg!(windows) {
-            plan("ping", &["-n", "60", "127.0.0.1"], dir)
+            plan_for(installation_id, "ping", &["-n", "60", "127.0.0.1"], dir)
         } else {
-            plan("sleep", &["60"], dir)
+            plan_for(installation_id, "sleep", &["60"], dir)
         }
     }
 
@@ -397,6 +432,7 @@ mod tests {
             .start(
                 target("pacman"),
                 "Pac-Man".to_owned(),
+                "MAME 0.280".to_owned(),
                 &exiting(dir.path(), 2),
             )
             .expect("start");
@@ -421,6 +457,7 @@ mod tests {
             .start(
                 target("pacman"),
                 "Pac-Man".to_owned(),
+                "MAME 0.280".to_owned(),
                 &exiting(dir.path(), 0),
             )
             .expect("start again after exit");
@@ -442,6 +479,7 @@ mod tests {
             .start(
                 target("galaga"),
                 "Galaga".to_owned(),
+                "MAME 0.280".to_owned(),
                 &long_running(dir.path()),
             )
             .expect("start");
@@ -452,14 +490,16 @@ mod tests {
 
         // The same target cannot be started twice while running.
         assert!(matches!(
-            manager.start(target("galaga"), "Galaga".to_owned(), &long_running(dir.path())),
-            Err(SessionError::AlreadyRunning(id)) if id == session.id
-        ));
+                   manager.start(target("galaga"), "Galaga".to_owned(),
+        "MAME 0.280".to_owned(), &long_running(dir.path())),
+                   Err(SessionError::AlreadyRunning(id)) if id == session.id
+               ));
         // Another target can.
         let other = manager
             .start(
                 target("pacman"),
                 "Pac-Man".to_owned(),
+                "MAME 0.280".to_owned(),
                 &long_running(dir.path()),
             )
             .expect("other target");
@@ -482,6 +522,58 @@ mod tests {
     }
 
     #[test]
+    fn the_same_target_runs_once_per_installation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manager = manager(dir.path());
+        let first = manager
+            .start(
+                target("galaga"),
+                "Galaga".to_owned(),
+                "MAME 0.279".to_owned(),
+                &long_running_for(FIRST, dir.path()),
+            )
+            .expect("first installation");
+        let second = manager
+            .start(
+                target("galaga"),
+                "Galaga".to_owned(),
+                "MAME 0.280".to_owned(),
+                &long_running_for(SECOND, dir.path()),
+            )
+            .expect("same target, other installation");
+        assert!(matches!(
+            manager.start(
+                target("galaga"),
+                "Galaga".to_owned(),
+                "MAME 0.280".to_owned(),
+                &long_running_for(SECOND, dir.path()),
+            ),
+            Err(SessionError::AlreadyRunning(id)) if id == second.id
+        ));
+        assert_eq!(manager.running_for(FIRST), 1);
+        assert_eq!(manager.running_for(SECOND), 1);
+        let listed = manager.list();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|session| (
+                    session.installation_id.as_str(),
+                    session.installation_label.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            [(SECOND, "MAME 0.280"), (FIRST, "MAME 0.279")]
+        );
+
+        // Stopping one installation's session leaves the other running.
+        manager.stop(first.id).expect("stop");
+        wait_until_finished(&manager, first.id);
+        assert_eq!(manager.running_for(FIRST), 0);
+        assert_eq!(manager.list()[0].state, SessionState::Running);
+        manager.stop(second.id).expect("stop");
+        wait_until_finished(&manager, second.id);
+    }
+
+    #[test]
     fn reports_spawn_errors_for_missing_executables() {
         let dir = tempfile::tempdir().expect("temp dir");
         let manager = manager(dir.path());
@@ -489,6 +581,7 @@ mod tests {
         let result = manager.start(
             target("pacman"),
             "Pac-Man".to_owned(),
+            "MAME 0.280".to_owned(),
             &plan(missing.to_str().expect("utf-8"), &["pacman"], dir.path()),
         );
         assert!(matches!(result, Err(SessionError::Spawn(_))));

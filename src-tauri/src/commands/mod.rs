@@ -8,18 +8,16 @@
 pub mod catalog;
 pub mod detail;
 pub mod health;
+pub mod installations;
 pub mod launcher;
 pub mod mame;
 pub mod media;
 pub mod search;
 
-use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
-
 use serde::Serialize;
 
 use crate::catalog::freshness::CatalogFreshness;
-use crate::settings::{SettingsError, SettingsStore};
+use crate::catalog::store::StoreError;
 
 /// Error returned by commands. Validation failures are not errors: they are
 /// reported as part of a successful validation result.
@@ -30,19 +28,27 @@ use crate::settings::{SettingsError, SettingsStore};
     rename_all_fields = "camelCase"
 )]
 pub enum CommandError {
-    /// The settings could not be read or written.
+    /// A configuration file could not be read or written.
     Settings { message: String },
-    /// The operation requires a configured MAME executable.
-    NotConfigured,
+    /// The installation does not exist (for example it was removed).
+    InstallationNotFound { installation_id: String },
+    /// The executable is already registered.
+    DuplicateInstallation { existing_installation_id: String },
+    /// The installation cannot be removed now (for example MAME is running).
+    RemovalNotAllowed { message: String },
+    /// The configuration of an older YMDB could not be upgraded; nothing was lost.
+    MigrationFailed { message: String },
     /// A catalog import is already running.
     ImportInProgress,
-    /// The search request is invalid (for example a page size out of range).
+    /// The request is invalid (for example a page size out of range).
     InvalidRequest { message: String },
-    /// No catalog has been imported yet.
+    /// No catalog has been imported yet for the installation.
     CatalogNotImported,
+    /// The catalog file exists but cannot be read.
+    CatalogUnreadable { message: String },
     /// The catalog contains no software lists.
     SoftwareListsNotImported,
-    /// The catalog does not match the configured MAME executable, so names may
+    /// The catalog does not match the installation's executable, so names may
     /// differ: it must be imported again before launching.
     CatalogMismatch { freshness: CatalogFreshness },
     /// A machine, software or session does not exist.
@@ -55,47 +61,11 @@ pub enum CommandError {
     Internal { message: String },
 }
 
-impl From<SettingsError> for CommandError {
-    fn from(error: SettingsError) -> Self {
-        Self::Settings {
+impl From<StoreError> for CommandError {
+    fn from(error: StoreError) -> Self {
+        Self::CatalogUnreadable {
             message: error.to_string(),
         }
-    }
-}
-
-/// Managed state giving commands serialized access to the settings file.
-pub struct SettingsState {
-    /// `None` when the platform configuration directory could not be resolved.
-    store: Option<SettingsStore>,
-    lock: Mutex<()>,
-}
-
-impl SettingsState {
-    pub fn new(store: Option<SettingsStore>) -> Self {
-        Self {
-            store,
-            lock: Mutex::new(()),
-        }
-    }
-
-    /// Returns the configured MAME executable, if any.
-    pub fn configured_executable(&self) -> Result<Option<PathBuf>, CommandError> {
-        self.with_store(|store| {
-            store
-                .load()
-                .map(|settings| settings.mame.map(|mame| mame.executable_path))
-        })
-    }
-
-    fn with_store<T>(
-        &self,
-        operation: impl FnOnce(&SettingsStore) -> Result<T, SettingsError>,
-    ) -> Result<T, CommandError> {
-        let store = self.store.as_ref().ok_or_else(|| CommandError::Settings {
-            message: "the application configuration directory is unavailable".to_owned(),
-        })?;
-        let _guard = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
-        operation(store).map_err(CommandError::from)
     }
 }
 
@@ -125,8 +95,18 @@ mod tests {
             serde_json::json!({ "kind": "settings", "message": "disk full" })
         );
         assert_eq!(
-            serde_json::to_value(CommandError::NotConfigured).expect("serialize"),
-            serde_json::json!({ "kind": "notConfigured" })
+            serde_json::to_value(CommandError::InstallationNotFound {
+                installation_id: "abc".to_owned()
+            })
+            .expect("serialize"),
+            serde_json::json!({ "kind": "installationNotFound", "installationId": "abc" })
+        );
+        assert_eq!(
+            serde_json::to_value(CommandError::DuplicateInstallation {
+                existing_installation_id: "abc".to_owned()
+            })
+            .expect("serialize"),
+            serde_json::json!({ "kind": "duplicateInstallation", "existingInstallationId": "abc" })
         );
         assert_eq!(
             serde_json::to_value(CommandError::AlreadyRunning { session_id: 3 })
@@ -140,14 +120,5 @@ mod tests {
             .expect("serialize"),
             serde_json::json!({ "kind": "catalogMismatch", "freshness": "differentExecutable" })
         );
-    }
-
-    #[test]
-    fn reports_missing_configuration_directory_as_settings_error() {
-        let state = SettingsState::new(None);
-
-        let result = state.with_store(SettingsStore::load);
-
-        assert!(matches!(result, Err(CommandError::Settings { .. })));
     }
 }

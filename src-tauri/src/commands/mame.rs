@@ -1,7 +1,8 @@
-//! MAME installation management commands.
+//! MAME executable selection and detection commands.
 //!
-//! MAME is executed only by explicit user actions (select, verify, detect),
-//! always with the single fixed argument `-version`.
+//! MAME is executed only by explicit user actions (detect), always with the
+//! single fixed argument `-version`. Registering installations is done by
+//! `commands::installations`.
 
 use std::path::PathBuf;
 
@@ -9,32 +10,10 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
-use super::{CommandError, SettingsState, run_blocking};
+use super::installations::InstallationsState;
+use super::{CommandError, run_blocking};
 use crate::mame::detection::{DetectedInstallation, SearchLocations, detect_installations};
 use crate::mame::platform;
-use crate::mame::validation::{ValidationReport, validate_executable};
-use crate::settings::MameSettings;
-
-/// Saved MAME configuration, as known without running MAME.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MameConfiguration {
-    pub executable_path: Option<PathBuf>,
-    /// Whether a file still exists at the configured path.
-    pub executable_exists: bool,
-}
-
-#[tauri::command]
-pub fn get_mame_configuration(
-    state: State<'_, SettingsState>,
-) -> Result<MameConfiguration, CommandError> {
-    let executable_path = state.configured_executable()?;
-    let executable_exists = executable_path.as_ref().is_some_and(|path| path.is_file());
-    Ok(MameConfiguration {
-        executable_path,
-        executable_exists,
-    })
-}
 
 /// Opens the native file picker. Returns `None` when the user cancels.
 #[tauri::command]
@@ -56,48 +35,49 @@ pub async fn pick_mame_executable(app: AppHandle) -> Result<Option<PathBuf>, Com
         })
 }
 
-/// Validates an executable and saves it as the configured MAME executable
-/// only if validation succeeds.
-#[tauri::command]
-pub async fn set_mame_executable(
-    path: PathBuf,
-    state: State<'_, SettingsState>,
-) -> Result<ValidationReport, CommandError> {
-    let report = run_blocking(move || validate_executable(&path)).await?;
-    if report.is_valid() {
-        let executable_path = report.executable_path.clone();
-        state.with_store(|store| {
-            store.update(|settings| settings.mame = Some(MameSettings { executable_path }))
-        })?;
-    }
-    Ok(report)
-}
-
-/// Validates the configured executable again. The saved configuration is
-/// not modified, whatever the result.
-#[tauri::command]
-pub async fn verify_mame_configuration(
-    state: State<'_, SettingsState>,
-) -> Result<ValidationReport, CommandError> {
-    let path = state
-        .configured_executable()?
-        .ok_or(CommandError::NotConfigured)?;
-    run_blocking(move || validate_executable(&path)).await
-}
-
-#[tauri::command]
-pub fn clear_mame_configuration(state: State<'_, SettingsState>) -> Result<(), CommandError> {
-    state.with_store(|store| store.update(|settings| settings.mame = None).map(drop))
+/// A detected executable and the installation that already registers it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedCandidate {
+    #[serde(flatten)]
+    pub detected: DetectedInstallation,
+    pub registered_installation_id: Option<String>,
 }
 
 /// Searches well-known locations and validates the candidates found. The
-/// saved configuration is never modified by detection.
+/// registered installations are never modified by detection.
 #[tauri::command]
 pub async fn detect_mame_installations(
-    state: State<'_, SettingsState>,
-) -> Result<Vec<DetectedInstallation>, CommandError> {
-    // An unreadable settings file must not prevent detection.
-    let configured = state.configured_executable().ok().flatten();
-    run_blocking(move || detect_installations(&SearchLocations::for_current_platform(configured)))
-        .await
+    installations: State<'_, InstallationsState>,
+) -> Result<Vec<DetectedCandidate>, CommandError> {
+    // The active installation is listed first, as the "configured" one. An
+    // unreadable registry must not prevent detection.
+    let active = installations
+        .with_registry(|registry| {
+            registry
+                .active()
+                .map(|installation| installation.executable_path.clone())
+        })
+        .ok()
+        .flatten();
+    let detected =
+        run_blocking(move || detect_installations(&SearchLocations::for_current_platform(active)))
+            .await?;
+    Ok(detected
+        .into_iter()
+        .map(|detected| {
+            let registered_installation_id = installations
+                .with_registry(|registry| {
+                    registry
+                        .find_by_executable(&detected.report.executable_path)
+                        .map(|installation| installation.id.clone())
+                })
+                .ok()
+                .flatten();
+            DetectedCandidate {
+                detected,
+                registered_installation_id,
+            }
+        })
+        .collect())
 }
