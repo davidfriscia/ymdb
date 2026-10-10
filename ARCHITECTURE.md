@@ -63,6 +63,9 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `search`: typed wrappers of the search commands (`searchApi.ts`).
   - `browser`: the catalog browser and detail views (see
     [Catalog browser](#catalog-browser--implemented)).
+  - `media`: media sources in the Settings page and `MediaProvider`, which shares the
+    sources and their version with the Media Grid (see
+    [Media sources](#media-sources--implemented)).
   - `launcher`: launch panels in the machine and software details, the launch options
     section of the Settings page and `LauncherProvider`, which shares the launch
     configuration and the session statuses (see [Launcher](#launcher--implemented)).
@@ -100,13 +103,19 @@ results and open detail when their sum changes.
 
 #### Interface preferences
 
-`src/app/preferences.ts` stores the interface preferences (theme, card size, filter
-panel visibility, result renderer, command line preview) as JSON in the webview's
-`localStorage` under the versioned key `ymdb.preferences.v1`. They are separate from `settings.json` (MAME
-configuration) and from the catalog. Every field is validated when read: unknown
-themes or renderers, wrong types and malformed JSON fall back to the default of that
-field; the card size is clamped to 160-420 px. Unavailable storage only means the
-preferences last for the session.
+`src/app/preferences.ts` stores the interface preferences as JSON in the webview's
+`localStorage` under the versioned key `ymdb.preferences.v2`: theme, visibility of
+the Filters and View Options panels, selected renderer, the options of every
+renderer (kept separately, so switching renderer keeps each one's sizes and
+settings) and the command line preview. They are separate from `settings.json`
+(MAME), `launch.json` (launcher), `media.json` (media sources) and the catalog.
+Every field is validated when read: unknown themes or renderers, wrong types and
+malformed JSON fall back to the default of that field, and renderer options are
+normalized against the renderer definitions (ranges clamped to their bounds and
+steps, unknown choices replaced). Version 1 data (`ymdb.preferences.v1`: one card
+size and the `cards` renderer) is migrated when there is no version 2 yet, and
+removed at the next save. Unavailable storage only means the preferences last for
+the session.
 
 Planned: collections, input devices.
 
@@ -140,23 +149,45 @@ filters, sorts, counts or paginates itself: it only builds typed requests.
   as count. Active filters are shown as removable chips with "Clear all filters";
   the Filters button shows their number. Declared ROMs/CHDs are what MAME lists,
   not files on disk.
-- **Filter panel.** The Filters toolbar button hides or shows the panel
-  (`aria-pressed`). Hiding it keeps every filter active, does not search again and
-  gives the whole width to the results.
+- **Layout.** Three areas: the Filters panel (left), the results (center) and the
+  View Options panel (right). The **Filters** and **View** toolbar buttons
+  (`aria-pressed`) show or hide each panel independently; the body grid only has
+  columns for visible panels, so the results take the freed width. Hiding a panel
+  keeps filters, search, page and scroll, and never searches again. A new search,
+  filter, sort or page scrolls the results back to the top. Below 1100 px
+  both panels narrow; below 800 px they stack above the results.
 - **Renderers.** Results are displayed by a renderer implementing
-  `ResultRendererProps` (`renderers/types.ts`): the items of the current page, an
-  item size and `onOpen(index)`. Renderers only display; the choice of renderer
-  never changes the request. `renderers/registry.ts` registers `CardRenderer` only;
-  the renderer selector appears when more than one renderer is registered, so a
-  table or list renderer is added by implementing the contract and registering it.
-- **Cards.** `CardRenderer` uses a CSS grid with
-  `repeat(auto-fill, minmax(min(var(--card-size), 100%), 1fr))`: the Card size
-  slider (160-420 px, saved in the preferences) sets the minimum card width and
-  the number of columns follows the available width, without horizontal scrolling.
-  Machine cards show description, short name, manufacturer, year, driver status
-  and BIOS/device/mechanical/clone/not runnable badges; software cards show
-  description, list/name, publisher, year, list description and support status.
-  Pages hold at most 200 items, so no virtualization is used.
+  `ResultRendererProps` (`renderers/types.ts`): the items of the current page (the
+  same search DTOs for every renderer), the renderer's options and `onOpen(index)`.
+  Renderers only display; the choice of renderer never changes the text, filters,
+  facets, sort or page. `renderers/registry.ts` is a typed list of definitions: a
+  stable id, a label, an icon (SVG path), the component and the supported options
+  (`range`, `toggle` or `choice`, each with its default). The View Options panel
+  builds the view mode selector and the option controls from these definitions, and
+  the preferences normalize stored options against them (`renderers/options.ts`),
+  so a future table or list renderer only needs its component and its definition.
+- **Classic Cards** (`ClassicCardRenderer`, the original renderer) uses a CSS grid
+  with `repeat(auto-fill, minmax(min(var(--card-size), 100%), 1fr))`: the Card size
+  option (160-420 px) sets the minimum card width and the number of columns follows
+  the available width, without horizontal scrolling. Machine cards show
+  description, short name, manufacturer, year, driver status and
+  BIOS/device/mechanical/clone/not runnable badges; software cards show description,
+  list/name, publisher, year, list description and support status.
+- **Media Grid** (`MediaGridRenderer`) shows the artwork of each result in a fixed
+  4:3 frame, the same for every tile so the grid stays regular; the image is
+  contained (whole image, default) or covers the frame (cropped), never stretched,
+  so horizontal and vertical arcade screens, consoles, computers and software
+  artwork keep their proportions. Below the image, in smaller text, are the title
+  (two lines at most), optionally the short name and the status badge. Options:
+  tile size (120-480 px, columns follow the width), artwork category, image fit,
+  show title, show technical name, show status badges. Tiles are buttons (keyboard
+  focus and Enter open the detail, visible focus ring); the full title, short name,
+  manufacturer and year are in the accessible name and the tooltip, and
+  manufacturer and year appear over the image on hover or focus. Images use
+  `loading="lazy"`; an image that is missing or fails to load shows a themed
+  placeholder ("No snapshots"), only for that tile. When the category has no
+  directory, no image is requested and a note points to Settings.
+- Pages hold at most 200 items, so no virtualization is used.
 - **Pagination.** Page numbers around the current page, previous/next, page size
   (25, 50, 100, 200) and "Go to".
 - **Details.** Opening a result pushes a detail entry on the stack; links inside a
@@ -203,7 +234,7 @@ The Rust crate in `src-tauri/`.
 
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`, `catalog.rs`,
-  `search.rs`, `detail.rs`, `launcher.rs`). Commands extract what they need from the Tauri runtime and delegate
+  `search.rs`, `detail.rs`, `launcher.rs`, `media.rs`). Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
   long-running work (catalog import) on a dedicated thread, so the UI never freezes.
@@ -217,6 +248,7 @@ The Rust crate in `src-tauri/`.
 - `mame/` implements the MAME integration (see below).
 - `catalog/` implements the machine and software list catalog (see [Catalog](#catalog--implemented-machines-and-software-lists)).
 - `launcher/` builds and runs MAME command lines (see [Launcher](#launcher--implemented)).
+- `media/` finds and serves local artwork (see [Media sources](#media-sources--implemented)).
 
 ### MAME integration — Implemented
 
@@ -501,6 +533,111 @@ MAME's own error:
 - Options are limited to the supported definitions; anything else is configured in
   MAME's own INI files.
 - Sessions started before YMDB restarts are not tracked after the restart.
+
+### Media sources — Implemented
+
+Implemented in `src-tauri/src/media/` and `commands/media.rs`, typed in
+`src/features/media/`. YMDB shows local artwork and screenshots from directories the
+user chooses; it never copies, modifies, downloads or indexes images, and stores no
+image in the catalog.
+
+#### Categories and sources
+
+- Categories are a registry (`media/config.rs`, mirrored in `mediaApi.ts`): `snap`
+  (Snapshots), `titles` (Title screens), `flyers`, `cabinets`, `marquees`, named
+  after the folders of the common MAME artwork collections. A category is added by
+  registering it on both sides.
+- Each category has an ordered list of directories (at most 16), chosen with the
+  native folder picker, reordered or removed in **Settings → Media Sources**. They
+  can be on local disks or network shares already mounted by the operating system;
+  no remote protocol is implemented. Paths must be absolute; a directory that is
+  missing, not a directory or unreadable is kept and shown with that status (an
+  offline share is not an error).
+- `media.json` (next to `settings.json`, `schemaVersion` 1, atomic writes, validated
+  on load and save):
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "sources": {
+      "snap": ["D:\\MAME Artwork\\snap", "D:\\MAME Artwork\\snap_SL"],
+      "titles": ["D:\\MAME Artwork\\titles"]
+    }
+  }
+  ```
+
+  The backend keeps the configuration in memory, so image requests never read it.
+
+#### Naming conventions
+
+Checked against the artwork collections (for example the Progetto-SNAPS packs) and
+MAME itself; images are matched by name only, not by content:
+
+| Record   | Path in a source directory                            | Origin of the convention                                    |
+| -------- | ----------------------------------------------------- | ----------------------------------------------------------- |
+| Machine  | `<machine>.<ext>`, e.g. `snap/pacman.png`             | artwork collections, one folder per category                |
+| Machine  | `<machine>/0000.png`                                  | first screenshot saved by MAME (`snapname` default `%g/%i`) |
+| Software | `<list>/<software>.<ext>`, e.g. `snap_SL/nes/smb.png` | software list artwork packs and MAME's internal interface   |
+
+- Extensions, in order: `png`, `jpg`, `jpeg`, `webp` (displayed by WebView2,
+  WebKitGTK and WKWebView). Other files (`bmp`, `gif`, archives) are ignored.
+- Directories are searched in order, then extensions; the first existing file wins.
+  The rule is deterministic: an earlier directory wins even with a less preferred
+  format.
+- Software names are only unique within a list, so the list is always part of the
+  path, and a machine image is never used for a software of the same name.
+- No parent/clone fallback: a clone can be a different title (regional names, hacks,
+  sequels), so showing the parent's image could attribute it to the wrong game. A
+  missing image shows a placeholder.
+- Names are MAME short names (`[a-z0-9_]`, verified on all 48,893 machines and
+  139,122 software of MAME 0.280), so file names are matched exactly as stored; on
+  case-sensitive file systems image names must be lowercase, as in the collections.
+- Zipped collections (`snap.zip`) are not read.
+
+#### Serving images and security
+
+- Images are served by the `ymdb-media` URI scheme registered with
+  `register_asynchronous_uri_scheme_protocol`, handled on the blocking thread pool.
+  The Tauri asset protocol is not enabled, so the webview has no general file
+  access.
+- Requests contain identifiers only: `<category>/machine/<machine>` or
+  `<category>/software/<list>/<software>` (`mediaUrl` in `mediaApi.ts`, built with
+  `convertFileSrc`, plus `?v=<version>` that changes when the sources are saved).
+  The handler decodes the path, accepts only a registered category and MAME short
+  names, and builds the candidate file names itself. There is no way to name a
+  path, so traversal (`..`), absolute paths and other files are rejected (400) or not
+  found (404).
+- Each candidate is resolved with `canonicalize` and must still be inside the
+  canonical source directory: symbolic links and junctions that point outside are
+  refused, links within the directory are followed.
+- Only regular files with a supported extension up to 32 MiB are served, with
+  their content type, `X-Content-Type-Options: nosniff` and `Cache-Control:
+max-age=3600` (errors are `no-store`). Missing, unreadable or unsupported files
+  answer 404/500 and the tile shows its placeholder.
+- The CSP allows images from `'self'`, `data:` and the `ymdb-media` scheme only.
+
+#### Performance
+
+- No scan: each image request checks at most (sources × 5) candidate paths, and the
+  frontend only requests images of tiles near the viewport (`loading="lazy"`), so
+  large collections cost nothing until displayed. Results are not cached by the
+  backend: measurements showed no need.
+- Measured (release build, Windows, local SSD, Classic/Media Grid on the 0.280
+  catalog, a TEST collection of 48,893 generated images as first `snap` source plus
+  two other sources): with 200 results per page, 30 images were requested for the
+  visible area and the rows around it, and the visible images were displayed 60 ms
+  after the page change; one image request took 5-6 ms (median, 8 ms at most). With
+  small fixture sources, a request took 1.1 ms. JavaScript heap: 6-7 MB. Network
+  shares were not measured; requests to an offline share only cost the failed
+  look-ups of that share.
+- No thumbnails are generated; images are served as they are.
+
+#### Isolated data directory
+
+`YMDB_DATA_DIR`, when set, makes YMDB use `<dir>/config` and `<dir>/data` instead of
+the platform directories. It is used to run end-to-end tests without touching the
+user's settings, catalog, launch and media configuration, and can serve portable
+setups.
 
 ### Catalog — Implemented (machines and software lists)
 
@@ -995,6 +1132,10 @@ machine-specific derived data that should not roam:
 | Windows  | `%LOCALAPPDATA%\io.github.davidfriscia.ymdb\catalog.sqlite`                                |
 | macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/catalog.sqlite`                 |
 | Linux    | `$XDG_DATA_HOME/io.github.davidfriscia.ymdb/catalog.sqlite` (default `~/.local/share/...`) |
+
+Implemented: the media sources, `media.json`, next to `settings.json` (see
+[Media sources](#media-sources--implemented)). `YMDB_DATA_DIR` replaces all these
+locations with one directory, for isolated test runs.
 
 Implemented: the launch configuration, `launch.json`, next to `settings.json` (see
 [Launcher](#launcher--implemented)), and the MAME session logs in

@@ -24,8 +24,9 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::catalog::is_short_name;
 use command::{LaunchPlan, SoftwareMedia};
-use config::{LaunchConfig, is_short_name};
+use config::LaunchConfig;
 use resolve::{ListRelation, MediaAssignment};
 use session::{LaunchTarget, SoftwareRef};
 

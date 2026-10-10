@@ -81,6 +81,10 @@ pnpm tauri build
 
 Bundles are written to `src-tauri/target/release/bundle/`.
 
+To run YMDB with separate, empty data (for tests or a portable setup), set
+`YMDB_DATA_DIR` to a directory: settings, catalog, launch and media configuration are
+then stored in its `config/` and `data/` subdirectories instead of the user's.
+
 ## Configuring MAME
 
 YMDB uses a MAME installation that already exists on your computer. It never
@@ -210,10 +214,14 @@ The **Catalog** page (the start page) browses the imported machines or software:
   search and **Show more**. Active filters appear as chips above the results; remove
   them one by one or with **Clear all filters**. The **Filters** button hides the
   panel to give the results the whole width; the filters stay active.
-- Results are cards; the **Card size** slider changes their width and the number of
-  columns adapts to the window. Pages hold 25 to 200 results, with page numbers and
-  **Go to**.
-- Click a card to open its detail: machines show general data, relations, emulation
+- The **View** button opens the **View Options** panel on the right. **View mode**
+  switches between **Classic Cards** (text cards; **Card size**) and **Media Grid**
+  (artwork tiles; **Tile size**, **Artwork** category, **Image fit**, and whether to
+  show the title, the technical name and the status badge). Changing the view never
+  changes the search, filters, sort or page. Both side panels can be hidden
+  independently; the results then use the whole width. The number of columns adapts
+  to the window. Pages hold 25 to 200 results, with page numbers and **Go to**.
+- Click a card or tile (or press Enter on it) to open its detail: machines show general data, relations, emulation
   status, ROMs, CHDs, devices, displays, controls, chips and software lists;
   software shows its list, parts, ROMs and disks and the machines declaring its list;
   software lists show their software and machines. Parents, clones, devices and
@@ -226,8 +234,29 @@ The **Catalog** page (the start page) browses the imported machines or software:
 The **MAME** page holds the MAME installation and catalog import panels. The
 **Settings** page selects the **Light** (default) or **Dark** theme, applied
 immediately to the whole application, holds the MAME launch options and shows the
-version and a backend connection check. Theme, card size, filter panel visibility,
-result view and command line preview are saved in the application's web storage, separately from the MAME configuration.
+version and a backend connection check. Theme, panel visibility, view mode, the
+options of each view and the command line preview are saved in the application's
+web storage, separately from the MAME, launch and media configuration.
+
+## Artwork and screenshots
+
+The Media Grid shows images from directories you already have, for example an
+artwork collection or MAME's own `snap` folder. Configure them in **Settings → Media
+Sources**: each category (Snapshots, Title screens, Flyers, Cabinets, Marquees) takes
+one or more directories, searched from top to bottom. Local disks and network shares
+mounted by the operating system work; YMDB only reads them and never copies or
+changes your files.
+
+Images are found by name:
+
+- machines: `pacman.png` (also `.jpg`, `.jpeg`, `.webp`) in the directory, or
+  `pacman/0000.png` as saved by MAME;
+- software: `<list>/<software>.png`, for example `nes/smb.png`, so a directory of
+  software list snapshots (such as `snap_SL`) can be added to Snapshots.
+
+When a title has no image, its tile shows a placeholder: YMDB never shows the image
+of another title, not even of the parent of a clone. Zipped collections are not
+supported yet.
 
 ## Launching MAME
 
@@ -360,6 +389,8 @@ Implemented:
   counts, sorting and pagination (see [Catalog search](#catalog-search)).
 - Catalog browser with filters, facets, card results, pagination and machine,
   software and software list detail views (see [Browsing the catalog](#browsing-the-catalog)).
+- Media Grid view with local artwork and screenshots from configurable media
+  sources (see [Artwork and screenshots](#artwork-and-screenshots)).
 - MAME launcher: machines and software, with machine selection, part assignment,
   command line preview, global options, launch profiles, machine and software
   options, and session monitoring (see [Launching MAME](#launching-mame)).
@@ -369,7 +400,7 @@ Implemented:
 - Continuous integration on Windows, macOS and Linux.
 
 Not implemented yet: everything else, including ROM management, input device
-configuration, artwork and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+configuration, artwork download and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

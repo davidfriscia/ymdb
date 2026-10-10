@@ -125,8 +125,15 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   frontend: it builds typed requests for the backend search. Keep results and facet
   requests separate so that paging and sorting do not recount facets.
 - Result renderers implement `ResultRendererProps` and are registered in
-  `features/browser/renderers/registry.ts`; they only display the current page and
-  never change the request. Do not add selector entries for unimplemented renderers.
+  `features/browser/renderers/registry.ts` with their options (`range`, `toggle`,
+  `choice` with defaults); the View Options panel and the preferences are generic and
+  must not get renderer-specific code. Renderers only display the current page and
+  never change the request. Do not register unimplemented renderers.
+- Interface preferences have a versioned key; a format change gets a new key and a
+  migration from the previous one in `src/app/preferences.ts`.
+- Images reach the webview only through the `ymdb-media` protocol, by category and
+  MAME names; never enable the asset protocol or send file paths to be read. Media
+  files are only read: never copied, modified or stored in the catalog.
 - Asynchronous loads in components go through `src/shared/useLoader.ts` (stale
   responses ignored, memoized inputs).
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
@@ -156,3 +163,7 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Node.js is managed by fnm. In a non-initialized shell, run
   `fnm env --shell powershell | Out-String | Invoke-Expression` first so that
   `node` and `pnpm` are available.
+- End-to-end tests must not touch the user's YMDB data: run the app with
+  `YMDB_DATA_DIR` set to a temporary directory and a separate
+  `WEBVIEW2_USER_DATA_FOLDER`. If the user's own YMDB is running, build into a
+  separate `CARGO_TARGET_DIR` instead of stopping it.

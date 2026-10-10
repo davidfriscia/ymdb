@@ -1,9 +1,8 @@
 import type { Dispatch } from "react";
-import { CARD_SIZE, type BrowserPreferences } from "./browserPreferences";
+import type { BrowserPreferences } from "./browserPreferences";
 import type { MachineSort, SoftwareSort } from "../search/searchApi";
 import { sortOptions, type BrowserAction, type ScopeQuery } from "./browserState";
 import type { Scope } from "./filterDefinitions";
-import { RENDERERS, isRendererId } from "./renderers/registry";
 
 const SORT_LABELS: Record<MachineSort | SoftwareSort, string> = {
   relevance: "Best match",
@@ -22,8 +21,6 @@ interface ToolbarProps {
   query: ScopeQuery;
   filterCount: number;
   preferences: BrowserPreferences;
-  /** Whether the current renderer uses the item size. */
-  sizable: boolean;
   dispatch: Dispatch<BrowserAction>;
   onPreferencesChange: (change: Partial<BrowserPreferences>) => void;
 }
@@ -35,7 +32,6 @@ export function Toolbar({
   query,
   filterCount,
   preferences,
-  sizable,
   dispatch,
   onPreferencesChange,
 }: ToolbarProps) {
@@ -135,40 +131,26 @@ export function Toolbar({
         </button>
       </div>
 
-      {RENDERERS.length > 1 && (
-        <select
-          className="input"
-          aria-label="Result view"
-          value={preferences.renderer}
-          onChange={(event) => {
-            if (isRendererId(event.target.value)) {
-              onPreferencesChange({ renderer: event.target.value });
-            }
-          }}
-        >
-          {RENDERERS.map((renderer) => (
-            <option key={renderer.id} value={renderer.id}>
-              {renderer.label}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {sizable && (
-        <label className="toolbar__size">
-          <span>Card size</span>
-          <input
-            type="range"
-            min={CARD_SIZE.min}
-            max={CARD_SIZE.max}
-            step={CARD_SIZE.step}
-            value={preferences.cardSize}
-            onChange={(event) => {
-              onPreferencesChange({ cardSize: Number(event.target.value) });
-            }}
+      <button
+        type="button"
+        className="button button--secondary toolbar__view"
+        aria-pressed={preferences.viewOptionsVisible}
+        title={preferences.viewOptionsVisible ? "Hide view options" : "Show view options"}
+        onClick={() => {
+          onPreferencesChange({ viewOptionsVisible: !preferences.viewOptionsVisible });
+        }}
+      >
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <path
+            d="M2 4h12M2 8h12M2 12h12M5 2.5v3M11 6.5v3M7 10.5v3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
           />
-        </label>
-      )}
+        </svg>
+        <span>View</span>
+      </button>
     </div>
   );
 }

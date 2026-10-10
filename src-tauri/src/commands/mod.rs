@@ -10,6 +10,7 @@ pub mod detail;
 pub mod health;
 pub mod launcher;
 pub mod mame;
+pub mod media;
 pub mod search;
 
 use std::path::PathBuf;

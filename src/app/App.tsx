@@ -3,6 +3,7 @@ import { CatalogBrowser } from "../features/browser/CatalogBrowser";
 import type { BrowserPreferences } from "../features/browser/browserPreferences";
 import { CatalogPanel } from "../features/catalog/CatalogPanel";
 import { LauncherProvider } from "../features/launcher/LauncherProvider";
+import { MediaProvider } from "../features/media/MediaProvider";
 import { MameInstallation } from "../features/mame-installation/MameInstallation";
 import { loadPreferences, savePreferences, type UiPreferences } from "./preferences";
 import { SettingsView } from "./SettingsView";
@@ -64,83 +65,86 @@ export function App() {
   );
 
   const browserPreferences: BrowserPreferences = {
-    cardSize: preferences.cardSize,
     filtersVisible: preferences.filtersVisible,
+    viewOptionsVisible: preferences.viewOptionsVisible,
     renderer: preferences.renderer,
+    rendererOptions: preferences.rendererOptions,
   };
 
   return (
-    <LauncherProvider
-      showCommandPreview={preferences.showCommandPreview}
-      onShowCommandPreviewChange={onShowCommandPreviewChange}
-    >
-      <div className="shell">
-        <nav className="shell__nav" aria-label="Main">
-          <p className="shell__brand" title="Your MAME DB">
-            YMDB
-          </p>
-          <ul className="shell__nav-list">
-            {NAVIGATION.map((item) => (
-              <li key={item.view}>
-                <button
-                  type="button"
-                  className="shell__nav-item"
-                  aria-current={view === item.view ? "page" : undefined}
-                  onClick={() => {
-                    setView(item.view);
-                  }}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="20"
-                    height="20"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    aria-hidden="true"
+    <MediaProvider>
+      <LauncherProvider
+        showCommandPreview={preferences.showCommandPreview}
+        onShowCommandPreviewChange={onShowCommandPreviewChange}
+      >
+        <div className="shell">
+          <nav className="shell__nav" aria-label="Main">
+            <p className="shell__brand" title="Your MAME DB">
+              YMDB
+            </p>
+            <ul className="shell__nav-list">
+              {NAVIGATION.map((item) => (
+                <li key={item.view}>
+                  <button
+                    type="button"
+                    className="shell__nav-item"
+                    aria-current={view === item.view ? "page" : undefined}
+                    onClick={() => {
+                      setView(item.view);
+                    }}
                   >
-                    {item.icon}
-                  </svg>
-                  <span>{item.label}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="20"
+                      height="20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
+                      {item.icon}
+                    </svg>
+                    <span>{item.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
-        {/* Views stay mounted so that their state (search, filters, scroll) survives navigation. */}
-        <main className="shell__main shell__main--catalog" hidden={view !== "catalog"}>
-          <CatalogBrowser
-            refreshKey={catalogVersion + mameConfigurationVersion}
-            preferences={browserPreferences}
-            onPreferencesChange={updatePreferences}
-            onOpenMame={() => {
-              setView("mame");
-            }}
-          />
-        </main>
-
-        <main className="shell__main" hidden={view !== "mame"}>
-          <div className="page">
-            <h1 className="page__title">MAME</h1>
-            <MameInstallation onConfigurationChanged={onConfigurationChanged} />
-            <CatalogPanel
-              refreshKey={mameConfigurationVersion}
-              onCatalogChanged={onCatalogChanged}
+          {/* Views stay mounted so that their state (search, filters, scroll) survives navigation. */}
+          <main className="shell__main shell__main--catalog" hidden={view !== "catalog"}>
+            <CatalogBrowser
+              refreshKey={catalogVersion + mameConfigurationVersion}
+              preferences={browserPreferences}
+              onPreferencesChange={updatePreferences}
+              onOpenMame={() => {
+                setView("mame");
+              }}
             />
-          </div>
-        </main>
+          </main>
 
-        <main className="shell__main" hidden={view !== "settings"}>
-          <SettingsView
-            theme={preferences.theme}
-            onThemeChange={(theme) => {
-              updatePreferences({ theme });
-            }}
-          />
-        </main>
-      </div>
-    </LauncherProvider>
+          <main className="shell__main" hidden={view !== "mame"}>
+            <div className="page">
+              <h1 className="page__title">MAME</h1>
+              <MameInstallation onConfigurationChanged={onConfigurationChanged} />
+              <CatalogPanel
+                refreshKey={mameConfigurationVersion}
+                onCatalogChanged={onCatalogChanged}
+              />
+            </div>
+          </main>
+
+          <main className="shell__main" hidden={view !== "settings"}>
+            <SettingsView
+              theme={preferences.theme}
+              onThemeChange={(theme) => {
+                updatePreferences({ theme });
+              }}
+            />
+          </main>
+        </div>
+      </LauncherProvider>
+    </MediaProvider>
   );
 }

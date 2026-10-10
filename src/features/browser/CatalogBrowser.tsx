@@ -33,6 +33,7 @@ import { FilterPanel } from "./FilterPanel";
 import { Pagination } from "./Pagination";
 import type { BrowserPreferences } from "./browserPreferences";
 import { rendererById } from "./renderers/registry";
+import { ViewOptionsPanel } from "./ViewOptionsPanel";
 import type { ResultItem } from "./renderers/types";
 import { Toolbar } from "./Toolbar";
 
@@ -263,6 +264,13 @@ function Workspace({
     }
   }, [showingResults]);
 
+  // A new search, filter, sort or page starts at the top; changing the view
+  // or returning from a detail keeps the position.
+  useLayoutEffect(() => {
+    savedScroll.current = 0;
+    if (resultsRef.current) resultsRef.current.scrollTop = 0;
+  }, [request]);
+
   const openFromResults = (index: number) => {
     const item = shown?.items[index];
     if (!item) return;
@@ -270,7 +278,15 @@ function Workspace({
     dispatch({ type: "openDetail", target: targetOf(item), resultIndex: index });
   };
 
-  const renderer = rendererById(preferences.renderer);
+  const showFilters = preferences.filtersVisible && !softwareUnavailable;
+  const showViewOptions = preferences.viewOptionsVisible;
+  const bodyClass = [
+    "browser__body",
+    showFilters && "browser__body--filters",
+    showViewOptions && "browser__body--view",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const filterCount = countActiveFilters(query.filters);
   const top = stack.at(-1);
 
@@ -290,17 +306,12 @@ function Workspace({
           appliedText={appliedText}
           filterCount={filterCount}
           preferences={preferences}
-          sizable={renderer.sizable}
           dispatch={dispatch}
           onPreferencesChange={onPreferencesChange}
         />
 
-        <div
-          className={
-            preferences.filtersVisible ? "browser__body" : "browser__body browser__body--no-filters"
-          }
-        >
-          {preferences.filtersVisible && !softwareUnavailable && (
+        <div className={bodyClass}>
+          {showFilters && (
             <FilterPanel
               scope={scope}
               query={query}
@@ -343,6 +354,9 @@ function Workspace({
               />
             )}
           </div>
+          {showViewOptions && (
+            <ViewOptionsPanel preferences={preferences} onPreferencesChange={onPreferencesChange} />
+          )}
         </div>
       </div>
 
@@ -454,7 +468,8 @@ function Results({
     );
   }
   const { meta, items } = shown;
-  const Renderer = rendererById(preferences.renderer).Component;
+  const renderer = rendererById(preferences.renderer);
+  const Renderer = renderer.Component;
   const first = meta.page * meta.pageSize + 1;
   const kind = scope === "machines" ? "machines" : "software";
 
@@ -503,7 +518,11 @@ function Results({
       )}
 
       <div className={state.status === "loading" ? "results results--stale" : "results"}>
-        <Renderer items={items} itemSize={preferences.cardSize} onOpen={onOpen} />
+        <Renderer
+          items={items}
+          options={preferences.rendererOptions[renderer.id] ?? {}}
+          onOpen={onOpen}
+        />
       </div>
 
       {meta.pageCount > 1 && (

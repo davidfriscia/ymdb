@@ -1,11 +1,14 @@
 import type { CSSProperties } from "react";
 import type { MachineSummary, SoftwareSummary } from "../../search/searchApi";
 import { DriverStatusBadge, SupportBadge } from "../badges";
+import { numberOption } from "./options";
 import type { ResultRendererProps } from "./types";
 
-/** Displays results as a grid of cards whose minimum width follows `itemSize`. */
-export function CardRenderer({ items, itemSize, onOpen }: ResultRendererProps) {
-  const style = { "--card-size": `${String(itemSize)}px` } as CSSProperties;
+/** Text cards: the original renderer. The card size sets the minimum card width. */
+export function ClassicCardRenderer({ items, options, onOpen }: ResultRendererProps) {
+  const style = {
+    "--card-size": `${String(numberOption(options, "cardSize"))}px`,
+  } as CSSProperties;
   return (
     <ul className="card-grid" style={style} aria-label="Results">
       {items.map((item, index) => (

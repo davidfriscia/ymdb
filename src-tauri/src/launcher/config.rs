@@ -11,13 +11,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::options::{self, DEFINITIONS, OptionError, OptionSet, OptionValue};
+use crate::catalog::is_short_name;
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 const MAX_PROFILES: usize = 50;
 const MAX_PROFILE_NAME_LENGTH: usize = 60;
-const MAX_NAME_LENGTH: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -260,15 +260,6 @@ fn is_profile_id(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// MAME short names of machines, software and lists.
-pub fn is_short_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= MAX_NAME_LENGTH
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 #[cfg(test)]

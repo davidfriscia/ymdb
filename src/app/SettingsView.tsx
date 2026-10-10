@@ -1,5 +1,6 @@
 import { HealthCheck } from "../features/health-check/HealthCheck";
 import { LaunchSettings } from "../features/launcher/LaunchSettings";
+import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
 import { THEMES, type ThemeId } from "./theme/themes";
 
 interface SettingsViewProps {
@@ -45,6 +46,8 @@ export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
           Early development build. ROM management and artwork are not available yet.
         </p>
       </section>
+
+      <MediaSourcesSettings />
 
       <LaunchSettings />
 

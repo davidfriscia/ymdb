@@ -1,35 +1,59 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_PREFERENCES,
+  LEGACY_PREFERENCES_KEY,
   PREFERENCES_KEY,
   loadPreferences,
   savePreferences,
   type UiPreferences,
 } from "./preferences";
-import { CARD_SIZE } from "../features/browser/browserPreferences";
+
+const store = (key: string, value: unknown) => {
+  localStorage.setItem(key, JSON.stringify(value));
+};
 
 describe("UI preferences", () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it("defaults to the light theme, visible filters and cards", () => {
+  it("defaults to the light theme, the filters and classic cards", () => {
     expect(loadPreferences()).toEqual({
       theme: "light",
-      cardSize: CARD_SIZE.default,
       filtersVisible: true,
-      renderer: "cards",
+      viewOptionsVisible: false,
+      renderer: "classicCards",
+      rendererOptions: {
+        classicCards: { cardSize: 220 },
+        mediaGrid: {
+          tileSize: 220,
+          category: "snap",
+          fit: "contain",
+          showTitle: true,
+          showName: false,
+          showBadges: true,
+        },
+      },
       showCommandPreview: false,
     });
   });
 
-  it("restores saved preferences", () => {
+  it("restores saved preferences, with options kept per renderer", () => {
     const saved: UiPreferences = {
-      showCommandPreview: true,
+      ...DEFAULT_PREFERENCES,
       theme: "dark",
-      cardSize: 300,
       filtersVisible: false,
-      renderer: "cards",
+      viewOptionsVisible: true,
+      renderer: "mediaGrid",
+      rendererOptions: {
+        classicCards: { cardSize: 300 },
+        mediaGrid: {
+          ...DEFAULT_PREFERENCES.rendererOptions.mediaGrid,
+          tileSize: 360,
+          category: "flyers",
+        },
+      },
+      showCommandPreview: true,
     };
     savePreferences(saved);
 
@@ -37,47 +61,84 @@ describe("UI preferences", () => {
     expect(loadPreferences()).toEqual(saved);
   });
 
+  it("migrates version 1 preferences and drops them on save", () => {
+    store(LEGACY_PREFERENCES_KEY, {
+      theme: "dark",
+      cardSize: 300,
+      filtersVisible: false,
+      renderer: "cards",
+      showCommandPreview: true,
+    });
+
+    const migrated = loadPreferences();
+    expect(migrated).toEqual({
+      ...DEFAULT_PREFERENCES,
+      theme: "dark",
+      filtersVisible: false,
+      renderer: "classicCards",
+      rendererOptions: { ...DEFAULT_PREFERENCES.rendererOptions, classicCards: { cardSize: 300 } },
+      showCommandPreview: true,
+    });
+
+    savePreferences(migrated);
+    expect(localStorage.getItem(LEGACY_PREFERENCES_KEY)).toBeNull();
+    expect(loadPreferences()).toEqual(migrated);
+  });
+
+  it("prefers version 2 over leftover version 1 data", () => {
+    store(LEGACY_PREFERENCES_KEY, { theme: "dark" });
+    store(PREFERENCES_KEY, { theme: "light", renderer: "mediaGrid" });
+    expect(loadPreferences()).toMatchObject({ theme: "light", renderer: "mediaGrid" });
+  });
+
   it("ignores malformed data", () => {
     localStorage.setItem(PREFERENCES_KEY, "{not json");
     expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
-
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify([1, 2]));
-    expect(loadPreferences().theme).toBe("light");
-
-    localStorage.setItem(PREFERENCES_KEY, "null");
+    store(PREFERENCES_KEY, [1, 2]);
+    expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
+    store(PREFERENCES_KEY, null);
     expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
   });
 
   it("replaces invalid or obsolete values one by one", () => {
-    localStorage.setItem(
-      PREFERENCES_KEY,
-      JSON.stringify({
-        theme: "solarized",
-        cardSize: "big",
-        filtersVisible: "yes",
-        showCommandPreview: 1,
-        renderer: "table",
-        removedOption: true,
-      }),
-    );
-    expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);
-
-    localStorage.setItem(
-      PREFERENCES_KEY,
-      JSON.stringify({ theme: "dark", cardSize: 5000, renderer: "table" }),
-    );
+    store(PREFERENCES_KEY, {
+      theme: "solarized",
+      filtersVisible: "yes",
+      viewOptionsVisible: 1,
+      renderer: "table",
+      showCommandPreview: 1,
+      rendererOptions: {
+        classicCards: { cardSize: 5000, removedOption: true },
+        mediaGrid: {
+          tileSize: 251,
+          category: "music",
+          fit: "stretch",
+          showTitle: "no",
+          showName: true,
+        },
+        tableRenderer: { columns: 3 },
+      },
+    });
     expect(loadPreferences()).toEqual({
       ...DEFAULT_PREFERENCES,
-      theme: "dark",
-      cardSize: CARD_SIZE.max,
+      rendererOptions: {
+        classicCards: { cardSize: 420 },
+        mediaGrid: {
+          ...DEFAULT_PREFERENCES.rendererOptions.mediaGrid,
+          tileSize: 250,
+          showName: true,
+        },
+      },
     });
   });
 
-  it("clamps and rounds the card size", () => {
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ cardSize: 10 }));
-    expect(loadPreferences().cardSize).toBe(CARD_SIZE.min);
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ cardSize: 250.6 }));
-    expect(loadPreferences().cardSize).toBe(251);
+  it("clamps sizes to their range", () => {
+    store(PREFERENCES_KEY, {
+      rendererOptions: { classicCards: { cardSize: 10 }, mediaGrid: { tileSize: 1e9 } },
+    });
+    const { rendererOptions } = loadPreferences();
+    expect(rendererOptions.classicCards?.cardSize).toBe(160);
+    expect(rendererOptions.mediaGrid?.tileSize).toBe(480);
   });
 
   it("works without storage", () => {
@@ -86,6 +147,9 @@ describe("UI preferences", () => {
         throw new Error("denied");
       },
       setItem: () => {
+        throw new Error("denied");
+      },
+      removeItem: () => {
         throw new Error("denied");
       },
     } as unknown as Storage;

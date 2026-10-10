@@ -6,7 +6,11 @@ mod commands;
 mod health;
 mod launcher;
 mod mame;
+mod media;
 mod settings;
+
+use std::env;
+use std::path::PathBuf;
 
 use tauri::Manager;
 
@@ -14,38 +18,39 @@ use crate::catalog::store::CatalogStore;
 use crate::commands::SettingsState;
 use crate::commands::catalog::CatalogState;
 use crate::commands::launcher::LauncherState;
+use crate::commands::media::MediaState;
 use crate::launcher::store::LaunchConfigStore;
+use crate::media::config::MediaConfigStore;
+use crate::media::protocol::SCHEME;
 use crate::settings::SettingsStore;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol(SCHEME, |context, request, responder| {
+            let app = context.app_handle().clone();
+            let path = request.uri().path().to_owned();
+            // File I/O, possibly on a network share: off the webview thread.
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(commands::media::protocol_response(&app, &path));
+            });
+        })
         .setup(|app| {
             // Missing directories are reported by the commands that need them
             // instead of preventing the application from starting.
-            let paths = app.path();
-            let settings = paths
-                .app_config_dir()
-                .ok()
-                .map(|dir| SettingsStore::in_dir(&dir));
+            let (config_dir, data_dir) = app_dirs(app.path());
+            let settings = config_dir.as_deref().map(SettingsStore::in_dir);
             // The catalog is large, machine-specific derived data: it belongs
             // in the local (non-roaming) data directory.
-            let catalog = paths
-                .app_local_data_dir()
-                .ok()
-                .map(|dir| CatalogStore::in_dir(&dir));
+            let catalog = data_dir.as_deref().map(CatalogStore::in_dir);
+            let launch_config = config_dir.as_deref().map(LaunchConfigStore::in_dir);
+            let launch_logs = data_dir.as_ref().map(|dir| dir.join("launch-logs"));
+            let media = config_dir.as_deref().map(MediaConfigStore::in_dir);
             app.manage(SettingsState::new(settings));
-            let launch_config = paths
-                .app_config_dir()
-                .ok()
-                .map(|dir| LaunchConfigStore::in_dir(&dir));
-            let launch_logs = paths
-                .app_local_data_dir()
-                .ok()
-                .map(|dir| dir.join("launch-logs"));
             app.manage(CatalogState::new(catalog));
             app.manage(LauncherState::new(launch_config, launch_logs));
+            app.manage(MediaState::new(media));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -73,7 +78,23 @@ pub fn run() {
             commands::launcher::start_launch,
             commands::launcher::get_launch_sessions,
             commands::launcher::stop_launch_session,
+            commands::media::get_media_sources,
+            commands::media::save_media_sources,
+            commands::media::pick_media_directory,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");
+}
+
+/// Configuration and local data directories. `YMDB_DATA_DIR`, when set, puts
+/// both under one directory (`config/` and `data/`): it isolates test runs and
+/// portable setups from the user's data.
+fn app_dirs(paths: &tauri::path::PathResolver<tauri::Wry>) -> (Option<PathBuf>, Option<PathBuf>) {
+    match env::var_os("YMDB_DATA_DIR").filter(|value| !value.is_empty()) {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            (Some(dir.join("config")), Some(dir.join("data")))
+        }
+        None => (paths.app_config_dir().ok(), paths.app_local_data_dir().ok()),
+    }
 }

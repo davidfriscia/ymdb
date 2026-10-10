@@ -452,3 +452,36 @@ progress {
 .import-progress .message {
   margin-top: 8px;
 }
+
+/* Media sources settings */
+
+.media-sources__category + .media-sources__category {
+  margin-top: 8px;
+}
+
+.media-sources__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.media-sources__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.media-sources__path {
+  flex: 1 1 280px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.media-sources__actions {
+  display: inline-flex;
+  gap: 4px;
+}

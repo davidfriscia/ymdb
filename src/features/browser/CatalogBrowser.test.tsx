@@ -20,14 +20,20 @@ import type {
   MachineSummary,
   SoftwareSearchRequest,
 } from "../search/searchApi";
-import type { BrowserPreferences } from "./browserPreferences";
+import { DEFAULT_BROWSER_PREFERENCES, type BrowserPreferences } from "./browserPreferences";
+import { MediaProvider } from "../media/MediaProvider";
+import { mediaSourcesView } from "../../test/mediaFixtures";
 import { CatalogBrowser } from "./CatalogBrowser";
 import { LauncherProvider } from "../launcher/LauncherProvider";
 import { launchConfigView } from "../../test/launcherFixtures";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+  convertFileSrc: (path: string, protocol: string) =>
+    `${protocol}://localhost/${encodeURIComponent(path)}`,
+}));
 
 type Args = Record<string, unknown>;
 type Handler = (args: Args) => unknown;
@@ -108,6 +114,7 @@ function commands(overrides: Partial<Record<string, Handler>> = {}) {
     get_launch_config: () => launchConfigView(),
     get_launch_sessions: () => [],
     get_software_launch_info: () => null,
+    get_media_sources: () => mediaSourcesView({ snap: ["C:/Artwork ✓/snap"] }),
     ...overrides,
   });
 }
@@ -129,13 +136,15 @@ const isResultRequest = (args: Args) => machineRequest(args).direction !== undef
 
 function withLauncher(children: ReactNode) {
   return (
-    <LauncherProvider showCommandPreview={false} onShowCommandPreviewChange={() => undefined}>
-      {children}
-    </LauncherProvider>
+    <MediaProvider>
+      <LauncherProvider showCommandPreview={false} onShowCommandPreviewChange={() => undefined}>
+        {children}
+      </LauncherProvider>
+    </MediaProvider>
   );
 }
 
-const PREFERENCES: BrowserPreferences = { cardSize: 220, filtersVisible: true, renderer: "cards" };
+const PREFERENCES: BrowserPreferences = DEFAULT_BROWSER_PREFERENCES;
 
 function renderBrowser(props: Partial<ComponentProps<typeof CatalogBrowser>> = {}) {
   const user = userEvent.setup();
@@ -370,7 +379,7 @@ describe("CatalogBrowser", () => {
         "aria-pressed",
         "false",
       );
-      expect(document.querySelector(".browser__body--no-filters")).not.toBeNull();
+      expect(document.querySelector(".browser__body--filters")).toBeNull();
       expect(results().getByText("Pac-Man")).toBeInTheDocument();
 
       rerender({ preferences: PREFERENCES });
@@ -428,25 +437,215 @@ describe("CatalogBrowser", () => {
   });
 
   describe("display", () => {
-    it("resizes cards without searching again", async () => {
+    const withView = (change: Partial<BrowserPreferences> = {}): BrowserPreferences => ({
+      ...PREFERENCES,
+      viewOptionsVisible: true,
+      ...change,
+    });
+    const mediaGrid = (options: Record<string, number | boolean | string> = {}) =>
+      withView({
+        renderer: "mediaGrid",
+        rendererOptions: {
+          ...PREFERENCES.rendererOptions,
+          mediaGrid: { ...PREFERENCES.rendererOptions.mediaGrid, ...options },
+        },
+      });
+
+    it("resizes classic cards from the view options without searching again", async () => {
       commands();
-      const { onPreferencesChange, rerender } = renderBrowser();
+      const { onPreferencesChange, rerender } = renderBrowser({ preferences: withView() });
       await screen.findByText("1–3 of 3 machines");
       const searches = browserRequests().length;
+      const panel = within(screen.getByRole("complementary", { name: "View options" }));
+      expect(panel.getByRole("radio", { name: "Classic Cards" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(panel.queryByLabelText(/Tile size/)).not.toBeInTheDocument();
 
-      fireEvent.change(screen.getByLabelText("Card size"), { target: { value: "300" } });
-      expect(onPreferencesChange).toHaveBeenCalledWith({ cardSize: 300 });
+      fireEvent.change(panel.getByLabelText(/Card size/), { target: { value: "300" } });
+      expect(onPreferencesChange).toHaveBeenCalledWith({
+        rendererOptions: { ...PREFERENCES.rendererOptions, classicCards: { cardSize: 300 } },
+      });
 
-      rerender({ preferences: { ...PREFERENCES, cardSize: 300 } });
+      rerender({
+        preferences: withView({
+          rendererOptions: { ...PREFERENCES.rendererOptions, classicCards: { cardSize: 300 } },
+        }),
+      });
       expect(screen.getByRole("list", { name: "Results" })).toHaveStyle("--card-size: 300px");
       expect(browserRequests()).toHaveLength(searches);
     });
 
-    it("does not show a renderer selector with a single renderer", async () => {
+    it("switches renderer without changing the search", async () => {
       commands();
-      renderBrowser();
+      const { user, onPreferencesChange, rerender } = renderBrowser({
+        preferences: withView(),
+        debounceMs: 60_000,
+      });
+      await user.type(await screen.findByLabelText("Search text"), "pac{Enter}");
+      await user.click(await screen.findByRole("checkbox", { name: /Namco/ }));
+      await waitFor(() => {
+        expect(lastRequest()).toMatchObject({ text: "pac", filters: { manufacturers: ["Namco"] } });
+      });
       await screen.findByText("1–3 of 3 machines");
-      expect(screen.queryByLabelText("Result view")).not.toBeInTheDocument();
+      const searches = browserRequests().length;
+
+      await user.click(screen.getByRole("radio", { name: "Media Grid" }));
+      expect(onPreferencesChange).toHaveBeenCalledWith({ renderer: "mediaGrid" });
+      rerender({ preferences: mediaGrid() });
+
+      const tiles = within(screen.getByRole("list", { name: "Results" }));
+      expect(tiles.getByRole("button", { name: "Pac-Man (pacman)" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Search text")).toHaveValue("pac");
+      expect(screen.getByText("Manufacturer: Namco")).toBeInTheDocument();
+      const panel = within(screen.getByRole("complementary", { name: "View options" }));
+      expect(panel.getByRole("radio", { name: "Media Grid" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      for (const label of [
+        /Tile size/,
+        "Artwork",
+        "Image fit",
+        "Show title",
+        "Show technical name",
+        "Show status badges",
+      ]) {
+        expect(panel.getByLabelText(label)).toBeInTheDocument();
+      }
+      expect(panel.queryByLabelText(/Card size/)).not.toBeInTheDocument();
+      expect(browserRequests()).toHaveLength(searches);
+    });
+
+    it("shows and hides both panels independently", async () => {
+      commands();
+      const { user, onPreferencesChange, rerender } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      const body = () => document.querySelector(".browser__body");
+      const filters = () => screen.queryByRole("complementary", { name: "Filters" });
+      const viewOptions = () => screen.queryByRole("complementary", { name: "View options" });
+
+      // Default: filters only.
+      expect(filters()).toBeInTheDocument();
+      expect(viewOptions()).not.toBeInTheDocument();
+      expect(body()).toHaveClass("browser__body--filters");
+      expect(body()).not.toHaveClass("browser__body--view");
+
+      await user.click(screen.getByRole("button", { name: "View" }));
+      expect(onPreferencesChange).toHaveBeenCalledWith({ viewOptionsVisible: true });
+
+      for (const [filtersVisible, viewOptionsVisible] of [
+        [true, true],
+        [false, true],
+        [false, false],
+        [true, false],
+      ] as const) {
+        rerender({ preferences: { ...PREFERENCES, filtersVisible, viewOptionsVisible } });
+        expect(Boolean(filters())).toBe(filtersVisible);
+        expect(Boolean(viewOptions())).toBe(viewOptionsVisible);
+        expect(body()?.classList.contains("browser__body--filters")).toBe(filtersVisible);
+        expect(body()?.classList.contains("browser__body--view")).toBe(viewOptionsVisible);
+        // Both toggles stay available, and the results are unchanged.
+        expect(screen.getByRole("button", { name: /^Filters/ })).toHaveAttribute(
+          "aria-pressed",
+          String(filtersVisible),
+        );
+        expect(screen.getByRole("button", { name: "View" })).toHaveAttribute(
+          "aria-pressed",
+          String(viewOptionsVisible),
+        );
+        expect(results().getByText("Pac-Man")).toBeInTheDocument();
+      }
+    });
+
+    it("shows artwork with lazy loading, by category, with placeholders", async () => {
+      commands();
+      const { rerender } = renderBrowser({ preferences: mediaGrid() });
+      await screen.findByText("1–3 of 3 machines");
+      const button = (name: string) =>
+        screen.getByRole("button", { name: new RegExp(`\\(${name}\\)$`) });
+      const tile = (name: string) => within(button(name));
+      // Images are decorative (alt=""): the tile button carries the name.
+      const imageOf = (name: string) => button(name).querySelector("img");
+
+      const image = imageOf("pacman");
+      if (!image) throw new Error("no image");
+      expect(image).toHaveAttribute("src", "ymdb-media://localhost/snap%2Fmachine%2Fpacman?v=0");
+      expect(image).toHaveAttribute("loading", "lazy");
+      fireEvent.load(image);
+      expect(image).toHaveAttribute("data-state", "loaded");
+
+      // A missing image shows a placeholder; the title stays visible.
+      const galaga = imageOf("galaga");
+      if (!galaga) throw new Error("no image");
+      fireEvent.error(galaga);
+      expect(tile("galaga").getByTestId("media-placeholder")).toHaveTextContent("No snapshots");
+      expect(tile("galaga").getByText("Galaga")).toBeInTheDocument();
+      expect(tile("pacman").queryByTestId("media-placeholder")).not.toBeInTheDocument();
+
+      // Titles have no configured directory: no request, a hint and placeholders.
+      rerender({ preferences: mediaGrid({ category: "titles" }) });
+      expect(await screen.findByRole("note")).toHaveTextContent(
+        "No directory is configured for title screens.",
+      );
+      expect(document.querySelectorAll(".media-grid img")).toHaveLength(0);
+      expect(screen.getAllByTestId("media-placeholder")).toHaveLength(3);
+    });
+
+    it("applies the media grid options", async () => {
+      commands();
+      const { rerender } = renderBrowser({ preferences: mediaGrid({ tileSize: 320 }) });
+      await screen.findByText("1–3 of 3 machines");
+      const grid = screen.getByRole("list", { name: "Results" });
+      expect(grid).toHaveStyle("--tile-size: 320px");
+      expect(grid).toHaveAttribute("data-fit", "contain");
+      expect(within(grid).getByText("Pac-Man")).toBeInTheDocument();
+      expect(within(grid).queryByText("pacman")).not.toBeInTheDocument();
+      expect(within(grid).getAllByText(/^Driver:/)).toHaveLength(3);
+
+      rerender({
+        preferences: mediaGrid({
+          tileSize: 320,
+          fit: "cover",
+          showTitle: false,
+          showName: true,
+          showBadges: false,
+        }),
+      });
+      expect(grid).toHaveAttribute("data-fit", "cover");
+      expect(within(grid).queryByText("Pac-Man")).not.toBeInTheDocument();
+      expect(within(grid).getByText("pacman")).toBeInTheDocument();
+      expect(within(grid).queryByText(/^Driver:/)).not.toBeInTheDocument();
+      // The full title stays available as accessible name and tooltip.
+      const tile = within(grid).getByRole("button", { name: "Pac-Man (pacman)" });
+      expect(tile).toHaveAttribute("title", expect.stringContaining("Pac-Man"));
+    });
+
+    it("opens the detail from a media tile with the keyboard", async () => {
+      commands({ get_machine_detail: () => machineDetail("galaga", { description: "Galaga" }) });
+      const { user } = renderBrowser({ preferences: mediaGrid() });
+      const tile = await screen.findByRole("button", { name: "Galaga (galaga)" });
+      tile.focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByRole("heading", { name: "Galaga" })).toBeInTheDocument();
+      expect(invokeMock).toHaveBeenCalledWith("get_machine_detail", { name: "galaga" });
+    });
+
+    it("requests software artwork by list and name", async () => {
+      commands({
+        search_catalog_software: () =>
+          response([software("nes", "smb", { description: "Super Mario Bros." })]),
+      });
+      const { user } = renderBrowser({ preferences: mediaGrid() });
+      await screen.findByText("1–3 of 3 machines");
+      await user.selectOptions(screen.getByLabelText("Catalog type"), "Software");
+      const tile = await screen.findByRole("button", { name: "Super Mario Bros. (nes/smb)" });
+      expect(tile.querySelector("img")).toHaveAttribute(
+        "src",
+        "ymdb-media://localhost/snap%2Fsoftware%2Fnes%2Fsmb?v=0",
+      );
+      expect(within(tile).getByText("Supported")).toBeInTheDocument();
     });
   });
 

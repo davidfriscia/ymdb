@@ -3,8 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCatalogStatus } from "../test/catalogFixtures";
 import { launchConfigView } from "../test/launcherFixtures";
+import { mediaSourcesView } from "../test/mediaFixtures";
 import { App } from "./App";
-import { PREFERENCES_KEY } from "./preferences";
+import { LEGACY_PREFERENCES_KEY, PREFERENCES_KEY } from "./preferences";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -15,6 +16,7 @@ const responses: Record<string, unknown> = {
   get_catalog_status: emptyCatalogStatus,
   get_launch_config: launchConfigView(),
   get_launch_sessions: [],
+  get_media_sources: mediaSourcesView(),
 };
 
 function storedPreferences(): unknown {
@@ -86,29 +88,36 @@ describe("App", () => {
     expect(storedPreferences()).toMatchObject({ theme: "dark" });
   });
 
-  it("restores saved preferences at startup", () => {
+  it("restores saved preferences at startup, migrating the previous format", () => {
     localStorage.setItem(
-      PREFERENCES_KEY,
+      LEGACY_PREFERENCES_KEY,
       JSON.stringify({ theme: "dark", cardSize: 300, filtersVisible: false, renderer: "cards" }),
     );
     render(<App />);
 
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(screen.getByRole("radio", { name: "Dark", hidden: true })).toBeChecked();
-    expect(storedPreferences()).toEqual({
+    expect(storedPreferences()).toMatchObject({
       theme: "dark",
-      cardSize: 300,
       filtersVisible: false,
-      renderer: "cards",
-      showCommandPreview: false,
+      renderer: "classicCards",
+      rendererOptions: { classicCards: { cardSize: 300 } },
     });
+    expect(localStorage.getItem(LEGACY_PREFERENCES_KEY)).toBeNull();
   });
 
   it("starts with defaults when the saved preferences are invalid", () => {
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ theme: "neon", cardSize: "x" }));
+    localStorage.setItem(
+      PREFERENCES_KEY,
+      JSON.stringify({ theme: "neon", renderer: "table", rendererOptions: "x" }),
+    );
     render(<App />);
 
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
-    expect(storedPreferences()).toMatchObject({ theme: "light", cardSize: 220 });
+    expect(storedPreferences()).toMatchObject({
+      theme: "light",
+      renderer: "classicCards",
+      rendererOptions: { classicCards: { cardSize: 220 } },
+    });
   });
 });
