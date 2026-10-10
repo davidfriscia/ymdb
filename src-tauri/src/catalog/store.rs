@@ -148,7 +148,7 @@ pub struct SoftwareCatalogInfo {
     pub statistics: SoftwareStatistics,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SoftwareStatistics {
     pub lists: u64,
@@ -191,7 +191,7 @@ pub struct CatalogInfo {
 
 /// Counts describing the catalog content. Categories follow the flags of the
 /// XML; machines are not classified further (for example as arcade or console).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogStatistics {
     /// All `<machine>` entries, including devices.

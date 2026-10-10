@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCatalogStatus } from "../test/catalogFixtures";
+import { launchConfigView } from "../test/launcherFixtures";
 import { App } from "./App";
 import { PREFERENCES_KEY } from "./preferences";
 
@@ -12,6 +13,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 const responses: Record<string, unknown> = {
   get_mame_configuration: { executablePath: null, executableExists: false },
   get_catalog_status: emptyCatalogStatus,
+  get_launch_config: launchConfigView(),
+  get_launch_sessions: [],
 };
 
 function storedPreferences(): unknown {
@@ -97,6 +100,7 @@ describe("App", () => {
       cardSize: 300,
       filtersVisible: false,
       renderer: "cards",
+      showCommandPreview: false,
     });
   });
 

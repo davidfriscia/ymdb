@@ -8,6 +8,7 @@
 pub mod catalog;
 pub mod detail;
 pub mod health;
+pub mod launcher;
 pub mod mame;
 pub mod search;
 
@@ -16,6 +17,7 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::Serialize;
 
+use crate::catalog::freshness::CatalogFreshness;
 use crate::settings::{SettingsError, SettingsStore};
 
 /// Error returned by commands. Validation failures are not errors: they are
@@ -39,6 +41,15 @@ pub enum CommandError {
     CatalogNotImported,
     /// The catalog contains no software lists.
     SoftwareListsNotImported,
+    /// The catalog does not match the configured MAME executable, so names may
+    /// differ: it must be imported again before launching.
+    CatalogMismatch { freshness: CatalogFreshness },
+    /// A machine, software or session does not exist.
+    NotFound { message: String },
+    /// A session for the same machine and software is already running.
+    AlreadyRunning { session_id: u64 },
+    /// MAME could not be started.
+    LaunchFailed { message: String },
     /// Unexpected failure (for example a native dialog error).
     Internal { message: String },
 }
@@ -115,6 +126,18 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CommandError::NotConfigured).expect("serialize"),
             serde_json::json!({ "kind": "notConfigured" })
+        );
+        assert_eq!(
+            serde_json::to_value(CommandError::AlreadyRunning { session_id: 3 })
+                .expect("serialize"),
+            serde_json::json!({ "kind": "alreadyRunning", "sessionId": 3 })
+        );
+        assert_eq!(
+            serde_json::to_value(CommandError::CatalogMismatch {
+                freshness: CatalogFreshness::DifferentExecutable
+            })
+            .expect("serialize"),
+            serde_json::json!({ "kind": "catalogMismatch", "freshness": "differentExecutable" })
         );
     }
 

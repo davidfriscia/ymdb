@@ -63,6 +63,9 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `search`: typed wrappers of the search commands (`searchApi.ts`).
   - `browser`: the catalog browser and detail views (see
     [Catalog browser](#catalog-browser--implemented)).
+  - `launcher`: launch panels in the machine and software details, the launch options
+    section of the Settings page and `LauncherProvider`, which shares the launch
+    configuration and the session statuses (see [Launcher](#launcher--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 #### Application shell
@@ -98,14 +101,14 @@ results and open detail when their sum changes.
 #### Interface preferences
 
 `src/app/preferences.ts` stores the interface preferences (theme, card size, filter
-panel visibility, result renderer) as JSON in the webview's `localStorage` under the
-versioned key `ymdb.preferences.v1`. They are separate from `settings.json` (MAME
+panel visibility, result renderer, command line preview) as JSON in the webview's
+`localStorage` under the versioned key `ymdb.preferences.v1`. They are separate from `settings.json` (MAME
 configuration) and from the catalog. Every field is validated when read: unknown
 themes or renderers, wrong types and malformed JSON fall back to the default of that
 field; the card size is clamped to 160-420 px. Unavailable storage only means the
 preferences last for the session.
 
-Planned: collections, launch profiles.
+Planned: collections, input devices.
 
 ### Catalog browser — Implemented
 
@@ -200,22 +203,25 @@ The Rust crate in `src-tauri/`.
 
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`, `catalog.rs`,
-  `search.rs`, `detail.rs`). Commands extract what they need from the Tauri runtime and delegate
+  `search.rs`, `detail.rs`, `launcher.rs`). Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
   long-running work (catalog import) on a dedicated thread, so the UI never freezes.
   Failures are returned as a structured `CommandError` (`settings`, `notConfigured`,
   `importInProgress`, `invalidRequest`, `catalogNotImported`,
-  `softwareListsNotImported`, `internal`).
+  `softwareListsNotImported`, `catalogMismatch`, `notFound`, `alreadyRunning`,
+  `launchFailed`, `internal`).
 - `health.rs` builds the health report returned by `check_health`.
+- `atomic_file.rs` writes small files atomically (`settings.json`, `launch.json`).
 - `settings.rs` persists application settings (see [Local storage](#local-storage--implemented-partially)).
 - `mame/` implements the MAME integration (see below).
 - `catalog/` implements the machine and software list catalog (see [Catalog](#catalog--implemented-machines-and-software-lists)).
+- `launcher/` builds and runs MAME command lines (see [Launcher](#launcher--implemented)).
 
-### MAME integration — Implemented (installation management only)
+### MAME integration — Implemented
 
-Implemented in `src-tauri/src/mame/`, as independent modules reusable by the
-planned catalog importer and launcher:
+Implemented in `src-tauri/src/mame/`, as independent modules reused by the
+catalog importer and the launcher:
 
 - `process.rs`: runs a program directly (never through a shell) with closed stdin.
   `run_with_timeout` captures size-bounded output and kills the process after a
@@ -224,6 +230,8 @@ planned catalog importer and launcher:
   watchdog that kills the process when a cancellation flag is set or when no output
   is produced for an inactivity timeout (used for `-listxml`). Dropping a streaming
   process always terminates and reaps it.
+  `spawn_detached` starts a game session without a timeout, with its output written
+  to a log file instead of pipes; the launcher owns and monitors the child.
 - `version.rs`: recognizes the output of `mame -version`.
 - `validation.rs`: validates an executable and produces a `ValidationReport`.
 - `detection.rs`: finds candidate executables in well-known locations.
@@ -258,15 +266,241 @@ by canonical path, capped at 16, and validated concurrently. Detection only repo
 results; it never changes the saved configuration.
 
 **Execution policy:** MAME is only executed in response to an explicit user action
-(select, verify, detect, import catalog, import software lists), always with fixed
-arguments (`-version`, `-listxml`, `-listsoftware`). Loading the configuration or the
-catalog at startup never runs MAME. The frontend cannot pass arbitrary arguments.
+(select, verify, detect, import catalog, import software lists, Play). Management
+commands use fixed arguments (`-version`, `-listxml`, `-listsoftware`); launches use
+command lines built by the launcher from catalog names and validated options. Loading
+the configuration or the catalog at startup never runs MAME. The frontend cannot
+pass arbitrary arguments.
 
 Planned:
 
-- Build command lines and launch machines and software, supporting the full set of
-  MAME command-line options, launch profiles and per-machine configuration.
 - Verify ROM sets, BIOS and CHD requirements.
+
+### Launcher — Implemented
+
+Implemented in `src-tauri/src/launcher/`, exposed by `commands/launcher.rs`, typed in
+`src/features/launcher/launcherApi.ts`. It is specific to MAME: it only builds MAME
+command lines from catalog records and validated options; the frontend never passes
+raw arguments.
+
+#### MAME command syntax (verified with MAME 0.280)
+
+- Usage is `mame [machine] [media] [software] [options]`. YMDB always passes the
+  machine short name first, then one media argument per software part, then options.
+- A software part is mounted with `-<media brief name> <list>:<software>:<part>`,
+  for example `nes -cart nes:smb:cart` or
+  `apple2e -flop1 apple2_flop_orig:ultima4:flop1 -flop2 apple2_flop_orig:ultima4:flop2`.
+  The fully qualified form is unambiguous, while the bare positional form (`nes smb`)
+  lets MAME pick the list and the device and loads a single part. An unknown part or
+  list is reported with exit code 4.
+- MAME only looks for software in the lists declared by the machine (`nes kof98`
+  fails with exit code 6), and only through media devices that exist in the
+  machine's default configuration (`nes -flop1 smb`: unknown option).
+- Boolean options are enabled with `-name` and disabled with `-noname`; they take no
+  value (`-window 1` fails). Value options take exactly one following argument.
+  Repeating an option is not an error: the last occurrence wins, so MAME core
+  options are not repeatable. Search paths are a single argument with
+  `;`-separated directories. Paths with spaces and non-ASCII characters work when
+  passed as separate arguments.
+- Invalid option values are not fatal: MAME prints a warning and reverts to its
+  default (`-volume -100`, `-speed abc`, an unknown `-bios`). YMDB validates values
+  before launching so this does not happen silently.
+- Exit codes (MAME `emu.h`, observed): 0 success, 1 failed validity checks, 2
+  missing files, 3 fatal error, 4 device or image error, 5 unknown system, 6 invalid
+  configuration (unknown option or software), 7-9 ROM identification results.
+- MAME resolves its configuration relative to the working directory: `mame.ini` is
+  searched in `inipath` (default `.;ini;ini/presets`) and the default `rompath` is
+  `roms`. Started from another directory, `mame neogeo` cannot find the ROMs it
+  finds from its own directory. YMDB therefore always starts MAME with the
+  executable's directory as working directory, as when the user runs it there, and
+  never writes `mame.ini` or any other MAME file.
+
+#### Modules
+
+- `options.rs`: the option model. Each supported option has a definition (name,
+  kind, category, label, description). Kinds: `boolean`, `integer` (range), `float`
+  (range), `identifier` (a word such as a video backend or BIOS name), `path` and
+  `pathList` (joined with `;`). Values are validated against the definition: no
+  control characters, no value starting with `-` (MAME would read it as an
+  option), ranges for numbers, no `;` inside one path. Unknown option names are
+  rejected. An `OptionSet` maps option names to values and only contains options the
+  user set.
+- `config.rs`: the launch configuration (global options, profiles, default profile,
+  per-machine and per-software overrides), its validation and the option
+  resolution by precedence.
+- `store.rs`: `launch.json` persistence.
+- `resolve.rs`: catalog lookups for a launch: the machine must exist and be
+  runnable; for software, the candidate machines declaring its list, their
+  compatibility and the media devices able to mount each part.
+- `command.rs`: `LaunchPlan`, the structured command line (executable, working
+  directory, arguments with their role and, for options, the level they come from).
+  The arguments of the plan are what is executed; the preview shown to the user is
+  the same plan serialized, so there is a single composition.
+- `session.rs`: started MAME processes, their status and termination.
+
+#### Option precedence
+
+From lowest to highest:
+
+1. MAME native configuration (`mame.ini` and other INI files, MAME defaults).
+2. YMDB global options.
+3. The launch profile selected for the launch (the default profile otherwise).
+4. Overrides of the machine.
+5. Overrides of the software (software launches only).
+
+Only options explicitly set at some level are passed to MAME; everything else stays
+under MAME's own configuration. Each option is passed once, with the value of the
+highest level that sets it, and the preview names that level. A profile is a flat
+set of options with an id and a name; profiles do not inherit from each other. The
+`default` profile always exists and cannot be deleted; another profile can be made
+the default.
+
+The option set is deliberately small (display, performance, sound, paths, machine
+configuration such as BIOS and RAM size, `seconds_to_run`) and grows by adding
+definitions. Input options (`joystick`, `mouse`, `ctrlr`, controller mappings) are
+intentionally not included: a future **Input Devices** feature will manage
+controllers and mappings per profile, machine or software and contribute options
+through the same `OptionSet` and precedence mechanism. Profiles are not tied to any
+controller type, so this needs no change to them.
+
+#### Software launches and compatibility
+
+For a software, YMDB lists the machines declaring its list, from the catalog:
+
+- the `original` or `compatible` relation, as declared by MAME;
+- the list filter, evaluated as MAME does (`software_list_device::is_compatible`):
+  the software is compatible when the machine's list has no filter, when the
+  software declares no `compatibility` value (part feature, else shared feature), or
+  when one of the filter values appears in the compatibility values. Otherwise MAME
+  warns that the software might not work, and YMDB shows the mismatch;
+- the media devices of the machine (from `-listxml`) whose interfaces accept the
+  software's parts. A machine without a device for any part cannot load the
+  software and cannot be selected.
+
+YMDB never picks a machine by an arbitrary order. A machine is preselected only when
+it is the only one that is `original`, matches the filter and can mount the
+software. Everything else requires an explicit choice, and the interface states that
+the catalog cannot guarantee that the software works on the chosen machine (slot
+cards, RAM size and `requirement` features of parts are not evaluated).
+
+Parts are assigned to the compatible media devices of the chosen machine: by default
+the parts in order, one per device; the user can change the assignment or leave
+devices empty. At least one part must be mounted, and a part is mounted once.
+
+#### Process management
+
+- MAME is started directly (no shell) with an argument array, stdin closed and the
+  executable directory as working directory. On Windows the console window is
+  suppressed; MAME opens its own window.
+- Standard output and error go to a per-session log file in the application local
+  data directory (`launch-logs/`, the 20 most recent kept) instead of pipes, so a
+  long session never blocks on a full pipe and keeps running if YMDB exits. The end
+  of the log is shown when MAME fails.
+- No timeout is applied to game sessions; a monitor thread checks the process every
+  250 ms and records the exit code. Statuses are kept in memory and polled by the
+  frontend while a session runs (no per-session events).
+- A second launch of the same machine and software while a session for it runs is
+  refused (`alreadyRunning`); different targets may run at the same time.
+- The user can stop a running session after a confirmation. This kills the process
+  immediately, so MAME does not save NVRAM or its configuration for that session.
+- Closing YMDB never terminates running sessions: MAME keeps running on its own and
+  YMDB forgets it. Nothing is killed implicitly.
+- Before launching, the configured executable must exist and the catalog must be
+  `current` for it: a catalog from another or a modified executable is refused
+  (`catalogMismatch`), because machine, device and software names may differ. YMDB
+  does not check whether ROM files are present: MAME reports missing files (exit
+  code 2) and the session shows that error.
+
+#### Persistence
+
+`launch.json` lives next to `settings.json` in the application configuration
+directory. It has its own `schemaVersion`, is written atomically with the same
+helper as the settings and is validated when loaded: a missing file gives the
+default configuration; an invalid file is reported and replaced only when the user
+saves. It is separate from the catalog (derived data) and from the interface
+preferences (web storage).
+
+Format (options are only those the user set; values are booleans, numbers, strings
+or lists of paths):
+
+```json
+{
+  "schemaVersion": 1,
+  "globalOptions": { "skip_gameinfo": true, "rompath": ["roms", "D:\\MAME\\roms"] },
+  "profiles": [
+    { "id": "default", "name": "Default", "options": {} },
+    { "id": "big-screen", "name": "Big screen", "options": { "window": false } }
+  ],
+  "defaultProfileId": "default",
+  "machineOverrides": { "pacman": { "bios": "japan" } },
+  "softwareOverrides": { "nes:smb": { "speed": 1.5 } }
+}
+```
+
+#### Commands
+
+- `get_launch_config` / `save_launch_config`: the whole configuration, validated
+  and saved atomically, with the option definitions for the interface.
+- `get_software_launch_info(list, name)`: parts and candidate machines of a
+  software.
+- `preview_launch(request)`: the plan of a launch, without running it.
+- `start_launch(request)`: starts MAME and returns the session.
+- `get_launch_sessions`: in-memory statuses, polled while a session runs.
+- `stop_launch_session(id)`: kills a running session.
+
+A request names the machine, optionally the software with its part assignments,
+and optionally a profile; the backend always rebuilds the command line from it.
+
+#### Interface
+
+- Machine detail: a launch panel with **Play**, the profile, **Command line**
+  (the backend preview: executable, working directory, each argument with its role
+  or the level its option comes from, and the full command line), **Options for
+  this machine** (the machine override) and the status of the last session (running
+  with Stop and a confirmation, finished, failed with MAME's exit code, message and
+  output, or stopped). Devices and other non-runnable entries have no Play button.
+- Software detail: the same panel with a machine selector listing the candidates
+  with their relation, filter result and whether they can mount the software
+  (machines that cannot are disabled), a note on the limits of the catalog data,
+  the media assignment (one selector per compatible device) and **Options for this
+  software**.
+- Settings: global options, profiles (create, rename, edit, make default, delete;
+  the `default` profile cannot be deleted) and the list of machine and software
+  overrides, which can be removed there.
+- The option editor only lists supported options, grouped by category, and checks
+  values as they are typed; the backend validates them again when saving.
+- Whether the command line preview is shown is an interface preference.
+
+#### Verified with MAME 0.280
+
+Only the `neogeo` BIOS ROM set was installed, so running emulation was verified with
+`pong` (no ROMs) and `neogeo`, and launches needing missing files were verified up to
+MAME's own error:
+
+- `pong` with `-video none -sound none -seconds_to_run 3` and `cfg`/`nvram`
+  directories containing spaces and non-ASCII characters: running status, normal
+  exit after about 6 seconds, configuration written in the given directory.
+- `puckman`: exit code 2 with the missing ROM names in the output.
+- `neogeo` with a profile setting `seconds_to_run 600`: the profile overrides the
+  global option, a second launch is refused, the session keeps running, Stop kills
+  MAME.
+- `nespal -cart nes:smb:cart` and
+  `apple2e -flop1 apple2_flop_orig:ultima4:flop1 -flop2 apple2_flop_orig:ultima4:flop2`:
+  MAME resolves the software and parts and only reports missing files (exit code 2),
+  never an unknown option, software or part.
+- A catalog imported from another executable is refused before MAME runs.
+- Closing the YMDB window while `neogeo` runs leaves MAME running.
+
+#### Limitations
+
+- ROM, CHD and software media availability is not checked before launching.
+- Slot options (cards, expansions) are not configurable; parts are mounted on the
+  media devices of the machine's default configuration.
+- The `requirement` feature of parts (for example a disk needing another software)
+  and the machine's RAM options are not evaluated for compatibility.
+- Options are limited to the supported definitions; anything else is configured in
+  MAME's own INI files.
+- Sessions started before YMDB restarts are not tracked after the restart.
 
 ### Catalog — Implemented (machines and software lists)
 
@@ -762,8 +996,12 @@ machine-specific derived data that should not roam:
 | macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/catalog.sqlite`                 |
 | Linux    | `$XDG_DATA_HOME/io.github.davidfriscia.ymdb/catalog.sqlite` (default `~/.local/share/...`) |
 
-Implemented: interface preferences (theme, card size, filter panel, result renderer)
-in the webview `localStorage` (see [Interface preferences](#interface-preferences)).
+Implemented: the launch configuration, `launch.json`, next to `settings.json` (see
+[Launcher](#launcher--implemented)), and the MAME session logs in
+`launch-logs/` in the local data directory (the 20 most recent are kept).
+
+Implemented: interface preferences (theme, card size, filter panel, result renderer,
+command line preview) in the webview `localStorage` (see [Interface preferences](#interface-preferences)).
 They live in the webview data directory and are not part of `settings.json`.
 
 Planned: user-configurable ROM, CHD and artwork directories.

@@ -21,6 +21,7 @@ import {
 } from "./DetailParts";
 import { formatSize } from "./format";
 import { RelatedList } from "./RelatedList";
+import { SoftwareLaunchPanel } from "../../launcher/SoftwareLaunchPanel";
 
 interface SoftwareDetailViewProps {
   list: string;
@@ -68,6 +69,13 @@ export function SoftwareDetailView({
           <SupportBadge supported={software.supported} />
           {software.parent && <Badge tone="neutral">Clone</Badge>}
         </>
+      }
+      actions={
+        <SoftwareLaunchPanel
+          list={software.listName}
+          name={software.name}
+          refreshKey={refreshKey}
+        />
       }
       tabs={tabs}
       activeTab={tab}

@@ -1,15 +1,16 @@
 //! Persistent application settings stored as a JSON file.
 //!
 //! The file lives in the platform-specific application configuration
-//! directory. Writes are atomic: the new content is written to a temporary file
-//! in the same directory, flushed to disk, then renamed over the settings file.
+//! directory and is written atomically (see `atomic_file`).
 
 use std::fmt;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::atomic_file;
 
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 pub const SCHEMA_VERSION: u32 = 1;
@@ -128,21 +129,10 @@ impl SettingsStore {
         let mut content = serde_json::to_vec_pretty(settings).map_err(SettingsError::Serialize)?;
         content.push(b'\n');
 
-        let write_error = |source| SettingsError::Write {
+        atomic_file::write(&self.file, &content).map_err(|source| SettingsError::Write {
             path: self.file.clone(),
             source,
-        };
-        if let Some(dir) = self.file.parent() {
-            fs::create_dir_all(dir).map_err(write_error)?;
-        }
-        let temp_file = self.file.with_extension("json.tmp");
-        let result =
-            write_synced(&temp_file, &content).and_then(|()| fs::rename(&temp_file, &self.file));
-        if result.is_err() {
-            // Best effort: never leave a partial temporary file behind.
-            let _ = fs::remove_file(&temp_file);
-        }
-        result.map_err(write_error)
+        })
     }
 
     /// Loads the settings, applies `change` and saves the result.
@@ -159,12 +149,6 @@ impl SettingsStore {
         self.save(&settings)?;
         Ok(settings)
     }
-}
-
-fn write_synced(path: &Path, content: &[u8]) -> io::Result<()> {
-    let mut file = File::create(path)?;
-    file.write_all(content)?;
-    file.sync_all()
 }
 
 #[cfg(test)]

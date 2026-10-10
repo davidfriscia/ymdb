@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { CatalogFreshness } from "../features/catalog/catalogApi";
 
 /** Mirrors `CommandError` in `src-tauri/src/commands/mod.rs`. */
 export type CommandError =
@@ -8,6 +9,10 @@ export type CommandError =
   | { kind: "invalidRequest"; message: string }
   | { kind: "catalogNotImported" }
   | { kind: "softwareListsNotImported" }
+  | { kind: "catalogMismatch"; freshness: CatalogFreshness }
+  | { kind: "notFound"; message: string }
+  | { kind: "alreadyRunning"; sessionId: number }
+  | { kind: "launchFailed"; message: string }
   | { kind: "internal"; message: string };
 
 /** Thrown by {@link invokeCommand} when a Tauri command fails. */
@@ -33,6 +38,10 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "invalidRequest" ||
     kind === "catalogNotImported" ||
     kind === "softwareListsNotImported" ||
+    kind === "catalogMismatch" ||
+    kind === "notFound" ||
+    kind === "alreadyRunning" ||
+    kind === "launchFailed" ||
     kind === "internal"
   );
 }
@@ -68,6 +77,14 @@ export function describeCommandError(error: CommandError): string {
       return "No catalog has been imported yet.";
     case "softwareListsNotImported":
       return "The software lists have not been imported yet.";
+    case "catalogMismatch":
+      return "The catalog does not match the configured MAME executable. Import the catalog again before launching.";
+    case "notFound":
+      return `Not found: ${error.message}`;
+    case "alreadyRunning":
+      return "This machine or software is already running.";
+    case "launchFailed":
+      return `MAME could not be started: ${error.message}`;
     case "internal":
       return `Unexpected error: ${error.message}`;
   }

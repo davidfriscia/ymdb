@@ -5,8 +5,8 @@ Your MAME DB (YMDB) is an open source, cross-platform desktop frontend for
 launch every system supported by the emulator: arcade machines, consoles, home and
 personal computers, other devices, and software lists.
 
-> **Status:** early development. MAME configuration, catalog import, search and
-> browsing work; launching does not yet. See [Current status](#current-status).
+> **Status:** early development. MAME configuration, catalog import, search, browsing
+> and launching work; ROM management does not yet. See [Current status](#current-status).
 
 YMDB does not include ROMs, BIOS files, CHDs or any other copyrighted content.
 
@@ -225,9 +225,52 @@ The **Catalog** page (the start page) browses the imported machines or software:
 
 The **MAME** page holds the MAME installation and catalog import panels. The
 **Settings** page selects the **Light** (default) or **Dark** theme, applied
-immediately to the whole application, and shows the version and a backend
-connection check. Theme, card size, filter panel visibility and result view are
-saved in the application's web storage, separately from the MAME configuration.
+immediately to the whole application, holds the MAME launch options and shows the
+version and a backend connection check. Theme, card size, filter panel visibility,
+result view and command line preview are saved in the application's web storage, separately from the MAME configuration.
+
+## Launching MAME
+
+YMDB starts the configured MAME executable for a machine or a software. It needs a
+catalog imported from that same executable (reimport it after changing or updating
+MAME). YMDB does not check that ROMs, CHDs or software media are present: when files
+are missing, MAME refuses to start and YMDB shows its message and output.
+
+- **Machines:** open a machine and press **Play**. YMDB runs
+  `mame <machine> [options]` from the MAME directory, so MAME reads its own
+  `mame.ini` and relative paths exactly as when you run it there.
+- **Software:** open a software, choose the machine and press **Play**. The machine
+  list contains the machines declaring the software list, with the relation MAME
+  declares (original or compatible list), whether the list filter (for example NTSC
+  or PAL) matches the software, and whether the machine has a media device for it.
+  A machine is preselected only when it is the only one that is original and
+  matching; otherwise you choose. This information comes from MAME's catalog and
+  does not guarantee that a software works on a machine. Each part of the software
+  (for example the disks of a multi-disk game) is mounted on a media device, for
+  example `mame apple2e -flop1 apple2_flop_orig:ultima4:flop1 -flop2
+apple2_flop_orig:ultima4:flop2`; the assignment can be changed before launching.
+- **Command line** shows the exact command that **Play** runs, with the origin of
+  every option.
+- While MAME runs, the detail page shows the session; **Stop** terminates MAME after
+  a confirmation (unsaved progress and NVRAM changes are lost). Closing YMDB never
+  closes MAME.
+
+### Launch options
+
+YMDB passes only the options you set; everything else follows MAME's own
+configuration, which YMDB never modifies. Options are set at four levels, the later
+ones taking precedence:
+
+1. **Global options** (Settings page).
+2. **Launch profiles** (Settings page): named sets of options, chosen with the
+   **Profile** selector when launching; the default profile applies otherwise.
+3. **Options for this machine** (machine detail page).
+4. **Options for this software** (software detail page).
+
+The available options cover display, performance, sound, search paths and output
+directories, BIOS and RAM size and session options (for example `seconds_to_run`).
+Values are checked before saving. They are saved in `launch.json`, next to
+`settings.json`. Controller and input device settings are not managed by YMDB yet.
 
 ## Testing and quality checks
 
@@ -317,13 +360,16 @@ Implemented:
   counts, sorting and pagination (see [Catalog search](#catalog-search)).
 - Catalog browser with filters, facets, card results, pagination and machine,
   software and software list detail views (see [Browsing the catalog](#browsing-the-catalog)).
+- MAME launcher: machines and software, with machine selection, part assignment,
+  command line preview, global options, launch profiles, machine and software
+  options, and session monitoring (see [Launching MAME](#launching-mame)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including the launcher, ROM management,
-artwork and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including ROM management, input device
+configuration, artwork and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

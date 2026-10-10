@@ -3,7 +3,7 @@
 //! Programs are always started directly through [`std::process::Command`],
 //! never through a shell, so paths and arguments are passed verbatim.
 //!
-//! Two modes are provided:
+//! Three modes are provided:
 //!
 //! - [`run_with_timeout`] for short commands whose whole output is small
 //!   (for example `mame -version`).
@@ -11,7 +11,9 @@
 //!   example `mame -listxml`): standard output is consumed incrementally by the
 //!   caller, while a watchdog terminates the process on cancellation or
 //!   inactivity.
+//! - [`spawn_detached`] for game sessions: no timeout, output to a log file.
 
+use std::fs::File;
 use std::io::{self, Read};
 use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -305,6 +307,26 @@ impl Read for ActivityReader {
         }
         Ok(read)
     }
+}
+
+/// Starts a long-running program, such as a MAME game session, without a timeout.
+///
+/// Standard input is closed. Standard output and error go to `log` (or are
+/// discarded) instead of pipes, so the process never blocks on a full pipe and
+/// keeps running if the caller exits. The caller owns the returned child.
+pub fn spawn_detached(mut command: Command, log: Option<File>) -> Result<Child, ProcessError> {
+    command.stdin(Stdio::null());
+    match log {
+        Some(file) => {
+            let stderr = file.try_clone().map_err(ProcessError::Spawn)?;
+            command.stdout(file).stderr(stderr);
+        }
+        None => {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+    }
+    platform::configure_background_process(&mut command);
+    command.spawn().map_err(ProcessError::Spawn)
 }
 
 fn spawn_piped(mut command: Command) -> Result<Child, ProcessError> {

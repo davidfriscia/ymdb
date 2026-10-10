@@ -1,8 +1,10 @@
 //! Application core of Your MAME DB (YMDB).
 
+mod atomic_file;
 mod catalog;
 mod commands;
 mod health;
+mod launcher;
 mod mame;
 mod settings;
 
@@ -11,6 +13,8 @@ use tauri::Manager;
 use crate::catalog::store::CatalogStore;
 use crate::commands::SettingsState;
 use crate::commands::catalog::CatalogState;
+use crate::commands::launcher::LauncherState;
+use crate::launcher::store::LaunchConfigStore;
 use crate::settings::SettingsStore;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,7 +36,16 @@ pub fn run() {
                 .ok()
                 .map(|dir| CatalogStore::in_dir(&dir));
             app.manage(SettingsState::new(settings));
+            let launch_config = paths
+                .app_config_dir()
+                .ok()
+                .map(|dir| LaunchConfigStore::in_dir(&dir));
+            let launch_logs = paths
+                .app_local_data_dir()
+                .ok()
+                .map(|dir| dir.join("launch-logs"));
             app.manage(CatalogState::new(catalog));
+            app.manage(LauncherState::new(launch_config, launch_logs));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -53,6 +66,13 @@ pub fn run() {
             commands::detail::get_machine_detail,
             commands::detail::get_software_detail,
             commands::detail::get_software_list_detail,
+            commands::launcher::get_launch_config,
+            commands::launcher::save_launch_config,
+            commands::launcher::get_software_launch_info,
+            commands::launcher::preview_launch,
+            commands::launcher::start_launch,
+            commands::launcher::get_launch_sessions,
+            commands::launcher::stop_launch_session,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

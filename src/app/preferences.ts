@@ -9,6 +9,8 @@ import { CARD_SIZE, type BrowserPreferences } from "../features/browser/browserP
  */
 export interface UiPreferences extends BrowserPreferences {
   theme: ThemeId;
+  /** Whether launch panels show the MAME command line. */
+  showCommandPreview: boolean;
 }
 
 export const DEFAULT_PREFERENCES: UiPreferences = {
@@ -16,6 +18,7 @@ export const DEFAULT_PREFERENCES: UiPreferences = {
   cardSize: CARD_SIZE.default,
   filtersVisible: true,
   renderer: DEFAULT_RENDERER,
+  showCommandPreview: false,
 };
 
 export const PREFERENCES_KEY = "ymdb.preferences.v1";
@@ -48,6 +51,10 @@ export function loadPreferences(storage: Storage | null = safeStorage()): UiPref
         ? values.filtersVisible
         : DEFAULT_PREFERENCES.filtersVisible,
     renderer: isRendererId(values.renderer) ? values.renderer : DEFAULT_PREFERENCES.renderer,
+    showCommandPreview:
+      typeof values.showCommandPreview === "boolean"
+        ? values.showCommandPreview
+        : DEFAULT_PREFERENCES.showCommandPreview,
   };
 }
 

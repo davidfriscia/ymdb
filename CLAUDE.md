@@ -99,6 +99,15 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Measure search changes with the `search_benchmark` ignored test on a real catalog
   and check `EXPLAIN QUERY PLAN` before adding indexes.
 - MAME is executed only in response to explicit user actions; never at startup.
+- Launches go through `launcher::prepare` and `LaunchPlan`: the same plan is
+  previewed and executed, MAME runs from its own directory (so `mame.ini` applies),
+  and the frontend sends structured requests, never arguments. YMDB never writes
+  `mame.ini` or other MAME files; launch settings live in `launch.json`.
+- New MAME options are added as definitions in `launcher/options.rs` (validated
+  kinds, checked against `mame -showusage`); never accept free-form option names.
+  Input/controller options belong to the future input devices feature.
+- Game sessions have no timeout and are never killed implicitly (not even when YMDB
+  exits); only an explicit, confirmed Stop terminates them.
 - Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
   unbounded one-to-many relations (clones, software of a list, machines of a list)
   in them: return a count and list them through the paginated search.

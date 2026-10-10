@@ -1,4 +1,5 @@
 import { HealthCheck } from "../features/health-check/HealthCheck";
+import { LaunchSettings } from "../features/launcher/LaunchSettings";
 import { THEMES, type ThemeId } from "./theme/themes";
 
 interface SettingsViewProps {
@@ -41,9 +42,11 @@ export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
         <p className="about__name">Your MAME DB (YMDB)</p>
         <p className="message message--muted">Version {__APP_VERSION__}</p>
         <p className="message message--muted">
-          Early development build. Launch features are not available yet.
+          Early development build. ROM management and artwork are not available yet.
         </p>
       </section>
+
+      <LaunchSettings />
 
       <HealthCheck />
     </div>

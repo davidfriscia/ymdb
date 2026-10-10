@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<mame build="0.280 (mame0280)" debug="no" mameconfig="10">
+	<machine name="apple2" sourcefile="apple/apple2.cpp">
+		<description>Apple ][</description>
+		<year>1977</year>
+		<manufacturer>Apple Computer</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="floppydisk" tag="sl6:diskiing:0:525" interface="floppy_5_25">
+			<instance name="floppydisk1" briefname="flop1"/>
+			<extension name="dsk"/>
+		</device>
+		<device type="floppydisk" tag="sl6:diskiing:1:525" interface="floppy_5_25">
+			<instance name="floppydisk2" briefname="flop2"/>
+			<extension name="dsk"/>
+		</device>
+		<softwarelist tag="flop_orig" name="apple2_flop_orig" status="original" filter="A2"/>
+	</machine>
+	<machine name="apple2e" sourcefile="apple/apple2e.cpp">
+		<description>Apple //e</description>
+		<year>1983</year>
+		<manufacturer>Apple Computer</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="floppydisk" tag="sl6:diskiing:0:525" interface="floppy_5_25">
+			<instance name="floppydisk1" briefname="flop1"/>
+			<extension name="dsk"/>
+		</device>
+		<device type="floppydisk" tag="sl6:diskiing:1:525" interface="floppy_5_25">
+			<instance name="floppydisk2" briefname="flop2"/>
+			<extension name="dsk"/>
+		</device>
+		<device type="cassette" tag="tape">
+			<instance name="cassette" briefname="cass"/>
+			<extension name="wav"/>
+		</device>
+		<softwarelist tag="flop_orig" name="apple2_flop_orig" status="compatible" filter="A2E"/>
+	</machine>
+	<machine name="apple2tape" sourcefile="apple/apple2.cpp" cloneof="apple2" romof="apple2">
+		<description>Apple ][ (cassette only)</description>
+		<year>1977</year>
+		<manufacturer>Apple Computer</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="cassette" tag="tape" interface="apple2_cass">
+			<instance name="cassette" briefname="cass"/>
+			<extension name="wav"/>
+		</device>
+		<softwarelist tag="flop_orig" name="apple2_flop_orig" status="original"/>
+	</machine>
+	<machine name="c64" sourcefile="commodore/c64.cpp">
+		<description>Commodore 64 (NTSC)</description>
+		<year>1982</year>
+		<manufacturer>Commodore Business Machines</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="cartridge" tag="exp" interface="c64_cart,vic10_cart" mandatory="1">
+			<instance name="cartridge" briefname="cart"/>
+			<extension name="crt"/>
+		</device>
+		<device type="quickload" tag="quickload">
+			<instance name="quickload" briefname="quik"/>
+		</device>
+		<softwarelist tag="cart_list_c64" name="c64_cart" status="original" filter="NTSC"/>
+		<softwarelist name="vic10" status="compatible"/>
+	</machine>
+	<machine name="nes" sourcefile="nintendo/nes.cpp">
+		<description>Nintendo Entertainment System / Famicom (NTSC)</description>
+		<year>1985</year>
+		<manufacturer>Nintendo</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="cartridge" tag="nes_slot" interface="nes_cart" mandatory="1">
+			<instance name="cartridge" briefname="cart"/>
+			<extension name="nes"/>
+		</device>
+		<softwarelist tag="cart_list" name="nes" status="original" filter="NTSC"/>
+	</machine>
+	<machine name="nespal" sourcefile="nintendo/nes.cpp" cloneof="nes" romof="nes">
+		<description>Nintendo Entertainment System (PAL)</description>
+		<year>1987</year>
+		<manufacturer>Nintendo</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+		<device type="cartridge" tag="nes_slot" interface="nes_cart" mandatory="1">
+			<instance name="cartridge" briefname="cart"/>
+			<extension name="nes"/>
+		</device>
+		<softwarelist tag="cart_list" name="nes" status="original" filter="PAL"/>
+	</machine>
+	<machine name="pong" sourcefile="atari/pong.cpp">
+		<description>Pong (Rev E)</description>
+		<year>1972</year>
+		<manufacturer>Atari</manufacturer>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="z80" sourcefile="devices/cpu/z80/z80.cpp" isdevice="yes" runnable="no">
+		<description>Zilog Z80</description>
+	</machine>
+</mame>

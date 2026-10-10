@@ -19,11 +19,13 @@ describe("UI preferences", () => {
       cardSize: CARD_SIZE.default,
       filtersVisible: true,
       renderer: "cards",
+      showCommandPreview: false,
     });
   });
 
   it("restores saved preferences", () => {
     const saved: UiPreferences = {
+      showCommandPreview: true,
       theme: "dark",
       cardSize: 300,
       filtersVisible: false,
@@ -53,6 +55,7 @@ describe("UI preferences", () => {
         theme: "solarized",
         cardSize: "big",
         filtersVisible: "yes",
+        showCommandPreview: 1,
         renderer: "table",
         removedOption: true,
       }),

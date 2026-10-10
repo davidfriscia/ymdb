@@ -14,6 +14,8 @@ interface DetailFrameProps {
   title: string;
   subtitle: ReactNode;
   badges?: ReactNode;
+  /** Shown below the header, for example the launch controls. */
+  actions?: ReactNode;
   tabs: DetailTab[];
   activeTab: string;
   onTab: (tab: string) => void;
@@ -25,6 +27,7 @@ export function DetailFrame({
   title,
   subtitle,
   badges,
+  actions,
   tabs,
   activeTab,
   onTab,
@@ -40,6 +43,7 @@ export function DetailFrame({
         <p className="detail__subtitle">{subtitle}</p>
         {badges && <p className="detail__badges">{badges}</p>}
       </header>
+      {actions}
       <div className="detail__body">
         <div className="detail__tabs" role="tablist" aria-label="Sections">
           {tabs.map((tab) => (

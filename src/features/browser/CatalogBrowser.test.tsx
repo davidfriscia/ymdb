@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   catalogStatus,
@@ -22,6 +22,8 @@ import type {
 } from "../search/searchApi";
 import type { BrowserPreferences } from "./browserPreferences";
 import { CatalogBrowser } from "./CatalogBrowser";
+import { LauncherProvider } from "../launcher/LauncherProvider";
+import { launchConfigView } from "../../test/launcherFixtures";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -103,6 +105,9 @@ function commands(overrides: Partial<Record<string, Handler>> = {}) {
   backend({
     get_catalog_status: () => catalogStatus(),
     search_catalog_machines: machineSearch(),
+    get_launch_config: () => launchConfigView(),
+    get_launch_sessions: () => [],
+    get_software_launch_info: () => null,
     ...overrides,
   });
 }
@@ -122,6 +127,14 @@ const lastRequest = () => resultRequests().at(-1);
 const lastFacetRequest = () => facetRequests().at(-1);
 const isResultRequest = (args: Args) => machineRequest(args).direction !== undefined;
 
+function withLauncher(children: ReactNode) {
+  return (
+    <LauncherProvider showCommandPreview={false} onShowCommandPreviewChange={() => undefined}>
+      {children}
+    </LauncherProvider>
+  );
+}
+
 const PREFERENCES: BrowserPreferences = { cardSize: 220, filtersVisible: true, renderer: "cards" };
 
 function renderBrowser(props: Partial<ComponentProps<typeof CatalogBrowser>> = {}) {
@@ -136,9 +149,9 @@ function renderBrowser(props: Partial<ComponentProps<typeof CatalogBrowser>> = {
     debounceMs: 20,
     ...props,
   };
-  const view = render(<CatalogBrowser {...base} />);
+  const view = render(withLauncher(<CatalogBrowser {...base} />));
   const rerender = (next: Partial<ComponentProps<typeof CatalogBrowser>>) => {
-    view.rerender(<CatalogBrowser {...base} {...next} />);
+    view.rerender(withLauncher(<CatalogBrowser {...base} {...next} />));
   };
   return { user, onPreferencesChange, onOpenMame, rerender };
 }

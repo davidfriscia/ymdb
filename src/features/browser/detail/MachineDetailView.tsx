@@ -16,6 +16,7 @@ import {
 } from "./DetailParts";
 import { formatClock, formatSize, joinPresent, yesNo } from "./format";
 import { RelatedList } from "./RelatedList";
+import { MachineLaunchPanel } from "../../launcher/MachineLaunchPanel";
 
 interface MachineDetailViewProps {
   name: string;
@@ -67,6 +68,7 @@ export function MachineDetailView({
         </>
       }
       badges={<MachineBadges machine={machine} />}
+      actions={<MachineLaunchPanel name={machine.name} isRunnable={machine.isRunnable} />}
       tabs={tabs}
       activeTab={tab}
       onTab={onTab}
