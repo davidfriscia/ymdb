@@ -134,6 +134,14 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   changed implicitly. ROM Manager destinations reach MAME only through
   `launcher/search_paths.rs` (`-rompath`/`-samplepath` composed with the resolved
   value or `mame.ini`), never by writing MAME files.
+- `src-tauri/src/roms/`: the ROM manager works with whole files (archives, CHDs,
+  samples) chosen from catalog relations; never inspect, audit, extract or rebuild
+  archive contents, and never deduplicate across plans or versions. It reaches
+  repositories only through `roms::Connector`/`RemoteRepository` (no protocol code).
+  A missing candidate is a warning, never an error; a technical remote failure is
+  `unresolved`, never "not found". Downloads go through temporary files and are
+  finalized without ever replacing an existing file. Download plans are snapshots of
+  their installation and request; Download & Play launches only that request.
 - Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
   unbounded one-to-many relations (clones, software of a list, machines of a list)
   in them: return a count and list them through the paginated search.

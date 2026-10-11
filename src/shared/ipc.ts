@@ -11,6 +11,7 @@ export type CommandError =
   | { kind: "removalNotAllowed"; message: string }
   | { kind: "migrationFailed"; message: string }
   | { kind: "importInProgress" }
+  | { kind: "downloadInProgress" }
   | { kind: "invalidRequest"; message: string }
   | { kind: "catalogNotImported" }
   | { kind: "catalogUnreadable"; message: string }
@@ -47,6 +48,7 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "removalNotAllowed" ||
     kind === "migrationFailed" ||
     kind === "importInProgress" ||
+    kind === "downloadInProgress" ||
     kind === "invalidRequest" ||
     kind === "catalogNotImported" ||
     kind === "catalogUnreadable" ||
@@ -93,6 +95,8 @@ export function describeCommandError(error: CommandError): string {
       return `The previous YMDB configuration could not be upgraded. Nothing was deleted; YMDB retries on the next attempt. ${error.message}`;
     case "importInProgress":
       return "A catalog import is already running.";
+    case "downloadInProgress":
+      return "A ROM download is already running. Wait for it to end or cancel it first.";
     case "invalidRequest":
       return `Invalid request: ${error.message}`;
     case "catalogNotImported":

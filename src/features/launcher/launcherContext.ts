@@ -25,6 +25,8 @@ export interface LauncherContextValue {
   /** Sessions of this run, from every installation, most recent first. */
   sessions: SessionInfo[];
   start: (request: LaunchRequest) => Promise<SessionInfo>;
+  /** Reads the sessions again, for example after Download & Play started one. */
+  refreshSessions: () => void;
   stop: (id: number) => Promise<void>;
   showCommandPreview: boolean;
   setShowCommandPreview: (show: boolean) => void;

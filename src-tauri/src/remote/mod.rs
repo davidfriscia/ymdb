@@ -18,10 +18,6 @@ pub mod path;
 pub mod provider;
 pub mod sftp;
 pub mod sources;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the ROM manager's downloads")
-)]
 pub mod transfer;
 
 #[cfg(test)]

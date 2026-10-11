@@ -25,10 +25,6 @@ pub struct RemotePath(String);
 
 /// A path below a [`RemotePath`]: one or more plain segments.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the ROM manager's downloads")
-)]
 pub struct RelativePath(Vec<String>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,10 +112,6 @@ impl RemotePath {
 
     /// The path of `relative` inside this directory. Never outside of it.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
-    )]
     pub fn join(&self, relative: &RelativePath) -> Self {
         let mut path = self.0.clone();
         for segment in &relative.0 {
@@ -147,7 +139,10 @@ impl RemotePath {
     /// Whether `self` is `base` or inside it.
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
+        expect(
+            dead_code,
+            reason = "part of the contract, not used by the ROM manager yet"
+        )
     )]
     pub fn starts_with(&self, base: &RemotePath) -> bool {
         base.is_root()
@@ -164,7 +159,10 @@ impl fmt::Display for RemotePath {
 
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "used by the ROM manager's downloads")
+    expect(
+        dead_code,
+        reason = "part of the contract, not used by the ROM manager yet"
+    )
 )]
 impl RelativePath {
     /// Parses a relative path such as `neogeo/kof98.chd`. Absolute paths,

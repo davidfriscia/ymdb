@@ -72,6 +72,8 @@ React + TypeScript application rendered by the system WebView through Tauri.
     configuration and the session statuses (see [Launcher](#launcher--implemented)).
   - `remote`: **Settings → Remote Connections** and the **ROM Manager** section of
     the MAME page (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
+  - `roms`: Prepare Download and Download & Play in the launch panels (see
+    [ROM Manager downloads](#rom-manager-downloads--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 #### Application shell
@@ -243,13 +245,13 @@ The Rust crate in `src-tauri/`.
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`,
   `installations.rs`, `catalog.rs`, `search.rs`, `detail.rs`, `launcher.rs`,
-  `media.rs`, `remote.rs`). Commands extract what they need from the Tauri runtime and delegate
+  `media.rs`, `remote.rs`, `roms.rs`). Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
-  long-running work (catalog import) on a dedicated thread, so the UI never freezes.
+  long-running work (catalog import, ROM downloads) on a dedicated thread, so the UI never freezes.
   Failures are returned as a structured `CommandError` (`settings`,
   `installationNotFound`, `duplicateInstallation`, `removalNotAllowed`,
-  `migrationFailed`, `importInProgress`, `invalidRequest`, `catalogNotImported`,
+  `migrationFailed`, `importInProgress`, `downloadInProgress`, `invalidRequest`, `catalogNotImported`,
   `catalogUnreadable`, `softwareListsNotImported`, `catalogMismatch`, `notFound`,
   `alreadyRunning`, `launchFailed`, `connectionNotFound`, `connectionInUse`, `remote`,
   `internal`). A problem with one installation
@@ -268,6 +270,8 @@ The Rust crate in `src-tauri/`.
 - `media/` finds and serves local artwork (see [Media sources](#media-sources--implemented)).
 - `remote/` implements remote connections, remote sources and repository providers
   (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
+- `roms/` plans and performs ROM Manager downloads (see
+  [ROM Manager downloads](#rom-manager-downloads--implemented)).
 
 ### MAME integration — Implemented
 
@@ -1412,10 +1416,10 @@ Manager (`remote-sources.json`).
 ### Remote repositories — Implemented (connections, sources, SFTP provider)
 
 Implemented in `src-tauri/src/remote/` and `commands/remote.rs`, typed in
-`src/features/remote/`. This is the infrastructure of the future ROM Manager: it
+`src/features/remote/`. This is the infrastructure of the ROM Manager: it
 records where ROM, CHD and sample files can be retrieved from and where they will be
 stored, and provides a protocol-independent repository contract with a first SFTP
-provider. Nothing is downloaded yet (see [ROM Manager downloads](#rom-manager-downloads--planned)).
+provider, used by the [ROM Manager downloads](#rom-manager-downloads--implemented).
 
 Three layers, independent of any protocol:
 
@@ -1690,23 +1694,235 @@ No HTTPS or S3 code, placeholder or interface control exists yet.
 - Directory listings in the interface are limited to 2,000 entries.
 - RSA signatures use the `rsa` crate, which has a known timing side channel
   (RUSTSEC-2023-0071) for private key operations; prefer ed25519 keys.
-- Nothing is downloaded yet.
+- Downloads are described in [ROM Manager downloads](#rom-manager-downloads--implemented).
 
-### ROM Manager downloads — Planned
+### ROM Manager downloads — Implemented
 
-Built on the [remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)
-infrastructure, without changing the connection model:
+Implemented in `src-tauri/src/roms/` and `commands/roms.rs`, typed in
+`src/features/roms/`. Built on the
+[remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)
+infrastructure without changing it: the ROM Manager only uses `provider::RemoteRepository`
+(through the small `roms::Connector` trait, whose real implementation calls
+`provider::connect`) and `transfer::copy_download`; it never names SFTP.
 
-- Resolve the files a machine or software needs (parent/clone, BIOS, devices,
-  machine and software list ROMs and CHDs, samples) and map them to remote paths
-  according to each source's organization.
-- Download whole ZIP archives (never individual ROMs, never rebuilt archives) and
-  whole CHD files into the structure MAME expects, through `open_download` and
-  `transfer::copy_download` into temporary files, with progress, cancellation,
-  verification and finalization. Existing files are never overwritten.
-- No content-addressed cache, no deduplication between versions, no complex
-  parallel downloads.
-- Download & Play.
+#### Principle: whole sets, conservatively
+
+For a launch, the ROM Manager identifies the **sets** that may be needed, downloads every
+candidate file that is missing locally and available remotely, reports the others as
+warnings and lets MAME decide whether the files present are enough. It never opens
+archives, never reads or hashes individual ROMs, never rebuilds merged or split sets and
+never deduplicates between plans or MAME versions (no content-addressed cache).
+Redundancy is accepted: downloading an archive that was not strictly needed is
+preferred to analysing archive contents. Only identical files within one plan are
+deduplicated (by category and path).
+
+#### Catalog metadata
+
+No schema change was needed: the catalog already stores `cloneof`, `romof`, `sampleof`,
+device references, ROMs with `merge` and `status`, disks with `merge` and `status`,
+machine samples, software `cloneof`, parts, data areas and disk areas. Existing catalogs
+work as they are; no reimport is required.
+
+#### Set-based planner (`roms/planner.rs`)
+
+Input: the machine, and for a software its list, name and mounted parts (from the
+launch request), plus the organizations of the Machine CHDs and Samples sources (they
+change which paths exist). Output: ordered `Candidate`s (category, set, reason, path
+segments, and the organizations in which the file may legitimately be absent).
+
+- **Machine chain**: the machine, then every set reached through `romof` and `cloneof`
+  (indirect parents included, at most 16 sets); a reached set flagged `isbios` is a
+  BIOS (`bios`), otherwise a parent (`parent`).
+- **Machine ROMs**: `<set>.zip` for each set of the chain with at least one dumped ROM
+  (status other than `nodump`), then for each device with dumped ROMs reached through
+  `device_ref` from the machine, recursively (`device`). Absence notes: a clone is
+  stored in its parent's archive in merged collections; a set whose dumped ROMs are all
+  merged may have no archive in merged and split collections; a parent is included in
+  every clone of a non-merged collection.
+- **Machine CHDs**: `<set>/<disk>.chd` for the dumped disks of each set of the chain.
+  In merged and split collections a disk with a `merge` attribute lives in the
+  directory of the set it merges from, which the chain already covers, so it is
+  skipped; in non-merged collections it is also looked for in the clone's directory.
+  Disk names come from the catalog, never from the machine name.
+- **Samples** (machine only, no parent/clone rule): when the machine lists samples,
+  the sample set is `sampleof` (else the machine): `<set>.zip` for ZIP collections,
+  `<set>/<sample>.wav` per sample for directory collections.
+- **Software**: the software and its `cloneof` parents in the same list
+  (`software`, `softwareParent`): `<list>/<software>.zip` when the software has dumped
+  ROMs; `<list>/<software>/<disk>.chd` for the disks of the mounted parts (every part
+  when none is given) and, for parents, of their parts with the same names. A clone's
+  disk identical to a parent's (same name and SHA-1) may be absent in merged and split
+  collections. The machine running the software is then planned with reason `system`.
+- Requirements expressed only in free-form software features (such as
+  `requirement`) are not followed: they are not represented reliably.
+
+| Reason                       | Meaning                                   |
+| ---------------------------- | ----------------------------------------- |
+| `selected`                   | the machine launched on its own           |
+| `system`                     | the machine running the selected software |
+| `parent`, `bios`             | sets reached through `romof`/`cloneof`    |
+| `device`                     | a device with ROMs                        |
+| `software`, `softwareParent` | the software and its parents              |
+| `sample`                     | the sample set                            |
+
+#### Local availability (`roms/local.rs`)
+
+Files are looked for in the directories MAME searches **for this launch**: the
+resolved `rompath`/`samplepath` of the launch plan (global options, profile and
+overrides by precedence, already composed with the ROM Manager destinations by
+`launcher/search_paths.rs`), else MAME's own value from `mame.ini`. Relative entries are
+relative to the MAME directory. The check is shallow: the file exists, is a regular
+non-empty file and starts with the signature of its format (ZIP, 7-Zip, CHD, WAV,
+FLAC); `.7z` archives and `.flac` samples are accepted as MAME accepts them. A file
+that looks wrong is still `present`, with an informational warning (it is never
+replaced). No collection is scanned and no hash is computed.
+
+Names from the catalog must be portable file names (no reserved characters, control
+characters, leading dots, trailing dots or spaces, or reserved Windows device names) and
+valid `RelativePath` segments; otherwise the file is `unresolved`. The destination is
+`<category destination>/<relative path>`.
+
+#### Remote availability (`roms/availability.rs`, `roms/plan.rs`)
+
+The missing files of enabled sources are looked up with one `stat` per exact path,
+one connection per repository; repositories are never listed, so providers without
+listings (a future HTTPS provider) work the same way. `notFound` makes a file
+`remoteMissing`; any other error (permission denied, timeout, lost connection,
+authentication, unapproved or changed identity, unsupported) makes it `unresolved` with
+the error. After a connection-level failure (timeout, lost connection, unreachable
+host) the remaining files of that repository are unresolved without further waiting. A
+connection that cannot be opened is reported once (`connectionIssues`); an unknown
+server identity is remembered so that the existing approval command
+(`approve_remote_host_key`) can approve exactly the fingerprint presented.
+
+#### The plan
+
+| Availability      | Meaning                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `present`         | found where MAME searches (says nothing about its content)    |
+| `missing`         | not found locally, no usable source to look it up             |
+| `remoteAvailable` | not found locally, found remotely: downloaded                 |
+| `remoteMissing`   | not found locally nor remotely: warning                       |
+| `unresolved`      | the remote lookup failed or the path cannot be built: warning |
+
+Warnings are typed: `availability` (not in the repository), `informational` (an
+expected absence, or a remark about a local file), `configuration` (no enabled source,
+removed connection, unreadable settings), `unresolved` (technical failure) and
+`conflict`. When two different files of a plan would be written to the same local path
+(for example samples and ROMs downloaded into one directory, both named `galaga.zip`),
+neither is downloaded. The summary counts present files, files to download (with the
+known total size), files not found, unresolved files and non-informational warnings.
+
+A plan is a snapshot: it records the installation, the launch request, the remote
+paths, the destinations and the connections it was built with, and is kept in memory
+(the 16 most recent). Downloading a plan uses exactly that snapshot, whatever the
+active installation becomes; it is refused when one of its connections changed since.
+
+#### Download coordinator (`roms/download.rs`)
+
+- One plan downloads at a time (`downloadInProgress` otherwise) and one file at a
+  time, on a dedicated thread with its own Tokio runtime; it does not depend on any
+  React component. The frontend polls `get_download_status` (in memory).
+- Each file is streamed (256 KiB chunks, never in memory) into
+  `<destination>.ymdb-download` in the destination directory (same file system), then
+  flushed and synced. The bytes received must equal the size announced by the
+  repository (else the size of the plan); otherwise the file is discarded
+  (`sizeMismatch`).
+- Finalization never replaces a file: the final name is created with a hard link,
+  which fails if the name exists, then the temporary file is removed. On file systems
+  without hard links the temporary file is renamed after checking that the destination
+  is still free (a small race window remains). A destination that appears meanwhile is
+  kept and the transfer is `skipped`.
+- Cancellation stops the current transfer within 100 ms (also while connecting or
+  waiting for data), removes its temporary file and the directories created for it, and
+  marks the remaining files `cancelled`; completed files are kept.
+- A connection that cannot be opened fails its remaining files; after a broken
+  connection the next file reconnects. Errors are typed (`remote` with the
+  `RemoteError`, `sizeMismatch`, `local`).
+- Transfer statuses: `pending`, `downloading`, `downloaded` (transferred, size checked,
+  finalized; not verified against MAME), `skipped`, `failed`, `cancelled`. A retry of
+  the same plan keeps the files already downloaded. Resuming partial files is not
+  implemented: the temporary file has a fixed name and is overwritten by the next
+  attempt (also after YMDB was closed during a transfer; no automatic resume).
+- Job outcome: `completed`, `completedWithWarnings` (the plan had non-informational
+  warnings), `failed` (a transfer failed) or `cancelled`.
+
+#### Download & Play
+
+`start_download(planId, passphrases, play: true)` downloads the plan, then, only when
+no transfer failed and nothing was cancelled, starts MAME on the download thread
+through the launcher (`launch_blocking`: `prepare_resolved` and the session manager)
+with the plan's launch request, so the same installation, profile and options are used.
+Warnings never prevent it. The outcome (`started` with the session id, `notStarted`,
+`failed` with the command error) is part of the job status. When nothing needs
+downloading, the interface launches the plan's request directly. The normal Play
+command is unchanged and never consults the ROM Manager.
+
+#### Commands
+
+- `prepare_download_plan(request, passphrases)`: validates the request as a launch
+  would (catalog freshness included), builds and stores the plan. Nothing is downloaded.
+- `start_download(planId, passphrases, play)`, `get_download_status()`,
+  `cancel_download()`.
+
+Passphrases (by connection id) travel with one command and are dropped with the
+operation; they are never stored or logged.
+
+#### Interface
+
+The launch panel of the machine and software detail views has **Prepare Download** and
+**Download & Play**. The plan shows the summary, connection issues (passphrase prompt,
+approval of an unknown identity, changed identity), plan warnings and a table of files
+(path, category, reason, status, size, local path or destination, warning, and the
+transfer status once downloading). Progress shows the current file, bytes and overall
+percentage, with **Cancel download**; the result shows the outcome, failed files with
+their errors, **Retry** and the Download & Play outcome. A plan is shown only for the
+installation and launch request it was built for; a download keeps running when the
+page or the installation changes, and the panel shows it again when its target is
+displayed (or notes that another download is running).
+
+#### Future HTTPS providers
+
+Nothing in the planner, the plan or the coordinator depends on SFTP: a provider only
+needs `stat` and `open_download` on exact paths. Directory listings and ranged
+downloads are not used, so a provider declaring neither works unchanged.
+
+#### Verified
+
+- Automated: planner on synthetic catalogs (standalone machine, devices and devices of
+  devices, clones in every organization, all-merged clones, indirect parent and BIOS,
+  machine disks with merge in merged/split/non-merged, samples as ZIP and directories,
+  software clones, mounted parts, software disks identical to the parent's, undumped
+  software, unknown targets); plans with fake repositories (present files, missing
+  sources, removed connections, availability and informational warnings, permission
+  and passphrase failures, timeouts, destination conflicts, shallow local checks,
+  unusable names); downloads with fake repositories (temporary files and finalization,
+  5 MiB file, existing destination kept, broken stream, size mismatch, unwritable
+  destination, missing remote file, refused connection, cancellation of a stalled
+  transfer, retry with a stale temporary file); through the in-process SFTP server
+  (plan, download of ROMs and a 3 MiB CHD, remote files unchanged, files present for a
+  new plan, interrupted transfer without a partial file); command-level jobs (Download &
+  Play with the plan's request, no launch after a failure, retry, one download at a
+  time, cancellation, serialization); interface tests of the plan, progress,
+  cancellation, retry, outcomes, passphrase and identity prompts, installation changes
+  and the unchanged Play button.
+- End-to-end (ignored test `rom_manager_end_to_end`, run on Windows with MAME 0.280):
+  the real `-listxml` catalog (48,893 machines) imported in a temporary directory,
+  plans for `pacman`, `kof98a` (parent and `neogeo` BIOS) and `kinst` (disk), a
+  synthetic repository served over SFTP without the parent (availability warning),
+  download and `-rompath` composition of the prepared launch. MAME was not started.
+- Not verified: a real NAS, macOS/Linux runs (CI runs the same tests), and a game
+  started by Download & Play in the application window.
+
+#### Limitations
+
+- No audit: present and downloaded files are not checked against MAME's ROM data.
+- Only `.zip` archives and `.chd`/`.wav` files are downloaded (local `.7z` and `.flac`
+  are recognized as present).
+- Software requirements stated only in free-form features are not followed.
+- No resume of partial transfers, no parallel downloads, no persistence of plans or
+  downloads across restarts.
+- On file systems without hard links, finalization checks then renames (small race).
 
 ## Cross-platform considerations
 

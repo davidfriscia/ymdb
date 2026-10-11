@@ -84,6 +84,9 @@ export function LauncherProvider({
       setSessionsVersion((version) => version + 1);
     }
   }, []);
+  const refreshSessions = useCallback(() => {
+    setSessionsVersion((version) => version + 1);
+  }, []);
   const stop = useCallback(async (id: number) => {
     try {
       await stopLaunchSession(id);
@@ -111,6 +114,7 @@ export function LauncherProvider({
       saveConfig,
       sessions,
       start,
+      refreshSessions,
       stop,
       showCommandPreview,
       setShowCommandPreview: onShowCommandPreviewChange,
@@ -123,6 +127,7 @@ export function LauncherProvider({
       saveConfig,
       sessions,
       start,
+      refreshSessions,
       stop,
       showCommandPreview,
       onShowCommandPreviewChange,

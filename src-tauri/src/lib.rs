@@ -9,6 +9,7 @@ mod launcher;
 mod mame;
 mod media;
 mod remote;
+mod roms;
 mod settings;
 
 use std::env;
@@ -21,6 +22,7 @@ use crate::commands::installations::InstallationsState;
 use crate::commands::launcher::LauncherState;
 use crate::commands::media::MediaState;
 use crate::commands::remote::RemoteState;
+use crate::commands::roms::RomManagerState;
 use crate::installations::AppLayout;
 use crate::media::config::MediaConfigStore;
 use crate::media::protocol::SCHEME;
@@ -55,6 +57,7 @@ pub fn run() {
             app.manage(LauncherState::new(launch_logs));
             app.manage(MediaState::new(media));
             app.manage(RemoteState::new(config_dir.as_deref()));
+            app.manage(RomManagerState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -98,6 +101,10 @@ pub fn run() {
             commands::remote::pick_destination_directory,
             commands::remote::get_remote_sources,
             commands::remote::save_remote_sources,
+            commands::roms::prepare_download_plan,
+            commands::roms::start_download,
+            commands::roms::get_download_status,
+            commands::roms::cancel_download,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

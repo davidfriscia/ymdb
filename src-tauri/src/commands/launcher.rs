@@ -188,14 +188,40 @@ async fn prepare_request(
     launcher: &LauncherState,
 ) -> Result<(PreparedLaunch, String), CommandError> {
     let resolved = installations.resolve(&request.installation_id)?;
-    let config = launcher
-        .load(&resolved)
-        .map_err(|error| CommandError::Settings {
-            message: format!("{error}. Fix or save the launch options in Settings."),
-        })?;
+    let config = launch_config(launcher, &resolved)?;
     let label = resolved.installation.label();
     let prepared = run_blocking(move || prepare_resolved(&resolved, &config, &request)).await??;
     Ok((prepared, label))
+}
+
+/// The launch configuration a launch of the installation uses.
+pub(super) fn launch_config(
+    launcher: &LauncherState,
+    resolved: &ResolvedInstallation,
+) -> Result<LaunchConfig, CommandError> {
+    launcher
+        .load(resolved)
+        .map_err(|error| CommandError::Settings {
+            message: format!("{error}. Fix or save the launch options in Settings."),
+        })
+}
+
+/// Prepares and starts a launch on the calling thread (blocking), with the
+/// installation named by the request: used by Download & Play once its
+/// downloads are complete.
+pub(super) fn launch_blocking(
+    installations: &InstallationsState,
+    launcher: &LauncherState,
+    request: &LaunchRequest,
+) -> Result<SessionInfo, CommandError> {
+    let resolved = installations.resolve(&request.installation_id)?;
+    let config = launch_config(launcher, &resolved)?;
+    let label = resolved.installation.label();
+    let prepared = prepare_resolved(&resolved, &config, request)?;
+    launcher
+        .sessions
+        .start(prepared.target, prepared.title, label, &prepared.plan)
+        .map_err(session_error)
 }
 
 pub(super) fn prepare_resolved(

@@ -1,0 +1,107 @@
+<?xml version="1.0"?>
+<!-- Synthetic machines for the ROM manager tests (names and hashes are made up). -->
+<mame build="0.280 (mame0280)" debug="no" mameconfig="10">
+	<machine name="solo" sourcefile="test/solo.cpp">
+		<description>Standalone</description>
+		<rom name="solo.1" size="4096" crc="00000001" sha1="0000000000000000000000000000000000000001"/>
+		<rom name="pal.bin" size="279" status="nodump" optional="yes"/>
+		<device_ref name="cpu"/>
+		<device_ref name="sound"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="puckman" sourcefile="test/pacman.cpp">
+		<description>Parent</description>
+		<rom name="pm.6e" size="4096" crc="00000002" sha1="0000000000000000000000000000000000000002"/>
+		<device_ref name="cpu"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="pacman" sourcefile="test/pacman.cpp" cloneof="puckman" romof="puckman">
+		<description>Clone</description>
+		<rom name="pacman.6e" size="4096" crc="00000003" sha1="0000000000000000000000000000000000000003"/>
+		<rom name="pm.6f" merge="pm.6f" size="4096" crc="00000004" sha1="0000000000000000000000000000000000000004"/>
+		<device_ref name="cpu"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="pacmerged" sourcefile="test/pacman.cpp" cloneof="puckman" romof="puckman">
+		<description>Clone with only merged ROMs</description>
+		<rom name="pm.6e" merge="pm.6e" size="4096" crc="00000002" sha1="0000000000000000000000000000000000000002"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="bios" sourcefile="test/bios.cpp" isbios="yes">
+		<description>BIOS</description>
+		<rom name="bios.sp1" bios="std" size="131072" crc="00000005" sha1="0000000000000000000000000000000000000005"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="fighter" sourcefile="test/bios.cpp" romof="bios">
+		<description>Game on a BIOS</description>
+		<rom name="fighter.p1" size="2097152" crc="00000006" sha1="0000000000000000000000000000000000000006"/>
+		<rom name="bios.sp1" merge="bios.sp1" bios="std" size="131072" crc="00000005" sha1="0000000000000000000000000000000000000005"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="fightera" sourcefile="test/bios.cpp" cloneof="fighter" romof="fighter">
+		<description>Clone of a game on a BIOS</description>
+		<rom name="fightera.p1" size="2097152" crc="00000007" sha1="0000000000000000000000000000000000000007"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="kinst" sourcefile="test/kinst.cpp">
+		<description>Disk parent</description>
+		<rom name="kinst.u98" size="524288" crc="00000008" sha1="0000000000000000000000000000000000000008"/>
+		<disk name="kinst" sha1="00000000000000000000000000000000000000d1" region="ata:0:hdd" index="0" writable="yes"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="kinst2" sourcefile="test/kinst.cpp" cloneof="kinst" romof="kinst">
+		<description>Disk clone</description>
+		<rom name="kinst2.u98" size="524288" crc="00000009" sha1="0000000000000000000000000000000000000009"/>
+		<disk name="kinst" merge="kinst" sha1="00000000000000000000000000000000000000d1" region="ata:0:hdd" index="0" writable="yes"/>
+		<disk name="kinst2" sha1="00000000000000000000000000000000000000d2" region="ata:1:hdd" index="1" writable="yes"/>
+		<disk name="missing" status="nodump" region="ata:2:hdd" index="2" writable="yes"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="galaga" sourcefile="test/galaga.cpp" sampleof="galaga">
+		<description>Samples parent</description>
+		<rom name="gg1.1" size="4096" crc="0000000a" sha1="000000000000000000000000000000000000000a"/>
+		<sample name="bang"/>
+		<sample name="explode"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="galagao" sourcefile="test/galaga.cpp" cloneof="galaga" romof="galaga" sampleof="galaga">
+		<description>Samples clone</description>
+		<rom name="gg1o.1" size="4096" crc="0000000b" sha1="000000000000000000000000000000000000000b"/>
+		<sample name="bang"/>
+		<sample name="explode"/>
+		<sample name="bang"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="badname" sourcefile="test/bad.cpp">
+		<description>Disk with an unusable name</description>
+		<disk name="a:b" sha1="00000000000000000000000000000000000000d3" region="ata:0:hdd" index="0" writable="no"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="console" sourcefile="test/console.cpp">
+		<description>Console</description>
+		<device_ref name="sound"/>
+		<device type="cartridge" tag="slot" interface="test_cart" mandatory="1">
+			<instance name="cartridge" briefname="cart"/>
+			<extension name="bin"/>
+		</device>
+		<device type="cdrom" tag="cdrom" interface="test_cd">
+			<instance name="cdrom" briefname="cdrm"/>
+			<extension name="chd"/>
+		</device>
+		<softwarelist tag="cart_list" name="test_cart" status="original"/>
+		<softwarelist tag="cd_list" name="test_cd" status="original"/>
+		<driver status="good" emulation="good" savestate="supported"/>
+	</machine>
+	<machine name="cpu" sourcefile="test/cpu.cpp" isdevice="yes" runnable="no">
+		<description>CPU without ROMs</description>
+	</machine>
+	<machine name="sound" sourcefile="test/sound.cpp" isdevice="yes" runnable="no">
+		<description>Sound device with ROMs</description>
+		<rom name="sound.bin" size="1024" crc="0000000c" sha1="000000000000000000000000000000000000000c"/>
+		<device_ref name="subcpu"/>
+	</machine>
+	<machine name="subcpu" sourcefile="test/subcpu.cpp" isdevice="yes" runnable="no">
+		<description>Device of a device</description>
+		<rom name="subcpu.bin" size="1024" crc="0000000d" sha1="000000000000000000000000000000000000000d"/>
+	</machine>
+</mame>

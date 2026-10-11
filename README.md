@@ -6,8 +6,8 @@ launch every system supported by the emulator: arcade machines, consoles, home a
 personal computers, other devices, and software lists.
 
 > **Status:** early development. MAME configuration, catalog import, search, browsing
-> and launching work; remote repositories can be configured, but ROMs are not downloaded
-> yet. See [Current status](#current-status).
+> and launching work; missing ROM, CHD and sample files can be downloaded from your own
+> SFTP repositories. See [Current status](#current-status).
 
 YMDB does not include ROMs, BIOS files, CHDs or any other copyrighted content.
 
@@ -318,7 +318,7 @@ simply not listed).
 ## Remote repositories
 
 YMDB can be told where your ROM, CHD and sample collections live on another machine,
-for example a NAS. This prepares the ROM Manager: **files are not downloaded yet**.
+for example a NAS, so that the ROM Manager can download the files a launch is missing.
 Remote repositories are optional; without them YMDB works as before, fully offline.
 
 ### Remote connections
@@ -375,6 +375,62 @@ MAME versions.
 
 The settings are saved per installation in `installations/<id>/remote-sources.json`
 (configuration directory) and never shared between installations.
+
+### Downloading missing files (ROM Manager)
+
+The launch panel of a machine or software has two more buttons:
+
+- **Prepare Download** builds a _download plan_ for the launch as it is configured
+  (installation, machine, software, mounted parts, profile) and shows it. Nothing is
+  downloaded yet.
+- **Download & Play** builds the same plan; after you confirm, YMDB downloads the
+  available missing files and then starts MAME with the same installation and options.
+
+The plan works with **whole sets**, never with the ROMs inside archives. From the
+catalog, YMDB lists the files the launch may need:
+
+- the machine's ROM archive, its parents and BIOS sets (following `cloneof` and
+  `romof`, also indirectly) and the archives of its devices that have ROMs (also
+  devices of devices);
+- the machine's disks (`<set>/<disk>.chd`) and those of its parents;
+- its samples (`<sample set>.zip`, or one `.wav` file per sample for collections
+  organized as directories);
+- for a software: the software archive (`<list>/<software>.zip`), its parent's
+  archive, the disks of the mounted parts (`<list>/<software>/<disk>.chd`) and those
+  of the parent, plus everything the machine running it needs.
+
+This is deliberately conservative: a parent or BIOS archive may be downloaded even when
+the collection would not strictly need it. For each file the plan shows its category,
+why it is included, whether MAME already finds it locally (in the directories MAME
+will search for this launch: `rompath`/`samplepath` from your launch options or
+`mame.ini`, plus the ROM Manager destinations), whether it exists in the remote
+repository (one lookup per file, no listing of the whole server), its size and where
+it would be written.
+
+Missing files never block the plan: a file that is not on the server is a **warning**,
+and the files that exist are still downloaded. Some absences are expected and shown as
+information only (for example the archive of a clone in a merged collection). A
+category without a remote source, a lookup that fails for a technical reason (timeout,
+refused login, unapproved server identity) or a file name that cannot be used locally
+is reported as such, never as "not found". When a key needs a passphrase or a server
+identity must be approved, the plan asks for it and checks again; passphrases are used
+for that check and that download only, never saved.
+
+Downloads run in the background, one file at a time, with progress and **Cancel
+download**. Each file is written to a temporary file next to its destination
+(`<name>.ymdb-download`), its size is checked and only then is it given its final
+name. **Existing files are never replaced**, remote files are never modified, and a
+cancelled or failed transfer leaves no partial file. You can leave the page during a
+download; coming back shows it again. Failed transfers can be retried (completed files
+are kept). If YMDB is closed during a download, the transfer stops; its temporary file
+is replaced by the next attempt.
+
+The result says whether the download completed, completed with warnings, failed or was
+cancelled. **Download & Play** starts MAME only when no transfer failed; candidate files
+that were not available do not prevent it: MAME decides whether the files present are
+enough. A present or downloaded file is not verified against MAME's data, so YMDB never
+claims that a game will work. The normal **Play** button is unchanged and never
+requires the ROM Manager.
 
 ## Launching MAME
 
@@ -527,13 +583,18 @@ Implemented:
   and host key verification), connection test and remote browsing, and per-installation
   ROM Manager settings for five categories with local destinations added to the MAME
   search paths at launch (see [Remote repositories](#remote-repositories)).
+- ROM Manager downloads: set-based download plans (parents, BIOS, devices, machine and
+  software list ROMs and CHDs, samples) with local and remote availability, warnings,
+  sequential downloads with progress, cancellation and retry, and Download & Play (see
+  [Downloading missing files](#downloading-missing-files-rom-manager)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including ROM downloads and dependency resolution,
-an HTTPS provider, input device configuration and artwork download. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including ROM auditing (verifying the content of
+archives), an HTTPS provider, input device configuration and artwork download. See
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

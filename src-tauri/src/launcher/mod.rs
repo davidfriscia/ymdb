@@ -58,13 +58,16 @@ pub struct SoftwareSelection {
 }
 
 /// A validated launch, ready to preview or start.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PreparedLaunch {
     pub plan: LaunchPlan,
     pub target: LaunchTarget,
     pub title: String,
     /// Compatibility caveats the user should know about.
     pub warnings: Vec<String>,
+    /// The options of the plan with their resolved values (for example the
+    /// effective `rompath`, which the ROM manager searches).
+    pub options: Vec<config::ResolvedOption>,
 }
 
 /// What the preview shows: the same plan that a launch would execute.
@@ -233,6 +236,7 @@ pub fn prepare(
         target,
         title,
         warnings,
+        options,
     })
 }
 

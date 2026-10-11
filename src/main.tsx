@@ -8,6 +8,7 @@ import "./app/App.css";
 import "./features/browser/browser.css";
 import "./features/launcher/launcher.css";
 import "./features/remote/remote.css";
+import "./features/roms/roms.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

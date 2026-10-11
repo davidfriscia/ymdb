@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<!-- Synthetic software lists for the ROM manager tests (names and hashes are made up). -->
+<softwarelists>
+	<softwarelist name="test_cart" description="Test cartridges">
+		<software name="hero">
+			<description>Hero</description>
+			<year>1990</year>
+			<publisher>Test</publisher>
+			<part name="cart" interface="test_cart">
+				<dataarea name="rom" size="8192">
+					<rom name="hero.bin" size="8192" crc="00000101" sha1="0000000000000000000000000000000000000101"/>
+				</dataarea>
+			</part>
+		</software>
+		<software name="heroj" cloneof="hero">
+			<description>Hero (Japan)</description>
+			<year>1990</year>
+			<publisher>Test</publisher>
+			<part name="cart" interface="test_cart">
+				<dataarea name="rom" size="8192">
+					<rom name="heroj.bin" size="8192" crc="00000102" sha1="0000000000000000000000000000000000000102"/>
+				</dataarea>
+			</part>
+		</software>
+		<software name="lost">
+			<description>Undumped</description>
+			<year>1990</year>
+			<publisher>Test</publisher>
+			<part name="cart" interface="test_cart">
+				<dataarea name="rom" size="8192">
+					<rom name="lost.bin" size="8192" status="nodump"/>
+				</dataarea>
+			</part>
+		</software>
+	</softwarelist>
+	<softwarelist name="test_cd" description="Test CDs">
+		<software name="saga">
+			<description>Saga</description>
+			<year>1995</year>
+			<publisher>Test</publisher>
+			<part name="cdrom1" interface="test_cd">
+				<diskarea name="cdrom">
+					<disk name="saga disc 1" sha1="00000000000000000000000000000000000001d1"/>
+				</diskarea>
+			</part>
+			<part name="cdrom2" interface="test_cd">
+				<diskarea name="cdrom">
+					<disk name="saga disc 2" sha1="00000000000000000000000000000000000001d2"/>
+				</diskarea>
+			</part>
+		</software>
+		<software name="sagaj" cloneof="saga">
+			<description>Saga (Japan)</description>
+			<year>1995</year>
+			<publisher>Test</publisher>
+			<part name="cdrom1" interface="test_cd">
+				<diskarea name="cdrom">
+					<disk name="saga disc 1" sha1="00000000000000000000000000000000000001d1"/>
+				</diskarea>
+			</part>
+			<part name="cdrom2" interface="test_cd">
+				<diskarea name="cdrom">
+					<disk name="sagaj disc 2" sha1="00000000000000000000000000000000000001e2"/>
+				</diskarea>
+			</part>
+		</software>
+	</softwarelist>
+</softwarelists>

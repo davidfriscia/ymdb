@@ -13,6 +13,7 @@ import { latestSession, useLauncher } from "./launcherContext";
 import { OptionSetEditor } from "./OptionSetEditor";
 import { SessionStatus } from "./SessionStatus";
 import { useInstallationScope } from "../installations/installationsContext";
+import { RomDownloadSection } from "../roms/RomDownloadSection";
 
 interface LaunchControlsProps {
   target: LaunchTarget;
@@ -138,6 +139,8 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
           {overrideCount > 0 && <span className="counter">{overrideCount}</span>}
         </button>
       </div>
+
+      <RomDownloadSection request={fullRequest} target={target} />
 
       {launcher.error !== null && (
         <p className="message message--error" role="alert">

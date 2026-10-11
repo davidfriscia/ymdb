@@ -13,6 +13,7 @@ pub mod launcher;
 pub mod mame;
 pub mod media;
 pub mod remote;
+pub mod roms;
 pub mod search;
 
 use serde::Serialize;
@@ -43,6 +44,8 @@ pub enum CommandError {
     MigrationFailed { message: String },
     /// A catalog import is already running.
     ImportInProgress,
+    /// ROM manager downloads are already running (one download at a time).
+    DownloadInProgress,
     /// The request is invalid (for example a page size out of range).
     InvalidRequest { message: String },
     /// No catalog has been imported yet for the installation.

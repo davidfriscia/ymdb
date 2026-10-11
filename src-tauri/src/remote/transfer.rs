@@ -1,6 +1,6 @@
 //! Streaming a [`Download`] to a destination, with progress and cancellation.
 //!
-//! This is the building block of future downloads: it copies chunk by chunk
+//! This is the building block of the ROM manager downloads: it copies chunk by chunk
 //! (never the whole file in memory), reports the bytes transferred, stops
 //! when a cancellation flag is set and detects truncated streams. Choosing
 //! the destination (a temporary file), verifying and finalizing it belong to

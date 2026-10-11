@@ -516,10 +516,6 @@ impl RemoteRepository for SftpRepository {
 }
 
 /// A remote file being read; keeps its connection open.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the ROM manager's downloads")
-)]
 struct SftpReader {
     file: File,
     _connection: Arc<Handle<ClientHandler>>,

@@ -63,10 +63,6 @@ pub struct RemoteEntry {
 }
 
 /// An open download: a stream of the object's bytes from `offset`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the ROM manager's downloads")
-)]
 pub struct Download {
     /// Size of the whole object, when known.
     pub size: Option<u64>,
@@ -128,16 +124,8 @@ pub enum RemoteError {
     /// The connection was closed or broken during the operation.
     ConnectionLost,
     /// The operation was cancelled by the caller.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
-    )]
     Cancelled,
     /// A local file could not be written during a transfer.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
-    )]
     LocalIo { message: String },
     /// Any other protocol failure.
     Protocol { message: String },
@@ -189,10 +177,6 @@ impl std::error::Error for RemoteError {}
 
 impl RemoteError {
     /// Maps an I/O error while reading a download stream.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
-    )]
     pub fn from_stream(error: &std::io::Error) -> Self {
         match error.kind() {
             std::io::ErrorKind::TimedOut => Self::TimedOut,
@@ -266,7 +250,10 @@ pub trait RemoteRepository: Send + Sync {
     /// Whether an object exists.
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
+        expect(
+            dead_code,
+            reason = "part of the contract, not used by the ROM manager yet"
+        )
     )]
     fn exists(&self, path: &RemotePath) -> impl Future<Output = Result<bool, RemoteError>> + Send {
         async move {
@@ -287,10 +274,6 @@ pub trait RemoteRepository: Send + Sync {
 
     /// Opens a stream of a file's content from `offset`. An offset other
     /// than 0 needs [`Capabilities::ranged_download`].
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the ROM manager's downloads")
-    )]
     fn open_download(
         &self,
         path: &RemotePath,

@@ -79,7 +79,7 @@ impl RemoteState {
         })
     }
 
-    fn load(&self) -> Result<ConnectionsConfig, CommandError> {
+    pub(super) fn load(&self) -> Result<ConnectionsConfig, CommandError> {
         self.store()?
             .load()
             .map_err(|error| CommandError::Settings {
@@ -113,7 +113,7 @@ impl RemoteState {
             .ok_or_else(|| connection_not_found(id))
     }
 
-    fn connect_options(&self, passphrase: Option<String>) -> ConnectOptions {
+    pub(super) fn connect_options(&self, passphrase: Option<String>) -> ConnectOptions {
         ConnectOptions {
             passphrase: crate::remote::provider::Passphrase::new(passphrase),
             known_hosts: self.known_hosts.clone(),
@@ -128,7 +128,9 @@ impl RemoteState {
             .remove(connection_id);
     }
 
-    fn remember_pending(&self, connection_id: &str, error: &RemoteError) {
+    /// Keeps the server identity presented by a failed connection so that the
+    /// user can approve it; any other outcome forgets the pending identity.
+    pub(super) fn remember_pending(&self, connection_id: &str, error: &RemoteError) {
         let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
         match error {
             RemoteError::HostKeyUnknown {

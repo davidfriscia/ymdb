@@ -538,7 +538,7 @@ describe("launcher", () => {
 
       await user.selectOptions(within(media).getByLabelText(/floppydisk1/), "");
       expect(screen.getByText("Mount at least one part to launch.")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Play|Running/ })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /^(Play|Running)$/ })).toBeDisabled();
     });
 
     it("explains when no machine declares the list", async () => {
