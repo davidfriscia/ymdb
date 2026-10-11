@@ -5,9 +5,11 @@
 //! installations may have the same version) and owns its own files:
 //!
 //! - its catalog, `<data>/installations/<id>/catalog.sqlite`;
-//! - its launch configuration, `<config>/installations/<id>/launch.json`.
+//! - its launch configuration, `<config>/installations/<id>/launch.json`;
+//! - its remote sources, `<config>/installations/<id>/remote-sources.json`.
 //!
-//! Media sources and interface preferences are shared by all installations.
+//! Media sources, remote connections and interface preferences are shared by
+//! all installations.
 //!
 //! - [`registry`]: the installations, the active one and their rules.
 //! - [`store`]: `installations.json` persistence.
@@ -43,8 +45,8 @@ impl AppLayout {
         self.data_dir.join(INSTALLATIONS_DIR).join(id)
     }
 
-    /// Directory of the launch configuration of an installation. `id` must be
-    /// a registered id.
+    /// Configuration directory of an installation (`launch.json`,
+    /// `remote-sources.json`). `id` must be a registered id.
     pub fn launch_config_dir(&self, id: &str) -> PathBuf {
         self.config_dir.join(INSTALLATIONS_DIR).join(id)
     }

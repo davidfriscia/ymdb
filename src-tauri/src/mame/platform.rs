@@ -137,19 +137,72 @@ pub fn configure_background_process(command: &mut Command) {
 }
 
 /// Whether two paths name the same executable, following the platform's
-/// comparison rules: symbolic links and relative components are resolved
-/// when the file exists, and names are compared case-insensitively on Windows
-/// and macOS, whose default file systems ignore case.
+/// comparison rules (see [`same_path`]).
 pub fn same_executable(a: &Path, b: &Path) -> bool {
+    same_path(a, b)
+}
+
+/// Whether two paths name the same file or directory, following the
+/// platform's comparison rules: symbolic links and relative components are
+/// resolved when the path exists, `/` and `\` are equivalent on Windows, and
+/// names are compared case-insensitively on Windows and macOS, whose default
+/// file systems ignore case.
+pub fn same_path(a: &Path, b: &Path) -> bool {
     a == b || path_key(a) == path_key(b)
 }
 
 fn path_key(path: &Path) -> String {
     let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let text = resolved.to_string_lossy();
+    let text = if cfg!(windows) {
+        text.replace('/', "\\")
+    } else {
+        text.into_owned()
+    };
     if cfg!(any(windows, target_os = "macos")) {
         text.to_lowercase()
     } else {
-        text.into_owned()
+        text
     }
+}
+
+/// Directories where MAME looks for `mame.ini`, in order: MAME's default
+/// `inipath` for the platform, with `.` being the MAME directory (YMDB runs
+/// MAME from there).
+pub fn ini_search_dirs(mame_dir: &Path) -> Vec<PathBuf> {
+    // MAME's `INI_PATH`: `.;ini;ini/presets` on Windows,
+    // `$HOME/.mame;.;ini` on Linux, preceded by
+    // `$HOME/Library/Application Support/mame` on macOS.
+    #[cfg(windows)]
+    let (home, tail) = (
+        Vec::<PathBuf>::new(),
+        vec![mame_dir.join("ini").join("presets")],
+    );
+    #[cfg(target_os = "macos")]
+    let (home, tail) = (
+        home_dir()
+            .map(|home| {
+                vec![
+                    home.join("Library")
+                        .join("Application Support")
+                        .join("mame"),
+                    home.join(".mame"),
+                ]
+            })
+            .unwrap_or_default(),
+        Vec::<PathBuf>::new(),
+    );
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let (home, tail) = (
+        home_dir()
+            .map(|home| vec![home.join(".mame")])
+            .unwrap_or_default(),
+        Vec::<PathBuf>::new(),
+    );
+    #[cfg(not(any(windows, unix)))]
+    let (home, tail) = (Vec::<PathBuf>::new(), Vec::<PathBuf>::new());
+    home.into_iter()
+        .chain([mame_dir.to_path_buf(), mame_dir.join("ini")])
+        .chain(tail)
+        .collect()
 }

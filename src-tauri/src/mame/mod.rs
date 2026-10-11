@@ -7,9 +7,11 @@
 //! - [`version`]: recognizes the output of `mame -version`.
 //! - [`validation`]: checks that a path points to a usable MAME executable.
 //! - [`detection`]: finds candidate MAME executables in well-known locations.
+//! - [`ini`]: reads MAME's own search paths from `mame.ini` (never writes it).
 //! - `platform`: operating system specific details, isolated in one place.
 
 pub mod detection;
+pub mod ini;
 pub(crate) mod platform;
 pub mod process;
 pub mod validation;

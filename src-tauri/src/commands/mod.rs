@@ -12,12 +12,15 @@ pub mod installations;
 pub mod launcher;
 pub mod mame;
 pub mod media;
+pub mod remote;
 pub mod search;
 
 use serde::Serialize;
 
 use crate::catalog::freshness::CatalogFreshness;
 use crate::catalog::store::StoreError;
+use crate::remote::provider::RemoteError;
+use crate::remote::sources::ConnectionReference;
 
 /// Error returned by commands. Validation failures are not errors: they are
 /// reported as part of a successful validation result.
@@ -57,6 +60,14 @@ pub enum CommandError {
     AlreadyRunning { session_id: u64 },
     /// MAME could not be started.
     LaunchFailed { message: String },
+    /// The remote connection does not exist (for example it was removed).
+    ConnectionNotFound { connection_id: String },
+    /// The remote connection is used by remote sources and cannot be removed.
+    ConnectionInUse {
+        references: Vec<ConnectionReference>,
+    },
+    /// A remote repository operation failed.
+    Remote { error: RemoteError },
     /// Unexpected failure (for example a native dialog error).
     Internal { message: String },
 }
@@ -83,6 +94,7 @@ async fn run_blocking<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::sources::SourceCategory;
 
     #[test]
     fn serializes_errors_to_frontend_contract() {
@@ -119,6 +131,31 @@ mod tests {
             })
             .expect("serialize"),
             serde_json::json!({ "kind": "catalogMismatch", "freshness": "differentExecutable" })
+        );
+        assert_eq!(
+            serde_json::to_value(CommandError::ConnectionInUse {
+                references: vec![ConnectionReference {
+                    installation_id: "abc".to_owned(),
+                    installation_label: "MAME 0.280".to_owned(),
+                    category: SourceCategory::SoftwareListChds,
+                }]
+            })
+            .expect("serialize"),
+            serde_json::json!({
+                "kind": "connectionInUse",
+                "references": [{
+                    "installationId": "abc",
+                    "installationLabel": "MAME 0.280",
+                    "category": "softwareListChds"
+                }]
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(CommandError::Remote {
+                error: RemoteError::TimedOut
+            })
+            .expect("serialize"),
+            serde_json::json!({ "kind": "remote", "error": { "kind": "timedOut" } })
         );
     }
 }

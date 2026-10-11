@@ -18,9 +18,12 @@ use crate::catalog::store::CatalogInfo;
 use crate::launcher::config::LaunchConfig;
 use crate::launcher::options::{DEFINITIONS, OptionDefinition};
 use crate::launcher::resolve::{SoftwareLaunchInfo, software_launch_info};
+use crate::launcher::search_paths::RequiredSearchPaths;
 use crate::launcher::session::{SessionError, SessionInfo, SessionManager};
 use crate::launcher::store::LaunchStoreError;
 use crate::launcher::{LaunchError, LaunchPreview, LaunchRequest, PreparedLaunch, prepare};
+use crate::mame::ini::{NativeSearchPaths, read_search_paths};
+use crate::remote::sources::SearchPath;
 
 /// Managed state of the launcher: the sessions of every installation and a
 /// lock serializing access to the launch configuration files.
@@ -206,15 +209,63 @@ pub(super) fn prepare_resolved(
         .read_info()?
         .ok_or(CommandError::CatalogNotImported)?;
     ensure_catalog_matches(&info, executable, request.software.is_some())?;
-    resolved
+    let (search_paths, warning) = required_search_paths(resolved);
+    let mut prepared = resolved
         .catalog
-        .with_reader(|connection| Ok(prepare(connection, executable, config, request)))?
+        .with_reader(|connection| {
+            Ok(prepare(
+                connection,
+                executable,
+                config,
+                &search_paths,
+                request,
+            ))
+        })?
         .ok_or(CommandError::CatalogNotImported)?
         .map_err(|error| match error {
             LaunchError::Invalid(message) => CommandError::InvalidRequest { message },
             LaunchError::NotFound(message) => CommandError::NotFound { message },
             LaunchError::Database(error) => internal(&error),
-        })
+        })?;
+    prepared.warnings.extend(warning);
+    Ok(prepared)
+}
+
+/// The local destinations of the installation's enabled remote sources,
+/// which MAME must search, with MAME's own search paths to keep. An
+/// unreadable sources file does not prevent launching; it is reported.
+fn required_search_paths(resolved: &ResolvedInstallation) -> (RequiredSearchPaths, Option<String>) {
+    let sources = match resolved.remote_sources.load() {
+        Ok(sources) => sources,
+        Err(error) => {
+            return (
+                RequiredSearchPaths::default(),
+                Some(format!(
+                    "The ROM manager settings could not be read, so their local directories are not added to the search paths: {error}"
+                )),
+            );
+        }
+    };
+    let rompath = sources.destinations(SearchPath::Rom);
+    let samplepath = sources.destinations(SearchPath::Sample);
+    let native = if rompath.is_empty() && samplepath.is_empty() {
+        NativeSearchPaths::default()
+    } else {
+        resolved
+            .installation
+            .executable_path
+            .parent()
+            .map(read_search_paths)
+            .unwrap_or_default()
+    };
+    (
+        RequiredSearchPaths {
+            rompath,
+            samplepath,
+            native,
+        },
+        None,
+    )
 }
 
 /// A launch needs a catalog from the installation's unchanged executable,

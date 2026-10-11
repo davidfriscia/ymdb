@@ -13,6 +13,7 @@ const SOURCE_LABELS: Record<OptionSource, string> = {
   profile: "Profile",
   machine: "Machine",
   software: "Software",
+  romManager: "ROM Manager",
 };
 
 interface CommandPreviewProps {

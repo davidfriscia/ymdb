@@ -119,6 +119,21 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   Input/controller options belong to the future input devices feature.
 - Game sessions have no timeout and are never killed implicitly (not even when YMDB
   exits); only an explicit, confirmed Stop terminates them.
+- `src-tauri/src/remote/`: remote repositories. The ROM manager talks to repositories
+  only through `provider::RemoteRepository`; a new protocol is a new `ProviderConfig`
+  and `Repository` variant (never a reinterpretation of existing connections), and
+  optional operations are declared in `Capabilities` and fail with `unsupported`
+  instead of being emulated. Remote paths are `RemotePath`/`RelativePath` (POSIX),
+  never `PathBuf`; never join unchecked remote path text.
+- Server identities are always verified (no insecure mode, no automatic approval of a
+  changed key). Never store passwords, passphrases or keys in configuration files or
+  logs, and never execute remote commands. Network operations run only on explicit
+  user actions, with time limits.
+- Remote sources (`installations/<id>/remote-sources.json`) reference global
+  connections by id; a referenced connection cannot be removed and sources are never
+  changed implicitly. ROM Manager destinations reach MAME only through
+  `launcher/search_paths.rs` (`-rompath`/`-samplepath` composed with the resolved
+  value or `mame.ini`), never by writing MAME files.
 - Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
   unbounded one-to-many relations (clones, software of a list, machines of a list)
   in them: return a count and list them through the paginated search.

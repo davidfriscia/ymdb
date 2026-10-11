@@ -1,0 +1,96 @@
+/* Remote connections (Settings) */
+
+.remote-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-connections__item {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+}
+
+.remote-key-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-key-picker .input {
+  flex: 1 1 240px;
+}
+
+.remote-verification {
+  margin-top: 12px;
+}
+
+.remote-browser {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.remote-browser__path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.remote-browser__path .input {
+  flex: 1 1 240px;
+}
+
+.remote-browser__list {
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.remote-browser__entry {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+/* ROM Manager (MAME page) */
+
+.rom-manager__category {
+  margin: 16px 0 0;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.rom-manager__legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.rom-manager__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 0 16px;
+}
+
+.rom-manager__fields .field {
+  max-width: none;
+}
+
+.rom-manager__destination {
+  margin-top: 12px;
+}

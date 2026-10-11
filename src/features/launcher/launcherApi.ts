@@ -80,7 +80,7 @@ export interface LaunchRequest {
   profileId?: string;
 }
 
-export type OptionSource = "global" | "profile" | "machine" | "software";
+export type OptionSource = "global" | "profile" | "machine" | "software" | "romManager";
 
 /** Mirrors `PlanArgument` in `command.rs`. */
 export type PlanArgument =

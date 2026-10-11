@@ -1,6 +1,7 @@
 import { HealthCheck } from "../features/health-check/HealthCheck";
 import { LaunchSettings } from "../features/launcher/LaunchSettings";
 import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
+import { RemoteConnectionsSettings } from "../features/remote/RemoteConnectionsSettings";
 import { THEMES, type ThemeId } from "./theme/themes";
 
 interface SettingsViewProps {
@@ -43,11 +44,14 @@ export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
         <p className="about__name">Your MAME DB (YMDB)</p>
         <p className="message message--muted">Version {__APP_VERSION__}</p>
         <p className="message message--muted">
-          Early development build. ROM management and artwork are not available yet.
+          Early development build. Remote repositories can be configured, but ROMs are not
+          downloaded yet.
         </p>
       </section>
 
       <MediaSourcesSettings />
+
+      <RemoteConnectionsSettings />
 
       <LaunchSettings />
 

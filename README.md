@@ -6,7 +6,8 @@ launch every system supported by the emulator: arcade machines, consoles, home a
 personal computers, other devices, and software lists.
 
 > **Status:** early development. MAME configuration, catalog import, search, browsing
-> and launching work; ROM management does not yet. See [Current status](#current-status).
+> and launching work; remote repositories can be configured, but ROMs are not downloaded
+> yet. See [Current status](#current-status).
 
 YMDB does not include ROMs, BIOS files, CHDs or any other copyrighted content.
 
@@ -27,7 +28,8 @@ locally; macOS and Linux are currently verified through CI builds only.
 - Launch machines and software through the local MAME, with full support for MAME
   command-line options, launch profiles and per-machine configuration.
 - ROM, BIOS, CHD and dependency management with a configurable local cache.
-- Optional remote repositories (HTTPS, SFTP) to download missing files on demand.
+- Optional remote repositories (SFTP now, HTTPS planned) to download missing files on
+  demand.
 - Fully usable offline, without any remote repository configured.
 
 ## Technology stack
@@ -156,7 +158,8 @@ in the application configuration directory:
 | macOS    | `~/Library/Application Support/io.github.davidfriscia.ymdb/installations.json` |
 | Linux    | `~/.config/io.github.davidfriscia.ymdb/installations.json`                     |
 
-Each installation's launch options are in `installations/<id>/launch.json` next to it,
+Each installation's launch options are in `installations/<id>/launch.json` next to it
+(with its ROM Manager settings in `remote-sources.json`),
 and its catalog in `installations/<id>/catalog.sqlite` in the local data directory
 (see below).
 
@@ -312,6 +315,67 @@ supported yet. Media sources are shared by all MAME installations: switching the
 version uses the same directories (a title missing from one version's catalog is
 simply not listed).
 
+## Remote repositories
+
+YMDB can be told where your ROM, CHD and sample collections live on another machine,
+for example a NAS. This prepares the ROM Manager: **files are not downloaded yet**.
+Remote repositories are optional; without them YMDB works as before, fully offline.
+
+### Remote connections
+
+**Settings → Remote Connections** lists the connections, shared by every MAME
+installation. A connection has a name and a provider; the only provider is **SFTP**
+(over SSH):
+
+- host name or IP address, port (22 by default) and user name;
+- a **private key file**, chosen with the native file picker. Only its path is saved:
+  the key is never copied. OpenSSH (ed25519, ECDSA, RSA), PEM/PKCS#8 and PuTTY keys
+  work. Passwords are not supported and no SSH agent is needed;
+- keys protected by a **passphrase** work: YMDB asks for the passphrase when it
+  connects and never saves it, so it is asked again for later connections;
+- **host key verification**, always on. With "Approve the server identity in YMDB",
+  the first connection shows the server's fingerprint (`SHA256:…`, as printed by
+  `ssh-keygen -lf`) and asks you to approve it; YMDB then remembers it. With "Use
+  OpenSSH known_hosts, then approval in YMDB", the identity in your
+  `~/.ssh/known_hosts` is used when present (YMDB only reads that file). An identity
+  that changes is refused, never approved automatically; if the change is expected
+  (for example a reinstalled server), forget the approved identity and approve the
+  new one.
+
+**Test Connection** really connects: it resolves the host, performs the SSH handshake,
+verifies the server identity, authenticates with the key and opens SFTP. **Browse…**
+lists remote directories (read only) to check your paths. A connection used by an
+installation's ROM Manager cannot be removed; the message lists where it is used.
+Connections are saved in `remote-connections.json` in the configuration directory.
+
+### ROM Manager settings of an installation
+
+The **ROM Manager** section of the MAME page configures, for the installation selected
+there, five independent categories: Machine ROMs, Machine CHDs, Software List ROMs,
+Software List CHDs and Samples. Configure only the ones you need. Each one has:
+
+- **Enabled**;
+- **Remote connection** (one of the connections above; one connection can serve
+  several categories and installations);
+- **Remote base path**, an absolute path on the server such as
+  `/volume1/mame/0280/roms` (any layout of your choice);
+- **Collection organization**: Merged, Split or Non-merged for ROMs and CHDs, ZIP
+  archives or Directories for samples;
+- **Local destination**: one of the directories MAME already uses (`rompath` for ROMs
+  and CHDs, `samplepath` for samples, read from `mame.ini` or from the installation's
+  global launch options; choose one you can write to), or a **custom directory**.
+
+A custom directory is added to MAME's search path when YMDB launches MAME: YMDB passes
+`-rompath`/`-samplepath` with the directories that apply to the launch (from your
+launch options or from `mame.ini`) followed by the custom directory, so nothing that
+MAME already finds is lost. The command line preview shows these options as coming
+from the ROM Manager. `mame.ini` is never modified. Two installations may use the same
+local directory; YMDB warns you, because files with the same name can differ between
+MAME versions.
+
+The settings are saved per installation in `installations/<id>/remote-sources.json`
+(configuration directory) and never shared between installations.
+
 ## Launching MAME
 
 YMDB starts the executable of the active MAME installation for a machine or a
@@ -357,7 +421,10 @@ four levels, the later ones taking precedence:
 The available options cover display, performance, sound, search paths and output
 directories, BIOS and RAM size and session options (for example `seconds_to_run`).
 Values are checked before saving. They are saved in the installation's `launch.json`
-(`installations/<id>/launch.json` in the configuration directory). Controller and input device settings are not managed by YMDB yet.
+(`installations/<id>/launch.json` in the configuration directory). When the ROM Manager
+uses custom local directories, YMDB extends `-rompath`/`-samplepath` after these levels
+(see [Remote repositories](#remote-repositories)). Controller and input device settings
+are not managed by YMDB yet.
 
 ## Testing and quality checks
 
@@ -456,13 +523,17 @@ Implemented:
   command line preview, global options, launch profiles, machine and software
   options per installation, and session monitoring across installations (see
   [Launching MAME](#launching-mame)).
+- Remote repositories: global remote connections (SFTP with private keys, passphrases
+  and host key verification), connection test and remote browsing, and per-installation
+  ROM Manager settings for five categories with local destinations added to the MAME
+  search paths at launch (see [Remote repositories](#remote-repositories)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.
 - Continuous integration on Windows, macOS and Linux.
 
-Not implemented yet: everything else, including ROM management, input device
-configuration, artwork download and remote repositories. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Not implemented yet: everything else, including ROM downloads and dependency resolution,
+an HTTPS provider, input device configuration and artwork download. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.
 

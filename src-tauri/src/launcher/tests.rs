@@ -11,6 +11,7 @@ use super::command::ArgumentRole;
 use super::config::{LaunchConfig, OptionSource, Profile, software_key};
 use super::options::{OptionSet, OptionValue};
 use super::resolve::{ListRelation, MediaAssignment, SoftwareLaunchInfo, software_launch_info};
+use super::search_paths::RequiredSearchPaths;
 use super::{LaunchError, LaunchRequest, PreparedLaunch, SoftwareSelection, prepare};
 use crate::catalog::import::{ImportProgress, import_from_reader, import_software_from_reader};
 use crate::catalog::store::{CatalogSource, CatalogStore};
@@ -73,7 +74,16 @@ impl Catalog {
         config: &LaunchConfig,
         request: &LaunchRequest,
     ) -> Result<PreparedLaunch, LaunchError> {
-        self.read(|connection| prepare(connection, &executable(), config, request))
+        self.prepare_with(config, &RequiredSearchPaths::default(), request)
+    }
+
+    fn prepare_with(
+        &self,
+        config: &LaunchConfig,
+        search_paths: &RequiredSearchPaths,
+        request: &LaunchRequest,
+    ) -> Result<PreparedLaunch, LaunchError> {
+        self.read(|connection| prepare(connection, &executable(), config, search_paths, request))
     }
 }
 
@@ -451,5 +461,45 @@ fn preview_and_execution_share_the_same_plan() {
     assert_eq!(
         preview.command_line,
         ["c64", "-cart", "c64_cart:gameb2:cart"]
+    );
+}
+
+#[test]
+fn adds_rom_manager_destinations_to_the_search_paths() {
+    let catalog = Catalog::new();
+    let native = crate::mame::ini::NativeSearchPaths::default();
+    let required = RequiredSearchPaths {
+        rompath: vec!["/srv/YMDB downloads ✓/roms".to_owned()],
+        samplepath: vec!["samples".to_owned()],
+        native,
+    };
+    // MAME's own rompath is kept and the destination added; the sample
+    // destination is already MAME's default, so samplepath is not passed.
+    let prepared = catalog
+        .prepare_with(
+            &LaunchConfig::default(),
+            &required,
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    assert_eq!(
+        prepared.plan.command_line(),
+        ["pong", "-rompath", "roms;/srv/YMDB downloads ✓/roms"]
+    );
+    assert!(prepared.plan.arguments.iter().any(|argument| matches!(
+        &argument.role,
+        ArgumentRole::Option { name, source: OptionSource::RomManager } if name == "rompath"
+    )));
+
+    // A rompath from the profile wins over mame.ini and is extended.
+    let mut config = LaunchConfig::default();
+    config.profiles[0].options =
+        options(&[("rompath", OptionValue::List(vec!["/mnt/roms".to_owned()]))]);
+    let prepared = catalog
+        .prepare_with(&config, &required, &machine_request("pong"))
+        .expect("prepare");
+    assert_eq!(
+        prepared.plan.command_line(),
+        ["pong", "-rompath", "/mnt/roms;/srv/YMDB downloads ✓/roms"]
     );
 }

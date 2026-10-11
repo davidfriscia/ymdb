@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CatalogPanel } from "../catalog/CatalogPanel";
+import { RomManagerSection } from "../remote/RomManagerSection";
 import type { RemovalResult } from "./installationsApi";
 import { useInstallations } from "./installationsContext";
 import { InstallationDetails } from "./InstallationDetails";
@@ -70,6 +71,7 @@ export function MamePage({ refreshKey, onCatalogChanged }: MamePageProps) {
             refreshKey={refreshKey}
             onCatalogChanged={onCatalogChanged}
           />
+          <RomManagerSection key={`rom-manager:${selected.id}`} installation={selected} />
         </>
       )}
     </div>

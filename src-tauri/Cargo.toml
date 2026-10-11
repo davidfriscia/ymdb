@@ -23,9 +23,13 @@ serde_json = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 quick-xml = "0.42"
 uuid = { version = "1", features = ["v4"] }
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "3.0.1"
+tokio = { version = "1", features = ["net", "time", "io-util", "rt"] }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["macros"] }
 
 [lints.rust]
 unsafe_code = "forbid"

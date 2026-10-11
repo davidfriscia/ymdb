@@ -8,6 +8,7 @@ mod installations;
 mod launcher;
 mod mame;
 mod media;
+mod remote;
 mod settings;
 
 use std::env;
@@ -19,6 +20,7 @@ use crate::commands::catalog::CatalogState;
 use crate::commands::installations::InstallationsState;
 use crate::commands::launcher::LauncherState;
 use crate::commands::media::MediaState;
+use crate::commands::remote::RemoteState;
 use crate::installations::AppLayout;
 use crate::media::config::MediaConfigStore;
 use crate::media::protocol::SCHEME;
@@ -52,6 +54,7 @@ pub fn run() {
             app.manage(CatalogState::default());
             app.manage(LauncherState::new(launch_logs));
             app.manage(MediaState::new(media));
+            app.manage(RemoteState::new(config_dir.as_deref()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -84,6 +87,17 @@ pub fn run() {
             commands::media::get_media_sources,
             commands::media::save_media_sources,
             commands::media::pick_media_directory,
+            commands::remote::get_remote_connections,
+            commands::remote::save_remote_connection,
+            commands::remote::remove_remote_connection,
+            commands::remote::test_remote_connection,
+            commands::remote::approve_remote_host_key,
+            commands::remote::forget_remote_host_key,
+            commands::remote::browse_remote_directory,
+            commands::remote::pick_private_key_file,
+            commands::remote::pick_destination_directory,
+            commands::remote::get_remote_sources,
+            commands::remote::save_remote_sources,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

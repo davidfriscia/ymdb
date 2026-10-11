@@ -6,6 +6,7 @@
 //! - [`store`]: `launch.json` persistence.
 //! - [`resolve`]: catalog lookups (machine, software, candidate machines).
 //! - [`command`]: the structured command line used for preview and execution.
+//! - [`search_paths`]: search paths extended with the ROM manager destinations.
 //! - [`session`]: started MAME processes.
 //!
 //! [`prepare`] is the single path from a launch request to a command line,
@@ -15,6 +16,7 @@ pub mod command;
 pub mod config;
 pub mod options;
 pub mod resolve;
+pub mod search_paths;
 pub mod session;
 pub mod store;
 
@@ -28,6 +30,7 @@ use crate::catalog::is_short_name;
 use command::{LaunchPlan, PlanOrigin, SoftwareMedia};
 use config::LaunchConfig;
 use resolve::{ListRelation, MediaAssignment};
+use search_paths::RequiredSearchPaths;
 use session::{LaunchTarget, SoftwareRef};
 
 /// A launch requested by the user.
@@ -111,11 +114,13 @@ impl From<rusqlite::Error> for LaunchError {
 
 /// Validates a request against the catalog and the launch configuration of
 /// its installation and builds its command line. `executable` is the
-/// installation's executable.
+/// installation's executable; `search_paths` lists the directories the
+/// installation's remote sources need MAME to search.
 pub fn prepare(
     connection: &Connection,
     executable: &Path,
     config: &LaunchConfig,
+    search_paths: &RequiredSearchPaths,
     request: &LaunchRequest,
 ) -> Result<PreparedLaunch, LaunchError> {
     let invalid = |message: String| LaunchError::Invalid(message);
@@ -207,9 +212,12 @@ pub fn prepare(
         .profile_id
         .as_deref()
         .unwrap_or(&config.default_profile_id);
-    let options = config
+    let mut options = config
         .resolve(Some(profile_id), &machine.name, software)
         .map_err(|error| invalid(error.0))?;
+    if let Some(mame_dir) = executable.parent() {
+        search_paths::compose(&mut options, search_paths, mame_dir);
+    }
     let media = request.software.as_ref().map(|selection| SoftwareMedia {
         list: &selection.list,
         software: &selection.name,

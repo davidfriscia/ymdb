@@ -227,7 +227,8 @@ export function InstallationDetails({ installation, onRemoved }: InstallationDet
                 setDeleteLaunchConfig(event.target.checked);
               }}
             />
-            Also delete its launch options (global options, profiles and overrides)
+            Also delete its launch options and ROM Manager settings (global options, profiles,
+            overrides and remote sources)
           </label>
           {active && (
             <p className="message message--muted">

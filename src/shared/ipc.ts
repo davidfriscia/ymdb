@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CatalogFreshness } from "../features/catalog/catalogApi";
+import type { ConnectionReference, RemoteError } from "../features/remote/remoteApi";
+import { describeReferences, describeRemoteError } from "../features/remote/remoteMessages";
 
 /** Mirrors `CommandError` in `src-tauri/src/commands/mod.rs`. */
 export type CommandError =
@@ -17,6 +19,9 @@ export type CommandError =
   | { kind: "notFound"; message: string }
   | { kind: "alreadyRunning"; sessionId: number }
   | { kind: "launchFailed"; message: string }
+  | { kind: "connectionNotFound"; connectionId: string }
+  | { kind: "connectionInUse"; references: ConnectionReference[] }
+  | { kind: "remote"; error: RemoteError }
   | { kind: "internal"; message: string };
 
 /** Thrown by {@link invokeCommand} when a Tauri command fails. */
@@ -50,6 +55,9 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "notFound" ||
     kind === "alreadyRunning" ||
     kind === "launchFailed" ||
+    kind === "connectionNotFound" ||
+    kind === "connectionInUse" ||
+    kind === "remote" ||
     kind === "internal"
   );
 }
@@ -101,6 +109,12 @@ export function describeCommandError(error: CommandError): string {
       return "This machine or software is already running.";
     case "launchFailed":
       return `MAME could not be started: ${error.message}`;
+    case "connectionNotFound":
+      return "This remote connection no longer exists.";
+    case "connectionInUse":
+      return `This remote connection is used by the ROM Manager of ${describeReferences(error.references)}. Choose another connection there first.`;
+    case "remote":
+      return describeRemoteError(error.error);
     case "internal":
       return `Unexpected error: ${error.message}`;
   }

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCatalogStatus } from "../../test/catalogFixtures";
 import { installation, installationsView, NEW_ID, OLD_ID } from "../../test/installationFixtures";
 import { session } from "../../test/launcherFixtures";
+import { remoteSourcesView } from "../../test/remoteFixtures";
 import { LauncherProvider } from "../launcher/LauncherProvider";
 import type { SessionInfo } from "../launcher/launcherApi";
 import type { ValidationReport } from "../mame-installation/mameApi";
@@ -102,6 +103,7 @@ function registry(
       throw new Error("not needed");
     },
     get_launch_sessions: () => options.sessions ?? [],
+    get_remote_sources: (args) => remoteSourcesView(args.installationId as string, undefined, []),
     ...options.overrides,
   };
   invokeMock.mockImplementation((command: string, args?: Args) => {
@@ -182,6 +184,9 @@ describe("MAME page", () => {
     await user.click(await screen.findByRole("button", { name: "Manage MAME 0.252" }));
     expect(await screen.findByRole("heading", { level: 2, name: "MAME 0.252" })).toBeVisible();
     expect(invokeMock).toHaveBeenCalledWith("get_catalog_status", { installationId: OLD_ID });
+    // The ROM Manager settings follow the installation managed here.
+    expect(await screen.findByRole("heading", { level: 2, name: "ROM Manager" })).toBeVisible();
+    expect(invokeMock).toHaveBeenCalledWith("get_remote_sources", { installationId: OLD_ID });
     expect(invokeMock).not.toHaveBeenCalledWith("set_active_installation", expect.anything());
 
     await user.click(screen.getByRole("button", { name: "Set as active" }));

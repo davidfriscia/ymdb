@@ -244,6 +244,9 @@ pub enum OptionSource {
     Profile,
     Machine,
     Software,
+    /// A search path extended with the local destinations of the ROM
+    /// manager (see `search_paths`).
+    RomManager,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

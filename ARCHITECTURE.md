@@ -15,13 +15,13 @@ direction, not commitments; details will be decided when each component is built
 │ Application Core (Rust)                                      │
 │                                                              │
 │  ┌───────────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │ MAME          │  │ Catalog      │  │ ROM cache         │  │
+│  │ MAME          │  │ Catalog      │  │ ROM manager       │  │
 │  │ integration   │  │              │  │                   │  │
 │  └───────┬───────┘  └──────┬───────┘  └─────────┬─────────┘  │
 │          │                 │                    │            │
 │          │          ┌──────▼───────┐  ┌─────────▼─────────┐  │
-│          │          │ SQLite       │  │ Storage providers │  │
-│          │          │              │  │ (local / remote)  │  │
+│          │          │ SQLite       │  │ Remote providers  │  │
+│          │          │              │  │ (SFTP, HTTPS next)│  │
 │          │          └──────────────┘  └───────────────────┘  │
 └──────────┼───────────────────────────────────────────────────┘
            │ process execution
@@ -70,13 +70,16 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `launcher`: launch panels in the machine and software details, the launch options
     section of the Settings page and `LauncherProvider`, which shares the launch
     configuration and the session statuses (see [Launcher](#launcher--implemented)).
+  - `remote`: **Settings → Remote Connections** and the **ROM Manager** section of
+    the MAME page (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 #### Application shell
 
 `App.tsx` shows a navigation rail with three pages: **Catalog** (the browser, the
-start page), **MAME** (MAME Installation and MAME Catalog panels) and **Settings**
-(theme, version, backend connection check). Pages stay mounted and are hidden with
+start page), **MAME** (installations, catalog and ROM Manager panels) and **Settings**
+(theme, media sources, remote connections, launch options, version, backend connection
+check). Pages stay mounted and are hidden with
 the `hidden` attribute, so the browser keeps its query, results and scroll position
 while the user visits another page. There is no router. Below 640 px the rail
 becomes a top bar.
@@ -240,7 +243,7 @@ The Rust crate in `src-tauri/`.
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`,
   `installations.rs`, `catalog.rs`, `search.rs`, `detail.rs`, `launcher.rs`,
-  `media.rs`). Commands extract what they need from the Tauri runtime and delegate
+  `media.rs`, `remote.rs`). Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
   long-running work (catalog import) on a dedicated thread, so the UI never freezes.
@@ -248,11 +251,12 @@ The Rust crate in `src-tauri/`.
   `installationNotFound`, `duplicateInstallation`, `removalNotAllowed`,
   `migrationFailed`, `importInProgress`, `invalidRequest`, `catalogNotImported`,
   `catalogUnreadable`, `softwareListsNotImported`, `catalogMismatch`, `notFound`,
-  `alreadyRunning`, `launchFailed`, `internal`). A problem with one installation
+  `alreadyRunning`, `launchFailed`, `connectionNotFound`, `connectionInUse`, `remote`,
+  `internal`). A problem with one installation
   (missing executable, unreadable catalog) is reported for that installation only.
 - `health.rs` builds the health report returned by `check_health`.
 - `atomic_file.rs` writes small files atomically (`installations.json`, `launch.json`,
-  `media.json`).
+  `media.json`, `remote-connections.json`, `remote-sources.json`).
 - `installations/` manages the registered MAME installations, the active one and the
   migration from the single-installation layout (see
   [MAME installations](#mame-installations--implemented)).
@@ -262,6 +266,8 @@ The Rust crate in `src-tauri/`.
 - `catalog/` implements the machine and software list catalog (see [Catalog](#catalog--implemented-machines-and-software-lists)).
 - `launcher/` builds and runs MAME command lines (see [Launcher](#launcher--implemented)).
 - `media/` finds and serves local artwork (see [Media sources](#media-sources--implemented)).
+- `remote/` implements remote connections, remote sources and repository providers
+  (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
 
 ### MAME integration — Implemented
 
@@ -280,7 +286,10 @@ catalog importer and the launcher:
 - `version.rs`: recognizes the output of `mame -version`.
 - `validation.rs`: validates an executable and produces a `ValidationReport`.
 - `detection.rs`: finds candidate executables in well-known locations.
-- `platform.rs`: all OS-specific details (executable names, search directories,
+- `ini.rs`: reads `rompath` and `samplepath` from `mame.ini` (never written, MAME not
+  run), for the ROM Manager destinations and search paths.
+- `platform.rs`: all OS-specific details (executable names, search directories, MAME's
+  default `inipath`,
   executable checks, spawn error codes, console window suppression on Windows).
 
 **Validation** of a path proceeds in order and stops at the first failure:
@@ -384,6 +393,7 @@ installation never starts MAME.
 | `installations/<id>/catalog.sqlite`         | local data (`app_local_data_dir`) |
 | `installations/<id>/catalog.sqlite.partial` | local data, during an import      |
 | `installations/<id>/launch.json`            | configuration (`app_config_dir`)  |
+| `installations/<id>/remote-sources.json`    | configuration (`app_config_dir`)  |
 
 Each catalog is a separate SQLite database built by the unchanged parser, migrations,
 `CatalogStore` and search engine; there is no database mixing versions. It keeps the
@@ -467,7 +477,9 @@ nothing is terminated implicitly.
 `remove_installation(installationId, deleteCatalog, deleteLaunchConfig)` unregisters
 the installation after a confirmation in the interface. The catalog is deleted only
 when requested (default in the interface: yes, it is derived data) and the launch
-configuration only when requested (default: no); kept directories are reported. Files
+configuration and the remote sources (ROM Manager settings) only when requested
+(default: no); kept directories are reported. Global remote connections are never
+removed with an installation. Files
 are deleted before the registry changes: if one cannot be deleted, the installation
 stays registered. The MAME executable and MAME's files (ROMs, CHDs, artwork, INI,
 cfg, nvram) are never touched.
@@ -579,6 +591,8 @@ raw arguments.
 - `resolve.rs`: catalog lookups for a launch: the machine must exist and be
   runnable; for software, the candidate machines declaring its list, their
   compatibility and the media devices able to mount each part.
+- `search_paths.rs`: extends `rompath`/`samplepath` with the ROM Manager destinations
+  (see below).
 - `command.rs`: `LaunchPlan`, the structured command line (executable, working
   directory, arguments with their role and, for options, the level they come from).
   The arguments of the plan are what is executed; the preview shown to the user is
@@ -595,6 +609,9 @@ From lowest to highest:
 4. Overrides of the machine.
 5. Overrides of the software (software launches only).
 
+The ROM Manager may then extend `rompath`/`samplepath` (see
+[Search paths of the ROM Manager](#search-paths-of-the-rom-manager)).
+
 Only options explicitly set at some level are passed to MAME; everything else stays
 under MAME's own configuration. Each option is passed once, with the value of the
 highest level that sets it, and the preview names that level. A profile is a flat
@@ -609,6 +626,26 @@ intentionally not included: a future **Input Devices** feature will manage
 controllers and mappings per profile, machine or software and contribute options
 through the same `OptionSet` and precedence mechanism. Profiles are not tied to any
 controller type, so this needs no change to them.
+
+#### Search paths of the ROM Manager
+
+`-rompath` and `-samplepath` replace MAME's value instead of adding to it. When the
+installation's enabled remote sources store files in local destinations
+(`installations/<id>/remote-sources.json`), `launcher/search_paths.rs` makes sure
+MAME searches them, inside the same `prepare` used by preview and launch:
+
+1. Take the value resolved by the precedence above (global options, profile, machine
+   or software override), or, when no level sets the option, MAME's own value from
+   `mame.ini` (`mame/ini.rs`, read only) or MAME's default (`roms`, `samples`).
+2. Append the destinations it does not already contain (relative entries are
+   compared from the MAME directory, with the platform's path rules).
+3. Pass the option only if something was appended; its origin is then `romManager`
+   in the plan and the preview. Otherwise nothing changes and MAME's configuration
+   stays in charge.
+
+ROM and CHD destinations extend `rompath`; sample destinations extend `samplepath`.
+An unreadable `remote-sources.json` does not prevent launching: the launch gets a
+warning and the search paths are not extended.
 
 #### Software launches and compatibility
 
@@ -1335,6 +1372,9 @@ Configuration directory:
   [MAME installations](#mame-installations--implemented)).
 - `installations/<id>/launch.json`: the launch configuration of each installation
   (see [Launcher](#launcher--implemented)).
+- `installations/<id>/remote-sources.json`: the ROM Manager settings of each
+  installation (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
+- `remote-connections.json`: the remote connections, shared by all installations.
 - `media.json`: the media sources, shared by all installations (see
   [Media sources](#media-sources--implemented)).
 - `settings.json` and `launch.json`: files of the single-installation layout. They are
@@ -1356,7 +1396,8 @@ command line preview) in the webview `localStorage` (see
 [Interface preferences](#interface-preferences)). They live in the webview data
 directory and are shared by all MAME installations.
 
-Planned: user-configurable ROM, CHD and artwork directories.
+ROM, CHD and sample download destinations are configured per installation by the ROM
+Manager (`remote-sources.json`).
 
 ### SQLite — Implemented (catalog database)
 
@@ -1368,21 +1409,304 @@ Planned: user-configurable ROM, CHD and artwork directories.
 - Planned: a separate user database (favorites, collections, profiles, cache
   metadata) that survives catalog re-imports.
 
-### Remote storage provider abstraction — Planned
+### Remote repositories — Implemented (connections, sources, SFTP provider)
 
-- A small storage provider interface (list, check existence, download) with
-  initial HTTPS and SFTP implementations.
-- Providers are optional and configured explicitly by the user. The application must
-  work normally with no provider configured and no network connection.
-- Additional providers can be added later behind the same interface.
+Implemented in `src-tauri/src/remote/` and `commands/remote.rs`, typed in
+`src/features/remote/`. This is the infrastructure of the future ROM Manager: it
+records where ROM, CHD and sample files can be retrieved from and where they will be
+stored, and provides a protocol-independent repository contract with a first SFTP
+provider. Nothing is downloaded yet (see [ROM Manager downloads](#rom-manager-downloads--planned)).
 
-### ROM cache — Planned
+Three layers, independent of any protocol:
 
-- Configurable local cache (location and size limits) for files obtained from remote
-  providers.
-- Resolves required files for a launch: local directories first, then cache, then
-  configured remote providers (when available).
-- Integrity verification of cached files.
+1. **Remote connections** (global): how to reach a repository.
+2. **Remote sources** (per installation): which connection, remote path, collection
+   organization and local destination each category of files uses.
+3. **Repository providers**: the operations the ROM Manager performs, behind one
+   contract.
+
+#### Remote connections
+
+`remote/connections.rs`, persisted in `remote-connections.json` (configuration
+directory, `schemaVersion` 1, atomic writes, validated on load and save):
+
+```json
+{
+  "schemaVersion": 1,
+  "connections": [
+    {
+      "id": "6c1f…",
+      "name": "Home NAS",
+      "providerType": "sftp",
+      "providerConfig": {
+        "host": "nas.local",
+        "port": 22,
+        "username": "mame",
+        "privateKeyPath": "C:\\Users\\me\\.ssh\\id_ed25519",
+        "hostKeyVerification": "ymdb",
+        "approvedHostKey": {
+          "algorithm": "ssh-ed25519",
+          "fingerprint": "SHA256:…",
+          "publicKey": "ssh-ed25519 AAAA…",
+          "approvedAt": 1760000000000
+        }
+      }
+    }
+  ]
+}
+```
+
+- `id` is a random UUID (32 hexadecimal digits), stable: sources reference
+  connections by id only, never by copying their settings. Names are unique.
+- `providerType` and `providerConfig` are an adjacently tagged enum
+  (`ProviderConfig`). A new provider is a new variant with its own settings;
+  existing SFTP connections are never migrated or reinterpreted. An unknown provider
+  makes the file invalid (for example after a downgrade).
+- Only non-sensitive data is stored: the path of the private key (never the key),
+  the approved server identity and the verification mode. No password exists and
+  passphrases are never stored.
+- An invalid file is reported and never replaced implicitly (sources reference it);
+  changes are refused until it is fixed. A missing file means no connections.
+- Removing a connection is refused (`connectionInUse`) while a source of a registered
+  installation references it, even a disabled one; the error lists the installations
+  and categories. Sources are never changed implicitly. An unreadable sources file
+  also blocks the removal rather than risking an orphan.
+- Editing the host or port forgets the approved identity (it belonged to the
+  previous server).
+
+#### Remote sources
+
+`remote/sources.rs`, persisted per installation in
+`installations/<id>/remote-sources.json` (configuration directory, next to
+`launch.json`, `schemaVersion` 1):
+
+```json
+{
+  "schemaVersion": 1,
+  "categories": {
+    "machineRoms": {
+      "enabled": true,
+      "connectionId": "6c1f…",
+      "remoteBasePath": "/volume1/mame/0280/roms",
+      "organization": "merged",
+      "destination": { "mode": "mameDirectory", "directory": "roms" }
+    },
+    "samples": {
+      "enabled": true,
+      "connectionId": "6c1f…",
+      "remoteBasePath": "/volume1/mame/samples",
+      "organization": "zipArchives",
+      "destination": { "mode": "custom", "directory": "E:\\MAME\\samples" }
+    }
+  }
+}
+```
+
+- Categories: `machineRoms`, `machineChds`, `softwareListRoms`, `softwareListChds`,
+  `samples`. Each is optional and independent; a missing or disabled category never
+  affects the others. Enabled categories must be complete; disabled ones may keep
+  incomplete values, which are still validated. Empty categories are not written.
+- `organization`: `merged`, `split` or `nonMerged` for ROM and CHD categories;
+  `zipArchives` or `directories` for samples. For CHDs the same names say where the
+  disks of clones are stored (with the parent, in each clone's directory, or both);
+  the exact path rules for CHDs are not those of ZIP archives and belong to the ROM
+  Manager's file resolution.
+- The remote side and the local side are independent: several categories may use
+  different connections and one local directory, or the opposite. No file naming
+  rule is defined here.
+- `destination`: `mameDirectory` names an entry of the installation's search path
+  as written (relative entries are relative to the MAME directory); `custom` is an
+  absolute directory chosen with the native picker. Both must be valid MAME search
+  path entries (no `;`, no leading `-`). YMDB never assumes the first MAME directory
+  is writable: the user chooses.
+- The directories offered are the installation's global launch option (`rompath`,
+  `samplepath`) when set, otherwise the values read from `mame.ini`
+  (`mame/ini.rs`: the first `mame.ini` in MAME's default `inipath` for the platform,
+  read only, never run, never written), otherwise MAME's defaults (`roms`,
+  `samples`).
+- Two installations may use the same local directory. The view warns about it
+  (same path by the platform's rules), since files with the same name may differ
+  between versions. Nothing is deduplicated or overwritten.
+- The view also warns about references to removed connections and custom
+  directories that are not available.
+- Removing an installation with "delete launch options and ROM Manager settings"
+  deletes its `remote-sources.json` too; connections stay.
+
+#### Provider contract
+
+`remote/provider.rs` defines `RemoteRepository`, the contract the ROM Manager uses,
+and `Repository`, an enum with one variant per provider; `provider::connect` opens
+the repository of a connection with the provider it names. The ROM Manager never
+names a protocol.
+
+| Operation                     | Meaning                                                             |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `capabilities()`              | Optional operations available (`listDirectory`, `rangedDownload`)   |
+| `stat(path)`                  | Kind, size and modification time; `notFound` when missing           |
+| `exists(path)`                | `stat` without the `notFound` error                                 |
+| `list_directory(path)`        | Entries sorted by name; `unsupported` when the provider cannot list |
+| `open_download(path, offset)` | A stream of the file from `offset` (`Download`, an `AsyncRead`)     |
+| `close()`                     | Ends the connection                                                 |
+
+- Capabilities are declared, not emulated: a provider that cannot list (a plain web
+  server, a manifest-based repository) or resume reports it, and the operation fails
+  with `unsupported` instead of being approximated.
+- Downloads are streams: no API loads a whole file in memory. `remote/transfer.rs`
+  copies a `Download` into any `AsyncWrite` chunk by chunk (256 KiB), reports the
+  bytes transferred, stops on a cancellation flag (`cancelled`) and detects truncated
+  streams (`connectionLost`). Temporary files, verification and finalization belong
+  to the ROM Manager.
+- Errors (`RemoteError`, tagged with `kind`): `hostUnreachable`, `timedOut`,
+  `hostKeyUnknown`, `hostKeyChanged`, `privateKeyUnavailable`, `privateKeyInvalid`,
+  `passphraseRequired`, `passphraseIncorrect`, `authenticationFailed`,
+  `permissionDenied`, `notFound`, `notADirectory`, `unsupported`, `connectionLost`,
+  `cancelled`, `localIo`, `protocol`. Messages are short and never contain
+  credentials. A failed connection test is a result (`ConnectionTestResult`), other
+  commands fail with `CommandError::Remote`.
+- Paths (`remote/path.rs`) follow the POSIX semantics of the remote side and never
+  use `PathBuf`. `RemotePath` is absolute and normalized (repeated `/` and `.`
+  removed; `..`, `\` and control characters refused). `RelativePath` is a path below
+  a base, made of plain segments: `RemotePath::join` therefore never leaves the
+  configured base directory. Connection identity, base path and relative object path
+  are kept separate. Symbolic links on the server are resolved by the server.
+
+#### SFTP provider
+
+`remote/sftp.rs`, built on [`russh`](https://crates.io/crates/russh) 0.64 and
+[`russh-sftp`](https://crates.io/crates/russh-sftp) 3.0 (Apache-2.0):
+
+- Chosen because they are pure Rust, maintained and asynchronous (the Tauri runtime
+  is Tokio): no OpenSSL, libssh2, system `ssh`/`sftp` program or SSH agent is
+  needed, so the desktop bundles have no new system dependency. The `ring` crypto
+  backend is used (built with the C compiler already required by the bundled
+  SQLite); the default `aws-lc-rs` backend would need CMake and NASM on Windows.
+  `libssh2` (crate `ssh2`) was rejected: native library, and no ed25519 keys with
+  its default Windows backend.
+- Keys: OpenSSH (ed25519, ECDSA, RSA, encrypted with bcrypt-pbkdf), PEM PKCS#1 and
+  PKCS#8 and PuTTY keys. For RSA keys the best signature hash the server supports is
+  used. The key file is read (at most 64 KiB) only after the server identity was
+  verified, so a key is never used with an unverified server.
+- A connection performs, in order, with time limits (15 s for connection steps,
+  30 s per SFTP request, SSH keepalive every 20 s): name resolution, TCP connection
+  (`hostUnreachable`, `timedOut`), SSH handshake, server identity verification,
+  public key authentication (`authenticationFailed`) and the SFTP subsystem
+  (`protocol` when unavailable). Only SFTP requests are sent: no remote command is
+  ever executed. Writes are never requested.
+- Server identity, always verified (`verify_host_key`):
+  - `ymdb` mode: the key must match the identity approved in YMDB; without one the
+    connection stops with `hostKeyUnknown` (algorithm and `SHA256:` fingerprint).
+  - `knownHosts` mode: the user's `~/.ssh/known_hosts` is read (hashed host names
+    and `[host]:port` entries supported, never written); a matching key is trusted,
+    a different key of the same type is `hostKeyChanged` (source `knownHosts`); hosts
+    it does not list fall back to the YMDB approval.
+  - A different approved key is `hostKeyChanged` (source `ymdb`), and nothing is
+    approved automatically. The user can forget the approved identity explicitly.
+  - Approval: the test command keeps the identity the server presented in memory;
+    `approve_remote_host_key` only accepts that exact fingerprint for the same host
+    and port, then stores the public key. The frontend cannot approve a key the
+    server never presented.
+  - Host certificates are not supported.
+- The SFTP session keeps its connection alive while a download stream is open.
+
+#### Commands
+
+- `get_remote_connections`, `save_remote_connection(connection)` (create without
+  `id`, or update), `remove_remote_connection(connectionId)`.
+- `test_remote_connection(connectionId, passphrase)`: connects for real and
+  disconnects; returns `success` (start directory, capabilities) or `failure`.
+- `approve_remote_host_key(connectionId, fingerprint)`,
+  `forget_remote_host_key(connectionId)`.
+- `browse_remote_directory(connectionId, path, passphrase)`: one listing (at most
+  2,000 entries), read only; an empty path lists the start directory.
+- `pick_private_key_file`, `pick_destination_directory`: native pickers.
+- `get_remote_sources(installationId)`, `save_remote_sources(installationId, config)`:
+  the sources of one installation with the connections, the MAME directories and the
+  warnings. Saving checks that every referenced connection exists, under the same lock
+  as connection changes.
+
+Network commands are explicit user actions run on the async runtime; they never hold
+the configuration lock. Passphrases travel with one command and are dropped.
+
+#### Interface
+
+- **Settings → Remote Connections**: the connections with their server, key file
+  (marked when missing) and approved identity; add and edit (name, host, port,
+  username, key file with the native picker, host key verification; fields checked
+  before saving), remove (refused with the list of references), **Test Connection**
+  (progress, success, errors), the approval of an unknown identity (fingerprint and
+  key type, explicit approval, then the test runs again), a changed identity (both
+  fingerprints, no approval, an explicit "forget" for YMDB-approved identities), the
+  passphrase prompt (sent once, never kept) and **Browse…** (read-only directory
+  listing; a passphrase entered there stays in memory while it is open). Only SFTP is
+  offered; no control suggests other protocols.
+- **MAME page → ROM Manager**: the five categories of the selected installation with
+  enabled, connection (name and provider type), remote base path, organization and
+  local destination (a MAME directory with its origin and status, or a custom
+  directory), category warnings, and save/discard. Incomplete enabled categories are
+  reported before saving.
+
+#### Launcher integration
+
+See [Search paths of the ROM Manager](#search-paths-of-the-rom-manager).
+
+#### Future HTTPS provider
+
+SFTP is the first provider, not the ROM Manager's protocol. An HTTPS provider will be a
+new `ProviderConfig` variant and a new `Repository` variant implementing
+`RemoteRepository`:
+
+- it may declare `listDirectory: false` (deterministic URLs or a manifest) and
+  `rangedDownload` according to HTTP `Range` support; the contract already reports
+  unsupported operations instead of emulating them;
+- its authentication (HTTP Basic over TLS, bearer tokens, API keys, signed URLs or
+  OAuth 2.0 with PKCE) is not decided and lives in its own settings; nothing in the
+  model assumes browser cookies or a particular proxy. Secrets will need their own
+  storage decision (the current files hold no secret);
+- remote paths are POSIX-like and map to URL paths.
+
+No HTTPS or S3 code, placeholder or interface control exists yet.
+
+#### Verified
+
+- Automated, against an in-process SSH/SFTP server (`remote/test_server.rs`,
+  `russh` server with fixture keys, serving a temporary directory on `127.0.0.1`):
+  connection through the provider contract, stat, existence, listing, not found,
+  not a directory, permission denied, streaming of a 3 MiB file with progress, ranged
+  download, interrupted transfer (server disconnects: `connectionLost`),
+  cancellation, RSA and passphrase-protected keys (required, incorrect, correct),
+  unknown and changed identities, `known_hosts` matching and mismatch, refused key,
+  missing and invalid key files, unreachable host, handshake timeout, missing SFTP
+  subsystem, and the approval flow of the commands.
+- Not verified: a real NAS or OpenSSH server over a network, and macOS/Linux
+  connections (CI builds and runs the same tests there).
+
+#### Limitations
+
+- Passphrases are asked again for every connection (no credential manager, no SSH
+  agent support).
+- Only private key authentication; no keyboard-interactive or password login; no SSH
+  certificates, jump hosts or `~/.ssh/config`.
+- Changed host identities from `known_hosts` must be fixed in that file.
+- Directory listings in the interface are limited to 2,000 entries.
+- RSA signatures use the `rsa` crate, which has a known timing side channel
+  (RUSTSEC-2023-0071) for private key operations; prefer ed25519 keys.
+- Nothing is downloaded yet.
+
+### ROM Manager downloads — Planned
+
+Built on the [remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)
+infrastructure, without changing the connection model:
+
+- Resolve the files a machine or software needs (parent/clone, BIOS, devices,
+  machine and software list ROMs and CHDs, samples) and map them to remote paths
+  according to each source's organization.
+- Download whole ZIP archives (never individual ROMs, never rebuilt archives) and
+  whole CHD files into the structure MAME expects, through `open_download` and
+  `transfer::copy_download` into temporary files, with progress, cancellation,
+  verification and finalization. Existing files are never overwritten.
+- No content-addressed cache, no deduplication between versions, no complex
+  parallel downloads.
+- Download & Play.
 
 ## Cross-platform considerations
 

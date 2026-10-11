@@ -26,6 +26,7 @@ use crate::installations::{AppLayout, new_id};
 use crate::launcher::store::LaunchConfigStore;
 use crate::mame::validation::{ValidationReport, validate_executable};
 use crate::mame::version::MameVersion;
+use crate::remote::sources::RemoteSourcesStore;
 
 /// Managed state: the registry (kept in memory, saved on every change) and
 /// one catalog store per installation used since startup.
@@ -45,6 +46,7 @@ pub struct ResolvedInstallation {
     pub installation: MameInstallation,
     pub catalog: CatalogStore,
     pub launch_config: LaunchConfigStore,
+    pub remote_sources: RemoteSourcesStore,
 }
 
 impl InstallationsState {
@@ -113,6 +115,7 @@ impl InstallationsState {
         Ok(ResolvedInstallation {
             catalog: self.catalog_store(layout, id, active.as_deref()),
             launch_config: LaunchConfigStore::in_dir(&layout.launch_config_dir(id)),
+            remote_sources: RemoteSourcesStore::in_dir(&layout.launch_config_dir(id)),
             installation,
         })
     }
@@ -230,6 +233,14 @@ impl InstallationsState {
                 })?;
         }
         if delete_launch_config {
+            // The installation's settings: its remote sources go with its
+            // launch options (the remote connections are global and stay).
+            resolved
+                .remote_sources
+                .delete()
+                .map_err(|error| CommandError::Settings {
+                    message: format!("could not delete the ROM manager settings: {error}"),
+                })?;
             resolved
                 .launch_config
                 .delete()
@@ -247,7 +258,7 @@ impl InstallationsState {
         if resolved.catalog.catalog_path().exists() {
             kept_paths.push(resolved.catalog.dir().to_path_buf());
         }
-        if resolved.launch_config.exists() {
+        if resolved.launch_config.exists() || resolved.remote_sources.exists() {
             kept_paths.push(resolved.launch_config.dir().to_path_buf());
         }
         Ok(RemovalResult {
