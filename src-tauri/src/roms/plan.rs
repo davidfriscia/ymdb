@@ -20,7 +20,7 @@ use crate::launcher::session::LaunchTarget;
 use crate::mame::platform;
 use crate::remote::connections::ConnectionsConfig;
 use crate::remote::path::{RelativePath, RemotePath};
-use crate::remote::provider::{RemoteError, RemoteRepository};
+use crate::remote::provider::{EntryKind, RemoteError, RemoteRepository};
 use crate::remote::sources::{CollectionOrganization, RemoteSourcesConfig, SourceCategory};
 
 /// Whether a file exists locally or remotely.
@@ -100,6 +100,9 @@ pub struct PlanArtifact {
     organization: Option<CollectionOrganization>,
     #[serde(skip)]
     absent_note: Option<AbsentNote>,
+    /// The remote base directory of the source.
+    #[serde(skip)]
+    remote_base: Option<String>,
 }
 
 /// A connection that could not be used to look files up.
@@ -197,6 +200,7 @@ fn build_artifact(
         warning: None,
         organization: None,
         absent_note: candidate.absent_note,
+        remote_base: None,
     };
     let segments = &candidate.segments;
     let relative = RelativePath::from_segments(segments)
@@ -247,7 +251,8 @@ fn build_artifact(
         .remote_base_path
         .as_deref()
         .and_then(|base| RemotePath::parse(base).ok());
-    artifact.remote_path = base.map(|base| base.join(&relative).to_string());
+    artifact.remote_path = base.as_ref().map(|base| base.join(&relative).to_string());
+    artifact.remote_base = base.map(|base| base.to_string());
     artifact.connection_id = source
         .connection_id
         .clone()
@@ -287,7 +292,14 @@ pub async fn check_remote<C: Connector>(
         };
         let results = match connector.connect(connection).await {
             Ok(repository) => {
-                let paths: Vec<RemotePath> = indices
+                let missing_bases = check_bases(&repository, artifacts, &indices).await;
+                let (base_missing, lookups): (Vec<usize>, Vec<usize>) =
+                    indices.iter().partition(|&&index| {
+                        missing_bases
+                            .iter()
+                            .any(|(base, _)| artifacts[index].remote_base.as_ref() == Some(base))
+                    });
+                let paths: Vec<RemotePath> = lookups
                     .iter()
                     .filter_map(|&index| {
                         artifacts[index]
@@ -296,8 +308,21 @@ pub async fn check_remote<C: Connector>(
                             .and_then(|path| RemotePath::parse(path).ok())
                     })
                     .collect();
-                let results = check_paths(&repository, &paths).await;
+                let checked = check_paths(&repository, &paths).await;
                 repository.close().await;
+                for &index in &base_missing {
+                    apply_missing_base(&mut artifacts[index], &missing_bases);
+                }
+                // Results of the files whose base exists, in `indices` order.
+                let mut checked = lookups.into_iter().zip(checked);
+                let mut results = Vec::with_capacity(indices.len());
+                for &index in &indices {
+                    if base_missing.contains(&index) {
+                        results.push(None);
+                    } else {
+                        results.push(checked.next().map(|(_, result)| result));
+                    }
+                }
                 results
             }
             Err(error) => {
@@ -306,14 +331,71 @@ pub async fn check_remote<C: Connector>(
                     connection_name: connection.name.clone(),
                     error: error.clone(),
                 });
-                vec![RemoteCheck::Unresolved(error); indices.len()]
+                vec![Some(RemoteCheck::Unresolved(error)); indices.len()]
             }
         };
         for (&index, result) in indices.iter().zip(results) {
-            apply_check(&mut artifacts[index], result);
+            if let Some(result) = result {
+                apply_check(&mut artifacts[index], result);
+            }
         }
     }
     issues
+}
+
+/// The remote base directories (among those of `indices`) that do not exist
+/// or are not directories, with the reason. A missing base means a wrong
+/// configuration, not missing files: for example a path written as the
+/// server's shell shows it while its SFTP service shows another tree
+/// (Synology serves shared folders at the SFTP root, without `/volume1`).
+/// Other failures are left to the lookups of the files.
+async fn check_bases<R: RemoteRepository>(
+    repository: &R,
+    artifacts: &[PlanArtifact],
+    indices: &[usize],
+) -> Vec<(String, String)> {
+    let mut bases: Vec<String> = Vec::new();
+    for &index in indices {
+        if let Some(base) = &artifacts[index].remote_base
+            && !bases.contains(base)
+        {
+            bases.push(base.clone());
+        }
+    }
+    let mut missing = Vec::new();
+    for base in bases {
+        let Ok(path) = RemotePath::parse(&base) else {
+            continue;
+        };
+        let reason = match repository.stat(&path).await {
+            Ok(metadata) if matches!(metadata.kind, EntryKind::Directory | EntryKind::Symlink) => {
+                continue;
+            }
+            Ok(_) => "is not a directory",
+            Err(RemoteError::NotFound { .. }) => "does not exist",
+            Err(_) => continue,
+        };
+        missing.push((base, reason.to_owned()));
+    }
+    missing
+}
+
+fn apply_missing_base(artifact: &mut PlanArtifact, missing: &[(String, String)]) {
+    let Some((base, reason)) = missing
+        .iter()
+        .find(|(base, _)| artifact.remote_base.as_ref() == Some(base))
+    else {
+        return;
+    };
+    artifact.availability = Availability::Unresolved;
+    artifact.remote_error = Some(RemoteError::NotFound { path: base.clone() });
+    artifact.warning = Some(PlanWarning::new(
+        WarningKind::Configuration,
+        format!(
+            "The remote base path {base} of {} {reason} on the server, so its files were not looked up. Check the path with Browse… in Settings → Remote Connections: the SFTP service may show a different tree than a shell (on Synology, shared folders are at the root, without /volume1).",
+            artifact.category.label()
+        ),
+    ));
 }
 
 fn apply_check(artifact: &mut PlanArtifact, check: RemoteCheck) {
@@ -446,6 +528,7 @@ impl PlanArtifact {
             warning: None,
             organization: None,
             absent_note: None,
+            remote_base: None,
         }
     }
 }

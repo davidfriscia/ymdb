@@ -663,6 +663,17 @@ impl RemoteRepository for FakeRepository {
     }
 
     async fn stat(&self, path: &RemotePath) -> Result<RemoteMetadata, RemoteError> {
+        // Directories are those containing a served file.
+        let prefix = format!("{}/", path.as_str().trim_end_matches('/'));
+        if !self.files.contains_key(path.as_str())
+            && self.files.keys().any(|file| file.starts_with(&prefix))
+        {
+            return Ok(RemoteMetadata {
+                kind: EntryKind::Directory,
+                size: None,
+                modified_at: None,
+            });
+        }
         let size = match self.files.get(path.as_str()) {
             None => {
                 return Err(RemoteError::NotFound {
@@ -1725,4 +1736,75 @@ async fn an_interrupted_sftp_transfer_fails_without_a_partial_file() {
     assert!(state.bytes_transferred < size as u64);
     assert!(!destination.exists());
     assert!(tree(local.path()).is_empty());
+}
+
+#[test]
+fn a_missing_base_path_is_a_configuration_warning_not_missing_files() {
+    let catalog = Catalog::new();
+    let local = Local::new();
+    // The files exist under /files/..., as an SFTP service shows them; the
+    // source uses the shell path /volume1/files/... (Synology).
+    let connector = FakeConnector::serving(
+        NAS,
+        &[
+            ("/files/mame/roms/pacman.zip", FakeFile::Data(zip_bytes(10))),
+            (
+                "/files/mame/roms/puckman.zip",
+                FakeFile::Data(zip_bytes(10)),
+            ),
+        ],
+    );
+    let wrong = sources_with(
+        MachineRoms,
+        source(
+            NAS,
+            "/volume1/files/mame/roms",
+            Split,
+            &local.path("downloads/roms"),
+        ),
+    );
+    let (artifacts, issues, summary) = build(
+        &local,
+        catalog.machine("pacman", Organizations::default()),
+        &wrong,
+        &connector,
+    );
+    assert!(issues.is_empty());
+    for artifact in &artifacts {
+        assert_eq!(
+            artifact.availability,
+            Availability::Unresolved,
+            "{}",
+            artifact.id
+        );
+        assert_eq!(warning_kind(artifact), Some(WarningKind::Configuration));
+        assert!(
+            artifact
+                .warning
+                .as_ref()
+                .is_some_and(|warning| warning.message.contains("/volume1/files/mame/roms"))
+        );
+    }
+    assert_eq!(
+        (summary.not_found, summary.unresolved, summary.to_download),
+        (0, 2, 0)
+    );
+
+    // With the path as the SFTP service shows it, both are found.
+    let right = sources_with(
+        MachineRoms,
+        source(
+            NAS,
+            "/files/mame/roms",
+            Split,
+            &local.path("downloads/roms"),
+        ),
+    );
+    let (_, _, summary) = build(
+        &local,
+        catalog.machine("pacman", Organizations::default()),
+        &right,
+        &connector,
+    );
+    assert_eq!(summary.to_download, 2);
 }
