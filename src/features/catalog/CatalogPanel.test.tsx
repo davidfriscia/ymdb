@@ -302,7 +302,7 @@ describe("CatalogPanel", () => {
       mockCommands({ get_catalog_status: () => status() });
       const user = renderPanel();
       const button = await findEnabledButton("Import catalog");
-      await screen.findByRole("heading", { name: "Catalog of MAME 0.280" });
+      await screen.findByRole("region", { name: "Catalog of MAME 0.280" });
       // Tauri rejects with the serialized `CommandError`, not with an `Error`.
       invokeMock.mockRejectedValueOnce({ kind: "importInProgress" });
 
@@ -484,7 +484,7 @@ describe("CatalogPanel", () => {
       const user = renderPanel(undefined, installation(OLD_ID, "0.252"));
 
       expect(
-        await screen.findByRole("heading", { name: "Catalog of MAME 0.252" }),
+        await screen.findByRole("region", { name: "Catalog of MAME 0.252" }),
       ).toBeInTheDocument();
       expect(invokeMock).toHaveBeenCalledWith("get_catalog_status", { installationId: OLD_ID });
       await user.click(await findEnabledButton("Reimport machines"));

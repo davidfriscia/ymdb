@@ -1,61 +1,127 @@
+import { useState, type ReactNode } from "react";
 import { HealthCheck } from "../features/health-check/HealthCheck";
-import { LaunchSettings } from "../features/launcher/LaunchSettings";
 import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
 import { RemoteConnectionsSettings } from "../features/remote/RemoteConnectionsSettings";
+import { TwoPaneLayout, TwoPaneNavItem } from "../shared/TwoPaneLayout";
+import { useVisited } from "../shared/useVisited";
 import { THEMES, type ThemeId } from "./theme/themes";
+
+type SettingsSection =
+  "appearance" | "mediaSources" | "remoteConnections" | "about" | "diagnostics";
+
+const SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: "appearance", label: "Appearance" },
+  { id: "mediaSources", label: "Media Sources" },
+  { id: "remoteConnections", label: "Remote Connections" },
+  { id: "about", label: "About" },
+  { id: "diagnostics", label: "Diagnostics" },
+];
 
 interface SettingsViewProps {
   theme: ThemeId;
   onThemeChange: (theme: ThemeId) => void;
 }
 
+/**
+ * The global settings, one section at a time. Launch options and ROM Manager
+ * settings belong to an installation: they are on the MAME page.
+ */
 export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
+  // The page stays mounted, so the selection survives a visit to another page.
+  const [selected, setSelected] = useState<SettingsSection>("appearance");
+  // Sections stay mounted once opened, so that unsaved forms are kept.
+  const visited = useVisited(selected);
+  const heading = SECTIONS.find((section) => section.id === selected)?.label ?? "";
+
+  function content(section: SettingsSection): ReactNode {
+    switch (section) {
+      case "appearance":
+        return <Appearance theme={theme} onThemeChange={onThemeChange} />;
+      case "mediaSources":
+        return <MediaSourcesSettings />;
+      case "remoteConnections":
+        return <RemoteConnectionsSettings />;
+      case "about":
+        return <About />;
+      case "diagnostics":
+        return <HealthCheck />;
+    }
+  }
+
   return (
-    <div className="page">
-      <h1 className="page__title">Settings</h1>
-
-      <section className="panel" aria-labelledby="appearance-title">
-        <h2 id="appearance-title" className="panel__title">
-          Appearance
-        </h2>
-        <fieldset className="choice-group">
-          <legend>Theme</legend>
-          {THEMES.map((option) => (
-            <label key={option.id} className="choice">
-              <input
-                type="radio"
-                name="theme"
-                value={option.id}
-                checked={theme === option.id}
-                onChange={() => {
-                  onThemeChange(option.id);
+    <TwoPaneLayout
+      title="Settings"
+      navigationLabel="Settings sections"
+      heading={heading}
+      selectionKey={selected}
+      navigation={
+        <ul className="two-pane__list">
+          {SECTIONS.map((section) => (
+            <li key={section.id}>
+              <TwoPaneNavItem
+                selected={section.id === selected}
+                onSelect={() => {
+                  setSelected(section.id);
                 }}
-              />
-              {option.label}
-            </label>
+              >
+                {section.label}
+              </TwoPaneNavItem>
+            </li>
           ))}
-        </fieldset>
-      </section>
+        </ul>
+      }
+    >
+      {SECTIONS.filter((section) => visited.has(section.id)).map((section) => (
+        <div key={section.id} hidden={section.id !== selected}>
+          {content(section.id)}
+        </div>
+      ))}
+    </TwoPaneLayout>
+  );
+}
 
-      <section className="panel" aria-labelledby="about-title">
-        <h2 id="about-title" className="panel__title">
-          About
-        </h2>
-        <p className="about__name">Your MAME DB (YMDB)</p>
-        <p className="message message--muted">Version {__APP_VERSION__}</p>
-        <p className="message message--muted">
-          Early development build. Remote repositories can be configured, but ROMs are not
-          downloaded yet.
-        </p>
-      </section>
+function Appearance({ theme, onThemeChange }: SettingsViewProps) {
+  return (
+    <section className="panel" aria-label="Appearance">
+      <fieldset className="choice-group">
+        <legend>Theme</legend>
+        {THEMES.map((option) => (
+          <label key={option.id} className="choice">
+            <input
+              type="radio"
+              name="theme"
+              value={option.id}
+              checked={theme === option.id}
+              onChange={() => {
+                onThemeChange(option.id);
+              }}
+            />
+            {option.label}
+          </label>
+        ))}
+      </fieldset>
+      <p className="message message--muted">
+        The theme applies immediately to the whole application. Interface preferences are the same
+        for every MAME installation.
+      </p>
+    </section>
+  );
+}
 
-      <MediaSourcesSettings />
-
-      <RemoteConnectionsSettings />
-
-      <LaunchSettings />
-
-      <HealthCheck />
-    </div>
+function About() {
+  return (
+    <section className="panel" aria-label="About">
+      <p className="about__name">Your MAME DB (YMDB)</p>
+      <p className="message message--muted">Version {__APP_VERSION__}</p>
+      <p className="message">
+        A cross-platform desktop frontend for MAME: browse the catalog of each MAME installation,
+        launch machines and software, and download the files they need from your own remote
+        repositories.
+      </p>
+      <p className="message message--muted">
+        Early development build. Open source under the Apache License 2.0. YMDB does not include
+        ROMs, CHDs or BIOS files.
+      </p>
+    </section>
   );
 }

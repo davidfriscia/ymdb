@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { OptionDefinition, OptionSet } from "./launcherApi";
 import { CATEGORY_LABELS, initialValue, omit, parseValue, valueToText } from "./optionValues";
 
@@ -123,7 +123,8 @@ function OptionInput({ definition, options, onChange, onValidityChange }: Option
   const value = options[name];
   const [text, setText] = useState(valueToText(value));
   const [error, setError] = useState<string | null>(null);
-  const id = `option-${name}`;
+  // Unique: several editors (global options, profiles, installations) can be mounted at once.
+  const id = `option-${name}-${useId()}`;
 
   function update(next: string) {
     setText(next);

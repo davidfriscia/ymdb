@@ -571,7 +571,7 @@ describe("launcher", () => {
   describe("settings", () => {
     it("saves global options", async () => {
       const fake = launcherBackend();
-      const { user } = renderWithLauncher(<LaunchSettings />);
+      const { user } = renderWithLauncher(<LaunchSettings installationId={NEW_ID} />);
       const global = await screen.findByRole("group", { name: "Global options" });
 
       await user.selectOptions(within(global).getByRole("combobox"), "rompath");
@@ -591,7 +591,7 @@ describe("launcher", () => {
 
     it("creates, edits, makes default and deletes profiles", async () => {
       const fake = launcherBackend();
-      const { user } = renderWithLauncher(<LaunchSettings />);
+      const { user } = renderWithLauncher(<LaunchSettings installationId={NEW_ID} />);
       await user.type(await screen.findByLabelText("New profile name"), "Big Screen ✓");
       await user.click(screen.getByRole("button", { name: "Create profile" }));
 
@@ -630,7 +630,7 @@ describe("launcher", () => {
           softwareOverrides: { "nes:smb": { speed: 2 } },
         }),
       });
-      const { user } = renderWithLauncher(<LaunchSettings />);
+      const { user } = renderWithLauncher(<LaunchSettings installationId={NEW_ID} />);
       const list = await screen.findByRole("list", { name: "Machine and software options" });
       expect(list).toHaveTextContent("pacman · window: On");
       expect(list).toHaveTextContent("nes:smb · speed: 2");
@@ -650,7 +650,7 @@ describe("launcher", () => {
         }),
         get_launch_sessions: () => [],
       });
-      renderWithLauncher(<LaunchSettings />);
+      renderWithLauncher(<LaunchSettings installationId={NEW_ID} />);
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "launch configuration is invalid. The defaults are shown; saving replaces the file.",
       );
@@ -675,18 +675,17 @@ describe("launcher", () => {
       const fake = launcherBackend({
         config: launchConfig({ machineOverrides: { pacman: { window: true } } }),
       });
-      const { user } = renderWithLauncher(<LaunchSettings />);
-      const chooser = await screen.findByRole("combobox", { name: "Installation" });
-      expect(
-        within(chooser)
-          .getAllByRole("option")
-          .map((option) => option.textContent),
-      ).toEqual(["MAME 0.280 (active)", "MAME 0.252"]);
+      const { user, view, onShowCommandPreviewChange } = renderWithLauncher(
+        <LaunchSettings installationId={NEW_ID} />,
+      );
       expect(
         await screen.findByRole("list", { name: "Machine and software options" }),
       ).toHaveTextContent("pacman · window: On");
 
-      await user.selectOptions(chooser, OLD_ID);
+      // The MAME page shows the launch options of the installation chosen there.
+      view.rerender(
+        tree(<LaunchSettings installationId={OLD_ID} />, false, onShowCommandPreviewChange),
+      );
       await waitFor(() => {
         expect(calls("get_launch_config").at(-1)).toEqual({ installationId: OLD_ID });
       });

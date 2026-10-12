@@ -101,20 +101,29 @@ installation has its own catalog and its own launch options; media sources and
 interface preferences are shared by all of them. One installation is **active**: the
 catalog browser shows its catalog and new launches use its executable.
 
-On the **MAME** page, the **MAME Installations** panel lists the registered
-installations with their version, executable, catalog and status:
+The **MAME** page has a navigation on the left and the selected section on the right.
+The navigation starts with **Add Installation**, followed by one group per registered
+installation (its name, version, whether a catalog is imported, and an **Active**
+marker on the active one). Each group expands to four sections of that installation:
+**Status**, **Catalog**, **ROM Manager** and **Launch Options**. The page opens on the
+Status of the active installation; choosing a section never changes the active
+installation. Sections keep their unsaved changes while you look at other sections.
+Arrow keys, Home and End move through the navigation; on narrow windows it collapses
+behind a toggle above the content.
 
-- **Add installation…** opens the native file picker. Choose the MAME program file
+- **Add Installation → Add installation…** opens the native file picker. Choose the MAME program file
   (`mame.exe` on Windows, usually `mame` on macOS and Linux). YMDB validates it and
   registers it only if validation succeeds. Adding an installation never changes the
   others, and its catalog is not imported until you ask for it. The same executable
   cannot be registered twice (paths are compared with the operating system's rules:
-  case-insensitively on Windows and macOS, after resolving links).
-- **Detect installations** looks for MAME in the directories listed in `PATH` and in
+  case-insensitively on Windows and macOS, after resolving links). The new
+  installation is shown right away.
+- **Add Installation → Detect installations** looks for MAME in the directories listed in `PATH` and in
   a few standard installation directories (non-recursively), then validates each
   candidate. Detection never changes the registered installations: choose **Add** to
   register a detected executable.
-- **Manage** selects an installation; the panels below then apply to it only:
+- **Status** shows the executable, version, verification status and whether the
+  installation is active, with these actions:
   - **Set as active** makes it the active installation (MAME is not started).
   - **Verify** runs its executable again and shows the detected version, the
     validation status, the time of the check and the raw output of the version
@@ -127,7 +136,8 @@ installations with their version, executable, catalog and status:
     deleted. Removal is refused while a catalog import of the installation or a MAME
     session started from it is running. When the active installation is removed,
     the first remaining installation in registration order becomes active.
-  - **Catalog of …** imports and shows that installation's catalog (see below).
+- **Catalog** imports and shows that installation's catalog (see below).
+- **ROM Manager** and **Launch Options** are described below.
 
 The executable of an installation never changes. To use another executable (for
 example a new MAME release in another folder), add it as a new installation. If an
@@ -284,10 +294,13 @@ the active MAME installation:
 - ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
   and a software list declared by a machine does not guarantee compatibility.
 
-The **MAME** page holds the MAME installations and their catalog import panels. The
-**Settings** page selects the **Light** (default) or **Dark** theme, applied
-immediately to the whole application, holds the MAME launch options and shows the
-version and a backend connection check. Theme, panel visibility, view mode, the
+The **MAME** page holds the MAME installations and everything configured per
+installation (see above). The **Settings** page uses the same layout for the global
+settings: **Appearance** (the **Light**, default, or **Dark** theme, applied
+immediately to the whole application), **Media Sources**, **Remote Connections**,
+**About** (product name and version) and **Diagnostics** (a backend connection check).
+It opens on Appearance and keeps the chosen section while you visit other pages.
+Theme, panel visibility, view mode, the
 options of each view and the command line preview are saved in the application's
 web storage, separately from the MAME, launch and media configuration; they are the
 same for every MAME installation. The active installation is saved with the
@@ -324,7 +337,7 @@ Remote repositories are optional; without them YMDB works as before, fully offli
 ### Remote connections
 
 **Settings → Remote Connections** lists the connections, shared by every MAME
-installation. A connection has a name and a provider; the only provider is **SFTP**
+installation, below the **Add connection…** button. A connection has a name and a provider; the only provider is **SFTP**
 (over SSH):
 
 - host name or IP address, port (22 by default) and user name;
@@ -350,8 +363,8 @@ Connections are saved in `remote-connections.json` in the configuration director
 
 ### ROM Manager settings of an installation
 
-The **ROM Manager** section of the MAME page configures, for the installation selected
-there, five independent categories: Machine ROMs, Machine CHDs, Software List ROMs,
+The **ROM Manager** section of each installation on the MAME page configures, for that
+installation, five independent categories: Machine ROMs, Machine CHDs, Software List ROMs,
 Software List CHDs and Samples. Configure only the ones you need. Each one has:
 
 - **Enabled**;
@@ -463,13 +476,13 @@ apple2_flop_orig:ultima4:flop2`; the assignment can be changed before launching.
 
 YMDB passes only the options you set; everything else follows MAME's own
 configuration, which YMDB never modifies. Each MAME installation has its own options,
-profiles and overrides (choose the installation at the top of **Settings → MAME
-launch options**), because option, device and machine names can change between
+profiles and overrides (in the **Launch Options** section of each installation on
+the MAME page), because option, device and machine names can change between
 versions; they are never shared or copied between installations. Options are set at
 four levels, the later ones taking precedence:
 
-1. **Global options** (Settings page).
-2. **Launch profiles** (Settings page): named sets of options, chosen with the
+1. **Global options** (Launch Options of the installation).
+2. **Launch profiles** (Launch Options of the installation): named sets of options, chosen with the
    **Profile** selector when launching; the default profile applies otherwise.
 3. **Options for this machine** (machine detail page).
 4. **Options for this software** (software detail page).

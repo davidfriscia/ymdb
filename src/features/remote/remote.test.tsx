@@ -171,6 +171,10 @@ describe("RemoteConnectionsSettings", () => {
     expect(backup.getByText(/OpenSSH known_hosts first/)).toBeInTheDocument();
     // Only SFTP is offered: no control suggests other protocols.
     expect(screen.queryByText(/HTTPS|S3/)).not.toBeInTheDocument();
+    // Add connection comes before the list, however long it is.
+    const add = screen.getByRole("button", { name: "Add connection…" });
+    const list = screen.getByRole("list", { name: "Remote connections" });
+    expect(add.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("validates and creates a connection with the native key picker", async () => {

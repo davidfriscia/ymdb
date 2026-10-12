@@ -20,6 +20,7 @@ const EMPTY: Record<string, unknown> = {
   get_launch_config: launchConfigView(),
   get_launch_sessions: [],
   get_media_sources: mediaSourcesView(),
+  get_remote_connections: { connections: [], loadError: null },
 };
 
 function storedPreferences(): unknown {
@@ -63,8 +64,129 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "Open MAME settings" }));
 
     expect(screen.getByRole("heading", { level: 1, name: "MAME" })).toBeVisible();
-    expect(screen.getByRole("heading", { level: 2, name: "MAME Installations" })).toBeVisible();
+    // Without installations, the page opens on Add Installation.
+    expect(screen.getByRole("heading", { level: 2, name: "Add Installation" })).toBeVisible();
     expect(await screen.findByText(/No MAME installation is registered yet/)).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "MAME installations" })).toBeVisible();
+    // The main navigation is unchanged.
+    expect(
+      within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", {
+        name: "MAME",
+      }),
+    ).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens Settings on Appearance and shows one section at a time", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+    const sections = within(screen.getByRole("navigation", { name: "Settings sections" }));
+    expect(sections.getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Appearance",
+      "Media Sources",
+      "Remote Connections",
+      "About",
+      "Diagnostics",
+    ]);
+    expect(sections.getByRole("button", { name: "Appearance" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Appearance" })).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Light" })).toBeVisible();
+
+    await user.click(sections.getByRole("button", { name: "Media Sources" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Media Sources" })).toBeVisible();
+    expect(sections.getByRole("button", { name: "Media Sources" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(sections.getByRole("button", { name: "Appearance" })).not.toHaveAttribute(
+      "aria-current",
+    );
+    // The content is replaced, not appended.
+    expect(screen.queryByRole("radio", { name: "Light" })).not.toBeInTheDocument();
+    expect(await screen.findAllByRole("button", { name: "Add directory…" })).toHaveLength(5);
+
+    await user.click(sections.getByRole("button", { name: "Remote Connections" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Remote Connections" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Add connection…" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Add directory…" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an unsaved connection form while other sections are shown", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Remote Connections" }));
+    await user.click(await screen.findByRole("button", { name: "Add connection…" }));
+    await user.type(screen.getByLabelText("Connection name"), "Home NAS ✓");
+
+    await user.click(screen.getByRole("button", { name: "Appearance" }));
+    expect(screen.queryByLabelText("Connection name")).not.toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Remote Connections" }));
+
+    expect(screen.getByRole("form", { name: "New remote connection" })).toBeVisible();
+    expect(screen.getByLabelText("Connection name")).toHaveValue("Home NAS ✓");
+    expect(invokeMock).not.toHaveBeenCalledWith("save_remote_connection", expect.anything());
+  });
+
+  it("keeps the Settings section while other pages are visited", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const main = within(screen.getByRole("navigation", { name: "Main" }));
+
+    await user.click(main.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Diagnostics" }));
+    await user.click(main.getByRole("button", { name: "Catalog" }));
+    await user.click(main.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Check backend connection" })).toBeVisible();
+  });
+
+  it("moves through the Settings sections with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    const sections = within(screen.getByRole("navigation", { name: "Settings sections" }));
+
+    sections.getByRole("button", { name: "Appearance" }).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(sections.getByRole("button", { name: "Remote Connections" })).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(sections.getByRole("button", { name: "Diagnostics" })).toHaveFocus();
+    await user.keyboard("{ArrowUp}{Enter}");
+    expect(screen.getByRole("heading", { level: 2, name: "About" })).toBeVisible();
+    await user.keyboard("{Home}");
+    expect(sections.getByRole("button", { name: "Appearance" })).toHaveFocus();
+  });
+
+  it("collapses the section navigation behind a toggle on narrow windows", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    // The toggle is only displayed on narrow windows (CSS); it names the current section.
+    const toggle = screen.getByRole("button", { name: "Sections, current: Appearance" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute(
+      "aria-controls",
+      screen.getByRole("navigation", { name: "Settings sections" }).id,
+    );
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    // Choosing a section closes it.
+    await user.click(screen.getByRole("button", { name: "About" }));
+    expect(screen.getByRole("heading", { level: 2, name: "About" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Sections, current: About/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   it("keeps interface preferences global when the MAME version changes", async () => {
@@ -97,7 +219,14 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
+    await user.click(screen.getByRole("button", { name: "About" }));
+    expect(screen.getByText("Your MAME DB (YMDB)")).toBeVisible();
     expect(screen.getByText(`Version ${__APP_VERSION__}`)).toBeVisible();
+    // The obsolete note about downloads is gone.
+    expect(screen.queryByText(/not downloaded/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Diagnostics" }));
+    expect(screen.getByRole("heading", { level: 3, name: "Backend connection" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Check backend connection" })).toBeEnabled();
   });
 

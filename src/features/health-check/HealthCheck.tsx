@@ -22,9 +22,9 @@ export function HealthCheck() {
 
   return (
     <section className="panel" aria-labelledby="health-check-title">
-      <h2 id="health-check-title" className="panel__title">
+      <h3 id="health-check-title" className="panel__title">
         Backend connection
-      </h2>
+      </h3>
       <button
         type="button"
         className="button"

@@ -29,10 +29,7 @@ export function RemoteConnectionsSettings() {
   }, []);
 
   return (
-    <section className="panel" aria-labelledby="remote-connections-title">
-      <h2 id="remote-connections-title" className="panel__title">
-        Remote Connections
-      </h2>
+    <section className="panel" aria-label="Remote Connections">
       <p className="message message--muted">
         Repositories from which YMDB will retrieve ROM, CHD and sample files. Connections are shared
         by every MAME installation; each installation chooses what to use in its ROM Manager
@@ -61,13 +58,7 @@ export function RemoteConnectionsSettings() {
       {latest?.connections.length === 0 && !latest.loadError && (
         <p className="message message--muted">No remote connection.</p>
       )}
-      {latest && latest.connections.length > 0 && (
-        <ul className="remote-connections">
-          {latest.connections.map((connection) => (
-            <ConnectionItem key={connection.id} connection={connection} onChanged={changed} />
-          ))}
-        </ul>
-      )}
+      {/* First, so that it stays reachable however many connections are listed. */}
       {adding ? (
         <ConnectionForm
           connection={null}
@@ -83,7 +74,7 @@ export function RemoteConnectionsSettings() {
         <div className="actions">
           <button
             type="button"
-            className="button button--secondary"
+            className="button"
             disabled={latest?.loadError !== null}
             onClick={() => {
               setAdding(true);
@@ -92,6 +83,13 @@ export function RemoteConnectionsSettings() {
             Add connection…
           </button>
         </div>
+      )}
+      {latest && latest.connections.length > 0 && (
+        <ul className="remote-connections" aria-label="Remote connections">
+          {latest.connections.map((connection) => (
+            <ConnectionItem key={connection.id} connection={connection} onChanged={changed} />
+          ))}
+        </ul>
       )}
     </section>
   );

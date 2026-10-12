@@ -64,14 +64,17 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `search`: typed wrappers of the search commands (`searchApi.ts`).
   - `browser`: the catalog browser and detail views (see
     [Catalog browser](#catalog-browser--implemented)).
-  - `media`: media sources in the Settings page and `MediaProvider`, which shares the
+  - `installations`: `InstallationsProvider`, the MAME page (`MamePage`: navigation by
+    installation, `AddInstallationPanel`, `InstallationDetails` for Status).
+  - `media`: **Settings → Media Sources** and `MediaProvider`, which shares the
     sources and their version with the Media Grid (see
     [Media sources](#media-sources--implemented)).
-  - `launcher`: launch panels in the machine and software details, the launch options
-    section of the Settings page and `LauncherProvider`, which shares the launch
+  - `launcher`: launch panels in the machine and software details, the **Launch
+    Options** section of each installation on the MAME page and `LauncherProvider`,
+    which shares the launch
     configuration and the session statuses (see [Launcher](#launcher--implemented)).
   - `remote`: **Settings → Remote Connections** and the **ROM Manager** section of
-    the MAME page (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
+    each installation on the MAME page (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
   - `roms`: Prepare Download and Download & Play in the launch panels (see
     [ROM Manager downloads](#rom-manager-downloads--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
@@ -79,12 +82,33 @@ React + TypeScript application rendered by the system WebView through Tauri.
 #### Application shell
 
 `App.tsx` shows a navigation rail with three pages: **Catalog** (the browser, the
-start page), **MAME** (installations, catalog and ROM Manager panels) and **Settings**
-(theme, media sources, remote connections, launch options, version, backend connection
-check). Pages stay mounted and are hidden with
+start page), **MAME** and **Settings**. Pages stay mounted and are hidden with
 the `hidden` attribute, so the browser keeps its query, results and scroll position
 while the user visits another page. There is no router. Below 640 px the rail
 becomes a top bar.
+
+MAME and Settings are two-pane pages built with `src/shared/TwoPaneLayout.tsx`: the
+page title and a secondary navigation (`TwoPaneNavItem`, `aria-current` plus a marker
+and weight for the selected item; arrow keys, Home and End move between visible
+buttons) on the left, and on the right a content panel with the selected item's
+heading (and context, such as the installation) that replaces the previous content.
+Both columns scroll independently; below 960 px the navigation narrows and below
+720 px it collapses behind a toggle above the content. Sections are mounted when
+first shown and then kept mounted, hidden (`src/shared/useVisited.ts`), so that
+unsaved forms, the list of detected installations and running import polls survive
+a change of selection; save semantics are unchanged. The selection is component
+state (no persistence): the pages stay mounted, so it survives visits to other pages.
+
+- **MAME** (`MamePage`): **Add Installation**, then one collapsible group per
+  installation, keyed by its id (label, version, catalog, **Active** marker), with
+  **Status**, **Catalog**, **ROM Manager** and **Launch Options**. The page opens on
+  the Status of the active installation; a selection naming a removed installation
+  falls back to it (or to Add Installation when none is left), and an added
+  installation (or the one already registering a chosen executable) is shown at once.
+  Choosing a section never changes the active installation.
+- **Settings** (`SettingsView`): **Appearance** (theme), **Media Sources**, **Remote
+  Connections**, **About** (name, version) and **Diagnostics** (backend connection
+  check). It opens on Appearance.
 
 The shell keeps two counters, incremented when the MAME configuration changes and
 when an import replaces the catalog; the browser reloads its catalog status,
@@ -104,7 +128,7 @@ results and open detail when their sum changes.
   `applyTheme` sets `data-theme` on `<html>`. Light is the default and also applies
   before any `data-theme` is set. The operating system preference is not followed.
 - Adding a theme means defining its tokens in `themes.css` and registering it in
-  `THEMES`; the Settings page lists registered themes automatically.
+  `THEMES`; **Settings → Appearance** lists registered themes automatically.
 - `main.tsx` applies the saved theme before the first render to avoid a flash.
 
 #### Interface preferences
@@ -433,7 +457,8 @@ machine/software list consistency check are unchanged.
 #### Version selection in the interface
 
 `InstallationsProvider` loads the list and exposes the active installation. Selecting
-another one (MAME page or the **MAME Version** menu of the catalog's View Options)
+another one (**Set as active** in the Status of an installation on the MAME page, or the
+**MAME Version** menu of the catalog's View Options)
 switches the interface immediately and saves the selection with
 `set_active_installation`; selections are saved one after the other so the last one
 wins. The catalog browser:
@@ -459,8 +484,8 @@ options, profiles, machine overrides and software overrides are therefore isolat
 option, device and machine names can change between versions, so they are never
 shared or copied automatically. The precedence is unchanged: MAME configuration,
 global options of the installation, profile, machine override, software override.
-**Settings → MAME launch options** chooses the installation to configure (the active
-one by default).
+The **Launch Options** section of each installation on the MAME page configures that
+installation only.
 
 `LaunchRequest` contains `installationId`; preview and launch resolve that
 installation, check its catalog against its executable and build a `LaunchPlan`
@@ -754,7 +779,7 @@ from it.
   (machines that cannot are disabled), a note on the limits of the catalog data,
   the media assignment (one selector per compatible device) and **Options for this
   software**.
-- Settings: the installation to configure, then its global options, profiles
+- MAME page → Launch Options of an installation: its global options, profiles
   (create, rename, edit, make default, delete;
   the `default` profile cannot be deleted) and the list of machine and software
   overrides, which can be removed there.
@@ -1136,7 +1161,7 @@ reported as unreadable and must be imported again.
 
 #### Interface
 
-The **Catalog of …** panel of the MAME page, for the installation selected there,
+The **Catalog** section of each installation on the MAME page
 shows, for machines, whether a catalog exists, its MAME
 version, import date and statistics (entries, runnable systems, clones, BIOS sets,
 devices, mechanical, ROMs, disks, referenced software lists, database size, import
@@ -1643,7 +1668,7 @@ the configuration lock. Passphrases travel with one command and are dropped.
   passphrase prompt (sent once, never kept) and **Browse…** (read-only directory
   listing; a passphrase entered there stays in memory while it is open). Only SFTP is
   offered; no control suggests other protocols.
-- **MAME page → ROM Manager**: the five categories of the selected installation with
+- **MAME page → ROM Manager** of an installation: its five categories with
   enabled, connection (name and provider type), remote base path, organization and
   local destination (a MAME directory with its origin and status, or a custom
   directory), category warnings, and save/discard. Incomplete enabled categories are

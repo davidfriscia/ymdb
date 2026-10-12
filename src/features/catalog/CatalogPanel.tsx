@@ -92,7 +92,10 @@ export function CatalogPanel({
         if (!isActive()) return;
         setStatus(refreshed);
         setImportStatus(next);
-        if (next.state === "completed") onCatalogChanged?.();
+        // Panels of other installations may be mounted too: only this one reports.
+        if (next.state === "completed" && next.installationId === installationId) {
+          onCatalogChanged?.();
+        }
       } catch (pollError) {
         if (isActive()) setError(describeError(pollError));
       }
@@ -126,11 +129,11 @@ export function CatalogPanel({
   const canImportSoftware = catalog !== null && status?.freshness === "current" && idle;
 
   return (
-    <section className="panel" aria-labelledby="catalog-title" aria-busy={running}>
-      <h2 id="catalog-title" className="panel__title">
-        Catalog of {labels.get(installationId) ?? installation.label}
-      </h2>
-
+    <section
+      className="panel"
+      aria-label={`Catalog of ${labels.get(installationId) ?? installation.label}`}
+      aria-busy={running}
+    >
       {status === null && error === null && (
         <p className="message message--muted">Loading catalog…</p>
       )}

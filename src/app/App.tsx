@@ -133,11 +133,11 @@ function Shell() {
           />
         </main>
 
-        <main className="shell__main" hidden={view !== "mame"}>
+        <main className="shell__main shell__main--split" hidden={view !== "mame"}>
           <MamePage refreshKey={catalogVersion} onCatalogChanged={onCatalogChanged} />
         </main>
 
-        <main className="shell__main" hidden={view !== "settings"}>
+        <main className="shell__main shell__main--split" hidden={view !== "settings"}>
           <SettingsView
             theme={preferences.theme}
             onThemeChange={(theme) => {

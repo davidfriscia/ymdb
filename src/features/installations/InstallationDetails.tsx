@@ -75,10 +75,7 @@ export function InstallationDetails({ installation, onRemoved }: InstallationDet
     });
 
   return (
-    <section className="panel" aria-labelledby="installation-title" aria-busy={busy}>
-      <h2 id="installation-title" className="panel__title">
-        {label}
-      </h2>
+    <section className="panel" aria-label={`Status of ${label}`} aria-busy={busy}>
       <dl className="details-list" aria-label="Installation">
         <dt>Executable</dt>
         <dd className="code">{installation.executablePath}</dd>

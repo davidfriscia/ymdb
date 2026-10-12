@@ -77,10 +77,7 @@ export function MediaSourcesSettings() {
   }
 
   return (
-    <section className="panel" aria-labelledby="media-sources-title">
-      <h2 id="media-sources-title" className="panel__title">
-        Media Sources
-      </h2>
+    <section className="panel" aria-label="Media Sources">
       <p className="message message--muted">
         Directories with artwork and screenshots, for example from an artwork collection. Images are
         named after the MAME short name (snap/pacman.png) or, for software, the list and the

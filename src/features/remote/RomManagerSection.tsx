@@ -75,9 +75,8 @@ interface RomManagerSectionProps {
 }
 
 /**
- * MAME page section: the remote sources of one installation, per category.
- * Downloads are not available yet; this only records where files will come
- * from and where they will go.
+ * MAME page section: the remote sources of one installation, per category:
+ * where downloaded files come from and where they go.
  */
 export function RomManagerSection({ installation }: RomManagerSectionProps) {
   const load = useCallback(() => getRemoteSources(installation.id), [installation.id]);
@@ -145,14 +144,12 @@ export function RomManagerSection({ installation }: RomManagerSectionProps) {
   }
 
   return (
-    <section className="panel" aria-labelledby="rom-manager-title">
-      <h2 id="rom-manager-title" className="panel__title">
-        ROM Manager
-      </h2>
+    <section className="panel" aria-label={`ROM Manager settings of ${installation.label}`}>
       <p className="message message--muted">
-        Where YMDB will retrieve the files of {installation.label} from, and where it will store
-        them. Each category is independent and optional; categories that are not enabled keep using
-        only local files. Downloading is not available yet.
+        Where YMDB retrieves the files of {installation.label} from, and where it stores them. Each
+        category is independent and optional; categories that are not enabled keep using only local
+        files. Downloads start from the launch panel of a machine or software (Prepare Download,
+        Download &amp; Play).
       </p>
       {state.status === "error" && current === null && (
         <div className="state-message" role="alert">

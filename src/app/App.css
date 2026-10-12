@@ -118,17 +118,6 @@ body {
   overflow: hidden;
 }
 
-.page {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 32px 24px 48px;
-}
-
-.page__title {
-  margin: 0;
-  font-size: 1.5rem;
-}
-
 @media (width <= 640px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
@@ -163,6 +152,11 @@ body {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface);
+}
+
+/* Panels of the two-pane pages start without a title. */
+.panel > :first-child {
+  margin-top: 0;
 }
 
 .panel__title {
@@ -541,4 +535,213 @@ progress {
   margin: 8px 0 0;
   padding-left: 20px;
   overflow-wrap: anywhere;
+}
+
+/* Two-pane pages (MAME, Settings): secondary navigation and selected content */
+
+.shell__main--split {
+  overflow: hidden;
+}
+
+.two-pane {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  height: 100%;
+}
+
+.two-pane__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 28px 12px 24px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.two-pane__title {
+  margin: 0 10px;
+  font-size: 1.5rem;
+}
+
+.two-pane__toggle {
+  display: none;
+}
+
+.two-pane__navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.two-pane__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.two-pane__separator {
+  margin: 10px 10px 6px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.two-pane__note {
+  margin: 4px 10px;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.two-pane__item,
+.two-pane__group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.two-pane__item:hover,
+.two-pane__group:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+/* Selected: marker, background and weight, not only a color. */
+.two-pane__item[aria-current="page"] {
+  border-left-color: var(--color-accent);
+  background: var(--color-selected);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.two-pane__item--nested {
+  padding-left: 30px;
+}
+
+.two-pane__group {
+  align-items: flex-start;
+  color: var(--color-text-primary);
+}
+
+.two-pane__group--current {
+  border-left-color: var(--color-border-strong);
+}
+
+.two-pane__chevron {
+  flex: none;
+  width: 12px;
+  color: var(--color-text-muted);
+}
+
+.two-pane__group-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.two-pane__group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.two-pane__group-meta {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.two-pane__content {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.two-pane__body {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+
+.two-pane__context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.two-pane__heading {
+  margin: 0;
+  font-size: 1.375rem;
+}
+
+@media (width <= 960px) {
+  .two-pane {
+    grid-template-columns: 216px minmax(0, 1fr);
+  }
+}
+
+/* Narrow windows: the navigation collapses behind a toggle above the content. */
+@media (width <= 720px) {
+  .two-pane {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .two-pane__sidebar {
+    flex-flow: row wrap;
+    align-items: center;
+    gap: 8px;
+    max-height: 60vh;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .two-pane__title {
+    margin: 0;
+    font-size: 1.125rem;
+  }
+
+  .two-pane__toggle {
+    display: inline-flex;
+    max-width: 70%;
+    margin-left: auto;
+  }
+
+  .two-pane__navigation {
+    display: none;
+    flex-basis: 100%;
+  }
+
+  .two-pane--navigation-open .two-pane__navigation {
+    display: flex;
+  }
+
+  .two-pane__body {
+    padding: 16px 16px 32px;
+  }
 }

@@ -10,35 +10,31 @@ import {
   type DetectedCandidate,
 } from "./installationsApi";
 import { useInstallations } from "./installationsContext";
-import { describeCatalog, describeExecutableStatus } from "./installationMessages";
 
-interface InstallationsPanelProps {
-  /** The installation shown in the panels below. */
-  selectedId: string | null;
-  onSelect: (id: string) => void;
+interface AddInstallationPanelProps {
+  /** Shows an installation (added, or already registered) with a message. */
+  onShowInstallation: (id: string, message: string) => void;
 }
 
-/** The registered MAME installations, adding new ones and detection. */
-export function InstallationsPanel({ selectedId, onSelect }: InstallationsPanelProps) {
-  const { view, error, installations, labels, reload } = useInstallations();
+/** Adds MAME installations: a chosen executable or a detected one. */
+export function AddInstallationPanel({ onShowInstallation }: AddInstallationPanelProps) {
+  const { view, installations, labels, reload } = useInstallations();
   const [pending, setPending] = useState<"add" | "detect" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [rejected, setRejected] = useState<ValidationReport | null>(null);
   const [detected, setDetected] = useState<DetectedCandidate[] | null>(null);
 
   async function run(action: "add" | "detect", work: () => Promise<void>) {
     setPending(action);
     setActionError(null);
-    setNotice(null);
     try {
       await work();
     } catch (actionFailure) {
       const detail = actionFailure instanceof CommandFailedError ? actionFailure.detail : null;
       if (detail?.kind === "duplicateInstallation") {
         // Show the installation that already registers it.
-        onSelect(detail.existingInstallationId);
-        setNotice(
+        onShowInstallation(
+          detail.existingInstallationId,
           `This executable is already registered as ${labels.get(detail.existingInstallationId) ?? "another installation"}.`,
         );
       } else {
@@ -58,8 +54,6 @@ export function InstallationsPanel({ selectedId, onSelect }: InstallationsPanelP
     const added = result.installation;
     setRejected(null);
     await reload();
-    onSelect(added.id);
-    setNotice(`${added.label} was added. Its catalog has not been imported yet.`);
     setDetected(
       (current) =>
         current?.map((candidate) =>
@@ -68,77 +62,24 @@ export function InstallationsPanel({ selectedId, onSelect }: InstallationsPanelP
             : candidate,
         ) ?? null,
     );
+    onShowInstallation(
+      added.id,
+      `${added.label} was added. Its catalog has not been imported yet.`,
+    );
   }
 
   const busy = pending !== null;
   return (
-    <section className="panel" aria-labelledby="installations-title" aria-busy={busy}>
-      <h2 id="installations-title" className="panel__title">
-        MAME Installations
-      </h2>
+    <section className="panel" aria-label="Add a MAME installation" aria-busy={busy}>
       <p className="message message--muted">
-        Register every MAME version you use. Each installation has its own catalog and launch
-        options; the one selected in the catalog is the active installation.
+        Register every MAME version you use. Each installation has its own catalog, launch options
+        and ROM Manager settings; the one selected in the catalog is the active installation.
       </p>
-
-      {view === null && error === null && (
-        <p className="message message--muted">Loading installations…</p>
-      )}
-      {error !== null && (
-        <div className="state-message" role="alert">
-          <p className="message message--error">
-            The MAME installations could not be read: {describeError(error)}
-          </p>
-          <button type="button" className="button button--secondary" onClick={() => void reload()}>
-            Retry
-          </button>
-        </div>
-      )}
       {view !== null && installations.length === 0 && (
         <p className="message message--muted">
           No MAME installation is registered yet. Add a MAME executable or detect the installed
           ones.
         </p>
-      )}
-
-      {installations.length > 0 && (
-        <ul className="installation-list" aria-label="Registered installations">
-          {installations.map((installation) => {
-            const label = labels.get(installation.id) ?? installation.label;
-            const selected = installation.id === selectedId;
-            return (
-              <li
-                key={installation.id}
-                className={`installation-list__item${selected ? " installation-list__item--selected" : ""}`}
-              >
-                <div className="installation-list__info">
-                  <p className="installation-list__title">
-                    {label}
-                    {installation.active && <span className="badge badge--success">Active</span>}
-                  </p>
-                  <p className="installation-list__path code">{installation.executablePath}</p>
-                  <p className="installation-list__meta">
-                    {installation.version ? formatVersion(installation.version) : "Version unknown"}{" "}
-                    · {describeCatalog(installation)}
-                    {installation.executableStatus !== "verified" &&
-                      ` · ${describeExecutableStatus(installation.executableStatus)}`}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="button button--secondary"
-                  aria-pressed={selected}
-                  aria-label={`Manage ${label}`}
-                  onClick={() => {
-                    onSelect(installation.id);
-                  }}
-                >
-                  {selected ? "Selected" : "Manage"}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
       )}
 
       {rejected && (
@@ -149,11 +90,6 @@ export function InstallationsPanel({ selectedId, onSelect }: InstallationsPanelP
           <p className="message code">{rejected.executablePath}</p>
           {rejected.output && <RawOutput report={rejected} />}
         </div>
-      )}
-      {notice && (
-        <p className="message message--success" role="status">
-          {notice}
-        </p>
       )}
       {actionError && (
         <p className="message message--error" role="alert">

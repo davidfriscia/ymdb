@@ -172,6 +172,11 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Images reach the webview only through the `ymdb-media` protocol, by category and
   MAME names; never enable the asset protocol or send file paths to be read. Media
   files are only read: never copied, modified or stored in the catalog.
+- MAME and Settings are two-pane pages (`src/shared/TwoPaneLayout.tsx`): settings of
+  one installation are a section of its group on the MAME page, global settings a
+  section of Settings. Sections stay mounted once shown (`useVisited`), so a change of
+  selection never discards unsaved forms; selecting never changes the active
+  installation.
 - Asynchronous loads in components go through `src/shared/useLoader.ts` (stale
   responses ignored, memoized inputs).
 - See `ARCHITECTURE.md` for planned components; update it when a component moves

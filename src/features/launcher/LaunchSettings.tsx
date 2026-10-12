@@ -1,11 +1,7 @@
 import { useCallback, useState } from "react";
 import { describeError } from "../../shared/ipc";
 import { useLoader } from "../../shared/useLoader";
-import {
-  InstallationScope,
-  useInstallationScope,
-  useInstallations,
-} from "../installations/installationsContext";
+import { InstallationScope, useInstallationScope } from "../installations/installationsContext";
 import {
   DEFAULT_PROFILE_ID,
   getLaunchConfig,
@@ -20,63 +16,25 @@ import { OptionSetEditor } from "./OptionSetEditor";
 import { describeValue, omit } from "./optionValues";
 
 /**
- * Settings page section: global options, profiles and overrides of one MAME
+ * MAME page section: global options, profiles and overrides of one MAME
  * installation. Each installation has its own; changing one never changes
  * another.
  */
-export function LaunchSettings() {
-  const { installations, activeId, labels } = useInstallations();
-  const [chosenId, setChosenId] = useState<string | null>(null);
-  // The active installation until the user chooses another one.
-  const selectedId =
-    chosenId !== null && installations.some((installation) => installation.id === chosenId)
-      ? chosenId
-      : activeId;
+export function LaunchSettings({ installationId }: { installationId: string }) {
   return (
-    <section className="panel" aria-labelledby="launch-settings-title">
-      <h2 id="launch-settings-title" className="panel__title">
-        MAME launch options
-      </h2>
+    <section className="panel" aria-label="Launch options">
       <p className="message message--muted">
         YMDB passes only the options set here; everything else follows MAME&apos;s own configuration
         (mame.ini), which YMDB never modifies. Precedence, from lowest to highest: MAME
         configuration, global options, launch profile, machine options, software options.
       </p>
-      {installations.length === 0 ? (
-        <p className="message message--muted">
-          Add a MAME installation on the MAME page to configure its launch options.
-        </p>
-      ) : (
-        <>
-          <label className="field">
-            <span className="field__label">Installation</span>
-            <select
-              className="input"
-              value={selectedId ?? ""}
-              onChange={(event) => {
-                setChosenId(event.target.value);
-              }}
-            >
-              {selectedId === null && <option value="">Select an installation</option>}
-              {installations.map((installation) => (
-                <option key={installation.id} value={installation.id}>
-                  {labels.get(installation.id)}
-                  {installation.id === activeId ? " (active)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="message message--muted">
-            Each MAME installation has its own global options, profiles and overrides, because
-            option and device names can change between versions.
-          </p>
-          {selectedId !== null && (
-            <InstallationScope value={selectedId}>
-              <InstallationLaunchSettings key={selectedId} installationId={selectedId} />
-            </InstallationScope>
-          )}
-        </>
-      )}
+      <p className="message message--muted">
+        Each MAME installation has its own global options, profiles and overrides, because option
+        and device names can change between versions.
+      </p>
+      <InstallationScope value={installationId}>
+        <InstallationLaunchSettings key={installationId} installationId={installationId} />
+      </InstallationScope>
     </section>
   );
 }
