@@ -13,6 +13,7 @@ import {
   Fields,
   RecordLinkButton,
   Section,
+  type DetailNavigation,
   type DetailTab,
 } from "./DetailParts";
 import { formatClock, formatSize, joinPresent, yesNo } from "./format";
@@ -25,6 +26,7 @@ interface MachineDetailViewProps {
   refreshKey: number;
   onTab: (tab: string) => void;
   onOpen: (target: DetailTarget) => void;
+  navigation: DetailNavigation;
 }
 
 export function MachineDetailView({
@@ -33,13 +35,14 @@ export function MachineDetailView({
   refreshKey,
   onTab,
   onOpen,
+  navigation,
 }: MachineDetailViewProps) {
   const installationId = useInstallationScope();
   const load = useCallback(() => getMachineDetail(installationId, name), [installationId, name]);
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status !== "ready" || state.value === null) {
-    return <DetailStatus state={state} what="machine" onRetry={reload} />;
+    return <DetailStatus state={state} what="machine" navigation={navigation} onRetry={reload} />;
   }
   const machine = state.value;
   const tabs: DetailTab[] = [
@@ -62,6 +65,7 @@ export function MachineDetailView({
 
   return (
     <DetailFrame
+      navigation={navigation}
       title={machine.description}
       subtitle={
         <>
@@ -71,7 +75,9 @@ export function MachineDetailView({
       }
       badges={<MachineBadges machine={machine} />}
       media={{ kind: "machine", name: machine.name }}
-      actions={<MachineLaunchPanel name={machine.name} isRunnable={machine.isRunnable} />}
+      launch={(summary) => (
+        <MachineLaunchPanel name={machine.name} isRunnable={machine.isRunnable} summary={summary} />
+      )}
       tabs={tabs}
       activeTab={tab}
       onTab={onTab}

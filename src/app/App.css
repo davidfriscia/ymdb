@@ -226,6 +226,93 @@ body {
   cursor: not-allowed;
 }
 
+/* A square button holding only an icon; its name is in `aria-label` and `title`. */
+.icon-button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+/* Modal dialog (src/shared/Modal.tsx) */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--color-overlay);
+}
+
+.modal__dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-elevated);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.modal__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.modal__close:hover {
+  border-color: var(--color-border);
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+/* Only the content scrolls: the header stays visible in small windows. */
+.modal__body {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px 0;
+  overflow: auto;
+}
+
+@media (width <= 640px) {
+  .modal {
+    padding: 8px;
+  }
+
+  .modal__body {
+    padding: 12px 12px 0;
+  }
+}
+
 .link-button {
   padding: 0;
   border: 0;

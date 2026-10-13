@@ -13,7 +13,7 @@ use crate::media::config::{
     CATEGORIES, MediaCategory, MediaConfig, MediaConfigStore, MediaStoreError, SourceStatus,
     source_status,
 };
-use crate::media::protocol::respond;
+use crate::media::protocol::{CategoryImages, MediaTarget, list_images, respond};
 
 /// Managed state: the media configuration is kept in memory because every
 /// image request reads it.
@@ -158,6 +158,16 @@ pub async fn pick_media_directory(app: AppHandle) -> Result<Option<PathBuf>, Com
         .map_err(|error| CommandError::Internal {
             message: format!("unsupported folder selection: {error}"),
         })
+}
+
+/// The categories with images of `target` and their number of images. Only
+/// the files of this title are looked up, off the main thread.
+#[tauri::command]
+pub async fn list_media(
+    target: MediaTarget,
+    app: AppHandle,
+) -> Result<Vec<CategoryImages>, CommandError> {
+    run_blocking(move || list_images(&app.state::<MediaState>().config(), &target)).await
 }
 
 /// Answers a `ymdb-media` request. Runs on the blocking pool (file I/O).

@@ -1,5 +1,6 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { describeError } from "../../shared/ipc";
+import { PlayIcon } from "../../shared/icons";
 import { CommandPreview } from "./CommandPreview";
 import type {
   LaunchConfig,
@@ -15,6 +16,28 @@ import { SessionStatus } from "./SessionStatus";
 import { useInstallationScope } from "../installations/installationsContext";
 import { RomDownloadSection } from "../roms/RomDownloadSection";
 
+interface LaunchBarProps {
+  /** Short information about the title, at the start of the bar. */
+  summary?: ReactNode;
+  /** The actions, at the end of the bar. */
+  actions: ReactNode;
+  /** A second row of the bar, for example the machine and media of a software. */
+  details?: ReactNode;
+}
+
+/** The compact bar below the media: the title information and the launch actions. */
+export function LaunchBar({ summary, actions, details }: LaunchBarProps) {
+  return (
+    <section className="launch-bar" aria-label="Launch">
+      <div className="launch-bar__main">
+        <div className="launch-bar__summary">{summary}</div>
+        <div className="launch-bar__actions">{actions}</div>
+      </div>
+      {details && <div className="launch-bar__details">{details}</div>}
+    </section>
+  );
+}
+
 interface LaunchControlsProps {
   target: LaunchTarget;
   /**
@@ -22,16 +45,18 @@ interface LaunchControlsProps {
    * user must still choose.
    */
   request: Omit<LaunchRequest, "profileId" | "installationId"> | null;
-  /** Shown before the buttons, for example the machine selection. */
+  /** Short information about the title, at the start of the launch bar. */
+  summary?: ReactNode;
+  /** Shown in the launch bar below the actions, for example the machine selection. */
   children?: ReactNode;
 }
 
 /**
- * Play button, profile, ROM downloads and session status, for the
- * installation whose catalog is browsed, with the overrides and the command
- * line preview in a collapsed Advanced section.
+ * The launch bar (ROM downloads, profile and Play) for the installation whose
+ * catalog is browsed, the session status below it, and the overrides and the
+ * command line preview in a collapsed Advanced section.
  */
-export function LaunchControls({ target, request, children }: LaunchControlsProps) {
+export function LaunchControls({ target, request, summary, children }: LaunchControlsProps) {
   const installationId = useInstallationScope();
   const launcher = useLauncher();
   const { sessions, start, stop, showCommandPreview, setShowCommandPreview } = launcher;
@@ -67,6 +92,8 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
   const overrideLabel = target.software ? "this software" : "this machine";
   const overrides = view ? overridesOf(view.config, target) : {};
   const overrideCount = Object.keys(overrides).length;
+  const defaultProfile =
+    profiles.find((profile) => profile.id === view?.config.defaultProfileId)?.name ?? "Default";
 
   async function play() {
     if (!fullRequest) return;
@@ -81,73 +108,76 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
     }
   }
 
+  const hasMessages =
+    launcher.error !== null || Boolean(view?.loadError) || error !== null || session !== undefined;
+
   return (
-    <section className="launch-panel" aria-label="Launch">
-      {children}
-      <div className="launch-panel__row">
+    <>
+      <LaunchBar
+        summary={summary}
+        details={children}
+        actions={
+          <>
+            <RomDownloadSection request={fullRequest} target={target} />
+            <label className="launch-bar__profile" title="Launch profile">
+              <span className="visually-hidden">Profile</span>
+              <select
+                className="input"
+                value={selectedProfile ?? ""}
+                disabled={!view}
+                onChange={(event) => {
+                  setProfileId(event.target.value === "" ? null : event.target.value);
+                }}
+              >
+                <option value="">Default ({defaultProfile})</option>
+                {profiles
+                  .filter((profile) => profile.id !== view?.config.defaultProfileId)
+                  .map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="button launch-bar__play"
+              disabled={!fullRequest || starting || running || !view}
+              onClick={() => void play()}
+            >
+              <PlayIcon size={16} />
+              {starting ? "Starting…" : running ? "Running" : "Play"}
+            </button>
+          </>
+        }
+      />
+
+      {hasMessages && (
+        <div className="launch-messages">
+          {launcher.error !== null && (
+            <p className="message message--error" role="alert">
+              The launch options could not be loaded: {describeError(launcher.error)}
+            </p>
+          )}
+          {view?.loadError && (
+            <p className="message message--warning" role="alert">
+              {view.loadError}. The default options are used until they are saved in Settings.
+            </p>
+          )}
+          {error && (
+            <p className="message message--error" role="alert">
+              {error}
+            </p>
+          )}
+          {session && <SessionStatus session={session} onStop={stop} />}
+        </div>
+      )}
+
+      {/* Overrides and the command line: collapsed by default, below the launch bar. */}
+      <section className="launch-advanced" aria-label="Advanced launch options">
         <button
           type="button"
-          className="button launch-panel__play"
-          disabled={!fullRequest || starting || running || !view}
-          onClick={() => void play()}
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-            <path d="M4 2.5v11l9-5.5z" fill="currentColor" />
-          </svg>
-          {starting ? "Starting…" : running ? "Running" : "Play"}
-        </button>
-        <label className="launch-panel__field">
-          <span>Profile</span>
-          <select
-            className="input"
-            value={selectedProfile ?? ""}
-            disabled={!view}
-            onChange={(event) => {
-              setProfileId(event.target.value === "" ? null : event.target.value);
-            }}
-          >
-            <option value="">
-              Default (
-              {profiles.find((profile) => profile.id === view?.config.defaultProfileId)?.name ??
-                "Default"}
-              )
-            </option>
-            {profiles
-              .filter((profile) => profile.id !== view?.config.defaultProfileId)
-              .map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-          </select>
-        </label>
-      </div>
-
-      <RomDownloadSection request={fullRequest} target={target} />
-
-      {launcher.error !== null && (
-        <p className="message message--error" role="alert">
-          The launch options could not be loaded: {describeError(launcher.error)}
-        </p>
-      )}
-      {view?.loadError && (
-        <p className="message message--warning" role="alert">
-          {view.loadError}. The default options are used until they are saved in Settings.
-        </p>
-      )}
-      {error && (
-        <p className="message message--error" role="alert">
-          {error}
-        </p>
-      )}
-
-      {session && <SessionStatus session={session} onStop={stop} />}
-
-      {/* Overrides and the command line: collapsed by default, below the main actions. */}
-      <div className="launch-panel__advanced">
-        <button
-          type="button"
-          className="launch-panel__disclosure"
+          className="launch-advanced__disclosure"
           aria-expanded={advanced}
           aria-controls={advancedId}
           onClick={() => {
@@ -168,7 +198,7 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
             </span>
           )}
         </button>
-        <div id={advancedId} className="launch-panel__advanced-body" hidden={!advanced}>
+        <div id={advancedId} className="launch-advanced__body" hidden={!advanced}>
           {advancedOpened && (
             <>
               <div className="launch-panel__row">
@@ -221,8 +251,8 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
             </>
           )}
         </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
 

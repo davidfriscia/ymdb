@@ -18,6 +18,7 @@ import {
   Fields,
   RecordLinkButton,
   Section,
+  type DetailNavigation,
   type DetailTab,
 } from "./DetailParts";
 import { formatSize } from "./format";
@@ -31,6 +32,7 @@ interface SoftwareDetailViewProps {
   refreshKey: number;
   onTab: (tab: string) => void;
   onOpen: (target: DetailTarget) => void;
+  navigation: DetailNavigation;
 }
 
 export function SoftwareDetailView({
@@ -40,6 +42,7 @@ export function SoftwareDetailView({
   refreshKey,
   onTab,
   onOpen,
+  navigation,
 }: SoftwareDetailViewProps) {
   const installationId = useInstallationScope();
   const load = useCallback(
@@ -49,7 +52,7 @@ export function SoftwareDetailView({
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status !== "ready" || state.value === null) {
-    return <DetailStatus state={state} what="software" onRetry={reload} />;
+    return <DetailStatus state={state} what="software" navigation={navigation} onRetry={reload} />;
   }
   const software = state.value;
   const tabs: DetailTab[] = [
@@ -60,6 +63,7 @@ export function SoftwareDetailView({
 
   return (
     <DetailFrame
+      navigation={navigation}
       title={software.description}
       subtitle={
         <>
@@ -76,13 +80,14 @@ export function SoftwareDetailView({
         </>
       }
       media={{ kind: "software", list: software.listName, name: software.name }}
-      actions={
+      launch={(summary) => (
         <SoftwareLaunchPanel
           list={software.listName}
           name={software.name}
           refreshKey={refreshKey}
+          summary={summary}
         />
-      }
+      )}
       tabs={tabs}
       activeTab={tab}
       onTab={onTab}

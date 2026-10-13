@@ -49,16 +49,38 @@ export function pickMediaDirectory(): Promise<string | null> {
 export type MediaTarget =
   { kind: "machine"; name: string } | { kind: "software"; list: string; name: string };
 
+/** Mirrors `CategoryImages` in `media/protocol.rs`. */
+export interface CategoryImages {
+  category: MediaCategoryId;
+  /** Number of images, requested by index from 0 to `count - 1`. */
+  count: number;
+}
+
+/**
+ * The categories with at least one image of `target`, in category order. Only
+ * the files of this title are looked up in the configured directories.
+ */
+export function listMedia(target: MediaTarget): Promise<CategoryImages[]> {
+  return invokeCommand("list_media", { target });
+}
+
 /**
  * URL of an image served by the `ymdb-media` protocol. It contains only
  * identifiers; the backend finds the file in the configured directories.
- * `version` changes when the sources change, so the webview does not reuse
- * images of the previous configuration.
+ * `index` selects one of the images of the title in the category (the first
+ * by default). `version` changes when the sources change, so the webview does
+ * not reuse images of the previous configuration.
  */
-export function mediaUrl(category: string, target: MediaTarget, version: number): string {
-  const path =
+export function mediaUrl(
+  category: string,
+  target: MediaTarget,
+  version: number,
+  index = 0,
+): string {
+  const record =
     target.kind === "machine"
       ? `${category}/machine/${target.name}`
       : `${category}/software/${target.list}/${target.name}`;
+  const path = index === 0 ? record : `${record}/${String(index)}`;
   return `${convertFileSrc(path, "ymdb-media")}?v=${String(version)}`;
 }

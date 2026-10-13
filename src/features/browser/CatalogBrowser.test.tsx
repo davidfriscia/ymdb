@@ -131,6 +131,7 @@ function commands(
     get_launch_sessions: () => [],
     get_software_launch_info: () => null,
     get_media_sources: () => mediaSourcesView({ snap: ["C:/Artwork ✓/snap"] }),
+    list_media: () => [],
     ...overrides,
   });
 }
@@ -918,10 +919,17 @@ describe("CatalogBrowser", () => {
       expect(browserRequests()).toHaveLength(searches);
     });
 
-    it("shows the artwork next to the launch controls, above the technical details", async () => {
+    it("lays out the header, artwork, launch bar, Advanced and technical details", async () => {
       commands({
         get_media_sources: () =>
           mediaSourcesView({ snap: ["C:/Artwork/snap"], flyers: ["C:/Artwork/flyers"] }),
+        list_media: (args) =>
+          (args.target as { name: string }).name === "pacman"
+            ? [
+                { category: "snap", count: 2 },
+                { category: "flyers", count: 1 },
+              ]
+            : [],
         get_machine_detail: (args) =>
           machineDetail(String(args.name), {
             description: MACHINES.find((entry) => entry.name === args.name)?.description,
@@ -929,36 +937,61 @@ describe("CatalogBrowser", () => {
       });
       const { user } = renderBrowser();
       await openCard("Pac-Man");
-      await screen.findByRole("heading", { name: "Pac-Man" });
+      const title = await screen.findByRole("heading", { name: "Pac-Man" });
 
-      const showcase = screen.getByTestId("detail-showcase");
-      const gallery = within(showcase).getByRole("region", { name: "Media" });
-      const launch = await within(showcase).findByRole("region", { name: "Launch" });
-      expect(showcase).toHaveAttribute("data-media", "shown");
-      expect(
-        gallery.compareDocumentPosition(launch) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
-      expect(
-        showcase.compareDocumentPosition(screen.getByRole("tablist", { name: "Sections" })),
-      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-      const snap = gallery.querySelector('img[data-category="snap"]');
-      expect(snap).toHaveAttribute("src", "ymdb-media://localhost/snap%2Fmachine%2Fpacman?v=0");
-      fireEvent.load(required(snap));
-      fireEvent.load(required(gallery.querySelector('img[data-category="flyers"]')));
-      expect(within(gallery).getByRole("button", { name: "Enlarge snapshots" })).toBeVisible();
+      // Header: back, title, then the position in the results.
+      const back = screen.getByRole("button", { name: "Back to results" });
+      const next = screen.getByRole("button", { name: "Next" });
+      expect(back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(title.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByText("1 / 3")).toBeInTheDocument();
 
-      // Next title: its own images, and without any the launcher takes the row.
-      await user.click(screen.getByRole("button", { name: "Next" }));
-      await screen.findByRole("heading", { name: "Ms. Pac-Man" });
-      const next = within(screen.getByTestId("detail-showcase"));
-      expect(next.queryByRole("button", { name: /^Enlarge/ })).toBeNull();
-      for (const image of document.querySelectorAll(".detail__media img")) {
-        expect(image.getAttribute("src")).toContain("mspacman");
-        fireEvent.error(image);
+      const gallery = await screen.findByRole("region", { name: "Media" });
+      await within(gallery).findByRole("list", { name: "Image categories" });
+      const launch = await screen.findByRole("region", { name: "Launch" });
+      const advanced = screen.getByRole("region", { name: "Advanced launch options" });
+      const sections = screen.getByRole("tablist", { name: "Sections" });
+      for (const [before, after] of [
+        [gallery, launch],
+        [launch, advanced],
+        [advanced, sections],
+      ] as const) {
+        expect(
+          before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
       }
-      expect(screen.getByTestId("detail-showcase")).toHaveAttribute("data-media", "none");
-      expect(next.getByText(/No artwork was found/)).toBeInTheDocument();
-      expect(next.getByRole("button", { name: "Play" })).toBeInTheDocument();
+      // The title is not repeated: the bar shows the short information and the actions.
+      expect(within(launch).getByText("pacman")).toBeInTheDocument();
+      expect(within(launch).getByRole("button", { name: "Play" })).toBeInTheDocument();
+      expect(within(launch).getByRole("button", { name: "Prepare Download" })).toBeInTheDocument();
+      expect(within(launch).getByRole("button", { name: "Download & Play" })).toBeInTheDocument();
+      expect(within(advanced).getByRole("button", { name: /^Advanced/ })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+
+      expect(
+        within(gallery)
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(expect.arrayContaining(["Enlarge snapshots 1", "Snapshots (2)", "Flyers (1)"]));
+      expect(gallery.querySelector(".media-gallery__image")).toHaveAttribute(
+        "src",
+        "ymdb-media://localhost/snap%2Fmachine%2Fpacman?v=0",
+      );
+
+      // Next title: its own images; without any, a discreet message and no categories.
+      await user.click(next);
+      await screen.findByRole("heading", { name: "Ms. Pac-Man" });
+      expect(document.querySelector('img[src*="pacman%3F"], img[src*="2Fpacman"]')).toBeNull();
+      expect(await screen.findByText(/No artwork was found/)).toBeInTheDocument();
+      expect(screen.queryByRole("list", { name: "Image categories" })).toBeNull();
+      expect(screen.getByText("2 / 3")).toBeInTheDocument();
+      expect(
+        within(screen.getByRole("region", { name: "Launch" })).getByRole("button", {
+          name: "Play",
+        }),
+      ).toBeInTheDocument();
     });
 
     it("shows the detail sections", async () => {
@@ -1094,6 +1127,7 @@ describe("CatalogBrowser", () => {
             ],
           }),
         get_software_list_detail: () => softwareListDetail("nes", { description: "NES carts" }),
+        list_media: () => [{ category: "snap", count: 1 }],
       });
       const { user } = renderBrowser();
       await screen.findByText("1–3 of 3 machines");
@@ -1113,11 +1147,13 @@ describe("CatalogBrowser", () => {
         name: "smb",
       });
       // The artwork of a software is found by its list and name.
-      const gallery = within(screen.getByRole("region", { name: "Media" }));
-      const snap = document.querySelector('.detail__media img[data-category="snap"]');
-      expect(snap).toHaveAttribute("src", "ymdb-media://localhost/snap%2Fsoftware%2Fnes%2Fsmb?v=0");
-      fireEvent.load(required(snap));
-      expect(gallery.getByRole("img", { name: "Super Mario Bros.: Snapshots" })).toBeVisible();
+      expect(invokeMock).toHaveBeenCalledWith("list_media", {
+        target: { kind: "software", list: "nes", name: "smb" },
+      });
+      const gallery = within(await screen.findByRole("region", { name: "Media" }));
+      expect(
+        await gallery.findByRole("img", { name: "Super Mario Bros.: Snapshots" }),
+      ).toHaveAttribute("src", "ymdb-media://localhost/snap%2Fsoftware%2Fnes%2Fsmb?v=0");
       await user.click(screen.getByRole("tab", { name: /Parts/ }));
       expect(screen.getByText("smb.prg")).toBeInTheDocument();
 

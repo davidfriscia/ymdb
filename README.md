@@ -292,9 +292,11 @@ the active MAME installation:
   status, ROMs, CHDs, devices, displays, controls, chips and software lists;
   software shows its list, parts, ROMs and disks and the machines declaring its list;
   software lists show their software and machines. Parents, clones, devices and
-  software lists are links. Machine and software details open with their artwork
-  next to the launch controls (see [Artwork and screenshots](#artwork-and-screenshots)),
-  the technical sections below. **Back** returns to the previous detail and **Back to
+  software lists are links. Machine and software details share one layout: a header
+  with **Back to results**, the title and **Previous** / position / **Next**; the
+  artwork (see [Artwork and screenshots](#artwork-and-screenshots)); a compact launch
+  bar with the short information, the download actions, the profile and **Play**;
+  the collapsed **Advanced** launch options; and the technical sections. **Back** returns to the previous detail and **Back to
   results** to the results, with the search, filters, sort, view, page size, page and
   scroll position unchanged; **Previous**/**Next** move through the current page.
 - ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
@@ -324,24 +326,26 @@ changes your files.
 Images are found by name:
 
 - machines: `pacman.png` (also `.jpg`, `.jpeg`, `.webp`) in the directory, or
-  `pacman/0000.png` as saved by MAME;
+  the numbered screenshots saved by MAME in `pacman/` (`0000.png`, `0001.png`, …);
 - software: `<list>/<software>.png`, for example `nes/smb.png`, so a directory of
   software list snapshots (such as `snap_SL`) can be added to Snapshots.
 
 When a title has no image, its tile shows a placeholder: YMDB never shows the image
 of another title, not even of the parent of a clone.
 
-The detail page of a machine or software shows a gallery of the images found for it
-in every configured category: the first one in the order Snapshots, Title screens,
-Flyers, Cabinets, Marquees as main image, the others as thumbnails (click one to show
-it). Images keep their proportions (a flyer stays vertical, a marquee wide). Click
-the main image to enlarge it: the arrow keys (or the arrow buttons) move between the
-images, **Esc** or **Close** closes it. Categories without an image are simply
-left out; when there is none at all, the launch controls take the whole width. On
-narrower windows the gallery is shown above the launch controls. Zipped collections are not
-supported yet. Media sources are shared by all MAME installations: switching the MAME
-version uses the same directories (a title missing from one version's catalog is
-simply not listed).
+The detail page of a machine or software shows a large carousel of its images with
+the categories that have images on its right (Snapshots, Title screens, Flyers,
+Cabinets, Marquees; categories without an image are left out). The first category
+is selected; click another to browse its images only. A category can hold several
+images: the image of each configured directory and, for machines, every screenshot
+MAME saved. Move with the arrow buttons, the dots or the arrow keys. Images keep
+their proportions (a flyer stays vertical, a marquee wide). Click the image to
+enlarge it: the arrow keys (or the arrow buttons) move between the images of the
+category, **Esc** or **Close** closes it. When there is no image at all, a one-line
+note replaces the gallery. On narrow windows the categories are shown as a row
+below the carousel. Zipped collections are not supported yet. Media sources are
+shared by all MAME installations: switching the MAME version uses the same
+directories (a title missing from one version's catalog is simply not listed).
 
 ## Remote repositories
 
@@ -406,13 +410,19 @@ The settings are saved per installation in `installations/<id>/remote-sources.js
 
 ### Downloading missing files (ROM Manager)
 
-The launch panel of a machine or software has two more buttons:
+The launch bar of a machine or software has two more buttons, shown as icons (hover
+them for a description):
 
 - **Prepare Download** builds a _download plan_ for the launch as it is configured
   (installation, machine, software, mounted parts, profile) and shows it. Nothing is
   downloaded yet.
 - **Download & Play** builds the same plan; after you confirm, YMDB downloads the
   available missing files and then starts MAME with the same installation and options.
+
+The plan, the progress and the result are shown in a window over the page. Closing
+it never cancels a download: while files are transferred, **Hide** (or **Esc**)
+only hides the window, and a **Downloading …%** button next to the actions shows it
+again. Use **Cancel download** to stop a transfer.
 
 The plan works with **whole sets**, never with the ROMs inside archives. From the
 catalog, YMDB lists the files the launch may need:
@@ -481,7 +491,7 @@ are missing, MAME refuses to start and YMDB shows its message and output.
   example `mame apple2e -flop1 apple2_flop_orig:ultima4:flop1 -flop2
 apple2_flop_orig:ultima4:flop2`; the assignment can be changed before launching.
 - **Play**, the **Profile**, **Prepare Download** and **Download & Play** are always
-  visible. The **Advanced** section (collapsed when a detail opens; its counter shows
+  visible in the launch bar below the artwork. The **Advanced** section (collapsed when a detail opens; its counter shows
   the number of options set for the title) holds **Options for this machine** or
   **Options for this software** and **Command line**, which shows the exact command
   that **Play** runs (executable, working directory and the origin of every option).

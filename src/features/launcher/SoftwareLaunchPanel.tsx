@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { describeError } from "../../shared/ipc";
 import { useLoader } from "../../shared/useLoader";
 import {
@@ -7,17 +7,19 @@ import {
   type MediaAssignment,
   type SoftwareLaunchInfo,
 } from "./launcherApi";
-import { LaunchControls } from "./LaunchControls";
+import { LaunchBar, LaunchControls } from "./LaunchControls";
 import { useInstallationScope } from "../installations/installationsContext";
 
 interface SoftwareLaunchPanelProps {
   list: string;
   name: string;
   refreshKey: number;
+  /** Short information about the software, at the start of the launch bar. */
+  summary?: ReactNode;
 }
 
 /** Launches a software on a machine chosen by the user. */
-export function SoftwareLaunchPanel({ list, name, refreshKey }: SoftwareLaunchPanelProps) {
+export function SoftwareLaunchPanel({ list, name, refreshKey, summary }: SoftwareLaunchPanelProps) {
   const installationId = useInstallationScope();
   const load = useCallback(
     () => getSoftwareLaunchInfo(installationId, list, name),
@@ -27,26 +29,36 @@ export function SoftwareLaunchPanel({ list, name, refreshKey }: SoftwareLaunchPa
 
   if (state.status === "loading") {
     return (
-      <p className="message message--muted launch-panel" role="status">
-        Looking for machines that can run this software…
-      </p>
+      <LaunchBar
+        summary={summary}
+        actions={
+          <p className="message message--muted" role="status">
+            Looking for machines that can run this software…
+          </p>
+        }
+      />
     );
   }
   if (state.status === "error") {
     return (
-      <div className="state-message launch-panel" role="alert">
-        <p className="message message--error">{describeError(state.error)}</p>
-        <button type="button" className="button button--secondary" onClick={reload}>
-          Retry
-        </button>
-      </div>
+      <LaunchBar
+        summary={summary}
+        actions={
+          <div className="launch-bar__error" role="alert">
+            <p className="message message--error">{describeError(state.error)}</p>
+            <button type="button" className="button button--secondary" onClick={reload}>
+              Retry
+            </button>
+          </div>
+        }
+      />
     );
   }
   if (state.value === null) return null;
-  return <SoftwareLauncher key={`${list}:${name}`} info={state.value} />;
+  return <SoftwareLauncher key={`${list}:${name}`} info={state.value} summary={summary} />;
 }
 
-function SoftwareLauncher({ info }: { info: SoftwareLaunchInfo }) {
+function SoftwareLauncher({ info, summary }: { info: SoftwareLaunchInfo; summary?: ReactNode }) {
   const [machineName, setMachineName] = useState<string | null>(info.recommended);
   // Part assignments per machine, kept when the user switches machines.
   const [assignments, setAssignments] = useState<Record<string, MediaAssignment[]>>({});
@@ -76,10 +88,15 @@ function SoftwareLauncher({ info }: { info: SoftwareLaunchInfo }) {
 
   if (info.candidates.length === 0) {
     return (
-      <p className="message message--muted launch-panel">
-        No machine in the catalog declares the software list {info.listName}: this software cannot
-        be launched.
-      </p>
+      <LaunchBar
+        summary={summary}
+        actions={
+          <p className="message message--muted">
+            No machine in the catalog declares the software list {info.listName}: this software
+            cannot be launched.
+          </p>
+        }
+      />
     );
   }
 
@@ -94,8 +111,8 @@ function SoftwareLauncher({ info }: { info: SoftwareLaunchInfo }) {
   }
 
   return (
-    <LaunchControls target={target} request={request}>
-      <div className="launch-panel__row">
+    <LaunchControls target={target} request={request} summary={summary}>
+      <div className="launch-setup">
         <label className="launch-panel__field launch-panel__machine">
           <span>Machine</span>
           <select
@@ -113,50 +130,52 @@ function SoftwareLauncher({ info }: { info: SoftwareLaunchInfo }) {
             ))}
           </select>
         </label>
+        {candidate && (
+          <fieldset className="launch-panel__media">
+            <legend>Media</legend>
+            {candidate.devices.map((device) => {
+              const current = media.find((entry) => entry.device === device.briefName)?.part ?? "";
+              const parts = info.parts.filter((part) => device.interfaces.includes(part.interface));
+              return (
+                <label key={device.briefName} className="launch-panel__field">
+                  <span>
+                    {device.instanceName ?? device.briefName}{" "}
+                    <span className="code message--muted">-{device.briefName}</span>
+                  </span>
+                  <select
+                    className="input"
+                    value={current}
+                    onChange={(event) => {
+                      assign(device.briefName, event.target.value);
+                    }}
+                  >
+                    <option value="">(empty)</option>
+                    {parts.map((part) => (
+                      <option key={part.name} value={part.name}>
+                        {part.name}
+                        {part.label ? ` – ${part.label}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            })}
+          </fieldset>
+        )}
       </div>
-      <p className="message message--muted">
-        {info.recommended
-          ? "Preselected: the only machine with this list as its own whose filter matches the software."
-          : "Choose a machine: the catalog does not identify a single suitable one."}{" "}
-        Declared lists and filters come from MAME; they cannot guarantee that the software works on
-        the chosen machine (slot cards, RAM or other requirements are not checked).
-      </p>
-      {candidate && <CandidateDetails candidate={candidate} />}
-      {candidate && (
-        <fieldset className="launch-panel__media">
-          <legend>Media</legend>
-          {candidate.devices.map((device) => {
-            const current = media.find((entry) => entry.device === device.briefName)?.part ?? "";
-            const parts = info.parts.filter((part) => device.interfaces.includes(part.interface));
-            return (
-              <label key={device.briefName} className="launch-panel__field">
-                <span>
-                  {device.instanceName ?? device.briefName}{" "}
-                  <span className="code message--muted">-{device.briefName}</span>
-                </span>
-                <select
-                  className="input"
-                  value={current}
-                  onChange={(event) => {
-                    assign(device.briefName, event.target.value);
-                  }}
-                >
-                  <option value="">(empty)</option>
-                  {parts.map((part) => (
-                    <option key={part.name} value={part.name}>
-                      {part.name}
-                      {part.label ? ` – ${part.label}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            );
-          })}
-          {media.length === 0 && (
-            <p className="message message--warning">Mount at least one part to launch.</p>
-          )}
-        </fieldset>
+      {candidate && media.length === 0 && (
+        <p className="message message--warning">Mount at least one part to launch.</p>
       )}
+      <div className="launch-setup__notes">
+        {candidate && <CandidateDetails candidate={candidate} />}
+        <p className="message message--muted">
+          {info.recommended
+            ? "Preselected: the only machine with this list as its own whose filter matches the software."
+            : "Choose a machine: the catalog does not identify a single suitable one."}{" "}
+          Declared lists and filters come from MAME; they cannot guarantee that the software works
+          on the chosen machine (slot cards, RAM or other requirements are not checked).
+        </p>
+      </div>
     </LaunchControls>
   );
 }

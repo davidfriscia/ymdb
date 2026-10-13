@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { describeError } from "../../../shared/ipc";
 import type { LoadState } from "../../../shared/useLoader";
 import { MediaGallery } from "../../media/MediaGallery";
@@ -12,14 +12,26 @@ export interface DetailTab {
   count?: number;
 }
 
+/** The navigation controls of the page, around the title in the header. */
+export interface DetailNavigation {
+  /** Back to the results (or to the previous detail). */
+  start: ReactNode;
+  /** Previous / position / Next in the results, when opened from them. */
+  end: ReactNode;
+}
+
 interface DetailFrameProps {
   title: string;
   subtitle: ReactNode;
   badges?: ReactNode;
-  /** The record whose artwork is shown in a gallery next to the actions. */
+  navigation: DetailNavigation;
+  /** The record whose artwork is shown in the gallery below the header. */
   media?: MediaTarget;
-  /** Shown next to the media, for example the launch controls. */
-  actions?: ReactNode;
+  /**
+   * The launch bar (and what goes with it), given the short information about
+   * the record to show at its start. Without it, the information is shown alone.
+   */
+  launch?: (summary: ReactNode) => ReactNode;
   tabs: DetailTab[];
   activeTab: string;
   onTab: (tab: string) => void;
@@ -27,46 +39,37 @@ interface DetailFrameProps {
 }
 
 /**
- * Header, media and actions, then the tabs and content of a detail view.
- * The media and the actions share a row when the window is wide enough; a
- * gallery without images leaves the row to the actions.
+ * The layout shared by the detail pages, from top to bottom: the header
+ * (navigation and title), the media gallery, the launch bar with the short
+ * information about the record, the Advanced launch options, and the
+ * technical sections with their content.
  */
 export function DetailFrame({
   title,
   subtitle,
   badges,
+  navigation,
   media,
-  actions,
+  launch,
   tabs,
   activeTab,
   onTab,
   children,
 }: DetailFrameProps) {
   const active = tabs.some((tab) => tab.id === activeTab) ? activeTab : "overview";
-  const [hasImages, setHasImages] = useState(true);
+  const summary = (
+    <div className="detail-summary">
+      <p className="detail-summary__line">{subtitle}</p>
+      {badges && <p className="detail-summary__badges">{badges}</p>}
+    </div>
+  );
   return (
     <article className="detail" aria-labelledby="detail-title">
-      <header className="detail__header">
-        <h2 id="detail-title" className="detail__title">
-          {title}
-        </h2>
-        <p className="detail__subtitle">{subtitle}</p>
-        {badges && <p className="detail__badges">{badges}</p>}
-      </header>
-      {(media ?? actions) && (
-        <div
-          className="detail__showcase"
-          data-media={media && hasImages ? "shown" : "none"}
-          data-testid="detail-showcase"
-        >
-          {media && (
-            <div className="detail__media">
-              <MediaGallery target={media} title={title} onAvailabilityChange={setHasImages} />
-            </div>
-          )}
-          {actions && <div className="detail__launch">{actions}</div>}
-        </div>
-      )}
+      <DetailHeader title={title} navigation={navigation} />
+      {media && <MediaGallery target={media} title={title} />}
+      <div className="detail__launch">
+        {launch ? launch(summary) : <div className="launch-bar">{summary}</div>}
+      </div>
       <div className="detail__body">
         <div className="detail__tabs" role="tablist" aria-label="Sections">
           {tabs.map((tab) => (
@@ -100,39 +103,67 @@ export function DetailFrame({
   );
 }
 
+/** Back on the left, the title in the middle, the result navigation on the right. */
+function DetailHeader({
+  title,
+  navigation,
+}: {
+  title: string | null;
+  navigation: DetailNavigation;
+}) {
+  return (
+    <header className="detail-header">
+      <nav className="detail-header__start" aria-label="Detail navigation">
+        {navigation.start}
+      </nav>
+      {title !== null ? (
+        <h2 id="detail-title" className="detail-header__title" title={title}>
+          {title}
+        </h2>
+      ) : (
+        <span className="detail-header__title" />
+      )}
+      <nav className="detail-header__end" aria-label="Result navigation">
+        {navigation.end}
+      </nav>
+    </header>
+  );
+}
+
 /** Loading, error and "not found" states shared by the detail views. */
 export function DetailStatus({
   state,
   what,
+  navigation,
   onRetry,
 }: {
   state: LoadState<unknown>;
   what: string;
+  navigation: DetailNavigation;
   onRetry: () => void;
 }) {
-  if (state.status === "loading") {
-    return (
-      <p className="message message--muted" role="status">
-        Loading {what}…
-      </p>
-    );
-  }
-  if (state.status === "error") {
-    return (
-      <div className="state-message" role="alert">
-        <p className="message message--error">
-          The {what} could not be loaded: {describeError(state.error)}
-        </p>
-        <button type="button" className="button button--secondary" onClick={onRetry}>
-          Retry
-        </button>
-      </div>
-    );
-  }
   return (
-    <p className="message message--warning" role="alert">
-      This {what} is not in the catalog. The catalog may have been imported again.
-    </p>
+    <div className="detail">
+      <DetailHeader title={null} navigation={navigation} />
+      {state.status === "loading" ? (
+        <p className="message message--muted" role="status">
+          Loading {what}…
+        </p>
+      ) : state.status === "error" ? (
+        <div className="state-message" role="alert">
+          <p className="message message--error">
+            The {what} could not be loaded: {describeError(state.error)}
+          </p>
+          <button type="button" className="button button--secondary" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      ) : (
+        <p className="message message--warning" role="alert">
+          This {what} is not in the catalog. The catalog may have been imported again.
+        </p>
+      )}
+    </div>
   );
 }
 

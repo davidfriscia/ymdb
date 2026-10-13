@@ -31,6 +31,7 @@ import {
 import { MachineDetailView } from "./detail/MachineDetailView";
 import { SoftwareDetailView } from "./detail/SoftwareDetailView";
 import { SoftwareListDetailView } from "./detail/SoftwareListDetailView";
+import type { DetailNavigation } from "./detail/DetailParts";
 import type { Scope } from "./filterDefinitions";
 import { FilterPanel } from "./FilterPanel";
 import { Pagination } from "./Pagination";
@@ -715,12 +716,12 @@ function DetailNavigation({
       ? `software:${target.list}/${target.name}`
       : `${target.kind}:${target.name}`;
 
-  return (
-    <div className="browser__detail">
-      <nav className="detail-nav" aria-label="Detail navigation">
+  const navigation: DetailNavigation = {
+    start: (
+      <>
         <button
           type="button"
-          className="button button--secondary"
+          className="button button--secondary button--small"
           onClick={() => {
             dispatch({ type: "back" });
           }}
@@ -730,7 +731,7 @@ function DetailNavigation({
         {depth > 1 && (
           <button
             type="button"
-            className="button button--secondary"
+            className="button button--secondary button--small"
             onClick={() => {
               dispatch({ type: "backToResults" });
             }}
@@ -738,35 +739,39 @@ function DetailNavigation({
             Back to results
           </button>
         )}
-        {resultIndex !== null && (
-          <span className="detail-nav__step">
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={!previous}
-              onClick={() => {
-                if (previous) dispatch({ type: "replaceDetail", ...previous });
-              }}
-            >
-              Previous
-            </button>
-            <span className="message--muted">
-              {resultIndex + 1} / {items.length}
-            </span>
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={!next}
-              onClick={() => {
-                if (next) dispatch({ type: "replaceDetail", ...next });
-              }}
-            >
-              Next
-            </button>
-          </span>
-        )}
-      </nav>
+      </>
+    ),
+    end: resultIndex !== null && (
+      <>
+        <button
+          type="button"
+          className="button button--secondary button--small"
+          disabled={!previous}
+          onClick={() => {
+            if (previous) dispatch({ type: "replaceDetail", ...previous });
+          }}
+        >
+          Previous
+        </button>
+        <span className="detail-header__position">
+          {resultIndex + 1} / {items.length}
+        </span>
+        <button
+          type="button"
+          className="button button--secondary button--small"
+          disabled={!next}
+          onClick={() => {
+            if (next) dispatch({ type: "replaceDetail", ...next });
+          }}
+        >
+          Next
+        </button>
+      </>
+    ),
+  };
 
+  return (
+    <div className="browser__detail">
       {target.kind === "machine" ? (
         <MachineDetailView
           key={key}
@@ -775,6 +780,7 @@ function DetailNavigation({
           refreshKey={refreshKey}
           onTab={onTab}
           onOpen={onOpen}
+          navigation={navigation}
         />
       ) : target.kind === "software" ? (
         <SoftwareDetailView
@@ -785,6 +791,7 @@ function DetailNavigation({
           refreshKey={refreshKey}
           onTab={onTab}
           onOpen={onOpen}
+          navigation={navigation}
         />
       ) : (
         <SoftwareListDetailView
@@ -795,6 +802,7 @@ function DetailNavigation({
           softwareImported={softwareImported}
           onTab={onTab}
           onOpen={onOpen}
+          navigation={navigation}
         />
       )}
     </div>

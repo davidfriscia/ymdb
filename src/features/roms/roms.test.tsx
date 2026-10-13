@@ -473,7 +473,7 @@ describe("ROM downloads", () => {
     expect(await screen.findByRole("region", { name: "Download progress" })).toBeInTheDocument();
   });
 
-  it("shows a download that started before the page was opened", async () => {
+  it("shows a download that started before the page was opened on request", async () => {
     backend({
       initial: jobStatus({
         transfers: [
@@ -482,10 +482,86 @@ describe("ROM downloads", () => {
         bytesTransferred: 512,
       }),
     });
-    renderSection();
+    const user = renderSection();
+    // No window opens by itself: a button next to the actions shows the progress.
+    const indicator = await screen.findByRole("button", { name: "Downloading 25%" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(indicator);
     const progress = await screen.findByRole("region", { name: "Download progress" });
     expect(progress).toHaveTextContent("pacman.zip (512 B of 2.0 KiB)");
     expect(calls("prepare_download_plan")).toHaveLength(0);
+  });
+
+  it("shows the plan in a modal window that returns the focus when closed", async () => {
+    backend();
+    const user = renderSection();
+    const prepare = await screen.findByRole("button", { name: "Prepare Download" });
+    expect(prepare).toHaveAttribute("title", expect.stringContaining("without starting MAME"));
+    expect(screen.getByRole("button", { name: "Download & Play" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("then start MAME"),
+    );
+    await user.click(prepare);
+    const dialog = await screen.findByRole("dialog", { name: "Download plan" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const plan = await within(dialog).findByRole("region", { name: "Download plan" });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    // The focus stays inside the window.
+    for (let step = 0; step < 8; step++) await user.tab();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(plan).not.toBeInTheDocument();
+    expect(prepare).toHaveFocus();
+
+    // Download & Play opens the same window with its own title and action.
+    await user.click(screen.getByRole("button", { name: "Download & Play" }));
+    const play = await screen.findByRole("dialog", { name: "Download & Play" });
+    expect(
+      await within(play).findByRole("button", { name: "Download 1 & Play" }),
+    ).toBeInTheDocument();
+    await user.click(within(play).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("hides the window of a running download without cancelling it", async () => {
+    const backendState = backend({ statuses: [jobStatus()] });
+    const user = renderSection();
+    const plan = await preparePlan(user);
+    await user.click(within(plan).getByRole("button", { name: "Download 1 file" }));
+    const progress = await screen.findByRole("region", { name: "Download progress" });
+    expect(progress).toHaveTextContent("does not stop the download");
+
+    // Escape and the header button only hide the window.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls("cancel_download")).toHaveLength(0);
+    await user.click(await screen.findByRole("button", { name: /^Downloading/ }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Hide (the download continues)",
+      }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(await screen.findByRole("button", { name: /^Downloading/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Hide" }));
+    expect(calls("cancel_download")).toHaveLength(0);
+
+    // The result stays available until the window is closed.
+    backendState.queue(
+      jobStatus({
+        state: "completed",
+        transfers: [transfer("machineRoms:pacman.zip", { status: "downloaded" })],
+        finishedAt: 2,
+      }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Download completed" }));
+    const result = await screen.findByRole("region", { name: "Download result" });
+    await user.click(within(result).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download completed" })).toBeNull();
   });
 
   it("keeps the normal Play button independent of the ROM manager", async () => {

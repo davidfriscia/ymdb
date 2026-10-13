@@ -90,6 +90,7 @@ pub fn run() {
             commands::media::get_media_sources,
             commands::media::save_media_sources,
             commands::media::pick_media_directory,
+            commands::media::list_media,
             commands::remote::get_remote_connections,
             commands::remote::save_remote_connection,
             commands::remote::remove_remote_connection,

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use super::config::{
     MEDIA_FILE_NAME, MediaConfig, MediaConfigStore, MediaStoreError, SourceStatus, source_status,
 };
-use super::protocol::respond;
-use super::resolve::{MediaKey, resolve};
+use super::protocol::{CategoryImages, MediaTarget, list_images, respond};
+use super::resolve::{MAX_IMAGES, MediaKey, resolve, resolve_all};
 
 fn write(path: &Path, content: &str) {
     fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
@@ -366,4 +366,148 @@ fn serves_images_by_identifiers_only() {
         );
         assert!(response.body.is_empty(), "{bad}");
     }
+}
+
+fn contents(sources: &[PathBuf], key: MediaKey<'_>) -> Vec<String> {
+    resolve_all(sources, key)
+        .into_iter()
+        .map(|media| fs::read_to_string(media.path).expect("read"))
+        .collect()
+}
+
+#[test]
+fn lists_every_image_of_a_title_in_order() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    write(&first.join("pacman.png"), "first named");
+    write(&first.join("pacman.jpg"), "first other format");
+    write(&first.join("pacman").join("0010.png"), "first 10");
+    write(&first.join("pacman").join("0002.png"), "first 2");
+    write(&first.join("pacman").join("10000.png"), "first 10000");
+    write(&first.join("pacman").join("notes.png"), "not numbered");
+    write(&first.join("pacman").join("0003.txt"), "not an image");
+    write(&first.join("pacman").join("0004.PNG"), "first 4 upper case");
+    write(&second.join("pacman.jpg"), "second named");
+    write(&second.join("pong").join("0000.png"), "second pong");
+    let sources = vec![dir.path().join("offline"), first.clone(), second];
+
+    assert_eq!(
+        contents(&sources, MediaKey::Machine("pacman")),
+        [
+            "first named",
+            "first 2",
+            "first 4 upper case",
+            "first 10",
+            "first 10000",
+            "second named"
+        ]
+    );
+    // The first image is the one served without an index.
+    assert_eq!(
+        resolved(&sources, MediaKey::Machine("pacman")).as_deref(),
+        Some("first named")
+    );
+    // Without a named image, the first screenshot comes first.
+    assert_eq!(
+        resolved(&sources, MediaKey::Machine("pong")).as_deref(),
+        Some("second pong")
+    );
+    // A directory listed twice contributes its images once.
+    let twice = vec![first.clone(), first.join(".").join("")];
+    assert_eq!(contents(&twice, MediaKey::Machine("pacman")).len(), 5);
+    assert!(contents(&sources, MediaKey::Machine("galaga")).is_empty());
+    assert!(contents(&sources, MediaKey::Machine("../first")).is_empty());
+}
+
+#[test]
+fn lists_one_image_per_source_for_software() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    write(&first.join("nes").join("smb.png"), "first smb");
+    write(
+        &first.join("nes").join("smb").join("0000.png"),
+        "not a convention",
+    );
+    write(&second.join("nes").join("smb.webp"), "second smb");
+    let key = MediaKey::Software {
+        list: "nes",
+        name: "smb",
+    };
+    assert_eq!(contents(&[first, second], key), ["first smb", "second smb"]);
+}
+
+#[test]
+fn limits_the_number_of_listed_images() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let snap = dir.path().join("snap");
+    for index in 0..MAX_IMAGES + 5 {
+        write(
+            &snap.join("pacman").join(format!("{index:04}.png")),
+            &index.to_string(),
+        );
+    }
+    let listed = contents(&[snap], MediaKey::Machine("pacman"));
+    assert_eq!(listed.len(), MAX_IMAGES);
+    assert_eq!(listed.first().map(String::as_str), Some("0"));
+}
+
+#[test]
+fn serves_and_lists_images_by_index() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let snap = dir.path().join("snap");
+    let flyers = dir.path().join("flyers");
+    write(&snap.join("pacman.png"), "named");
+    write(&snap.join("pacman").join("0000.png"), "screenshot 0");
+    write(&snap.join("pacman").join("0001.png"), "screenshot 1");
+    write(&flyers.join("pacman.jpg"), "flyer");
+    write(&snap.join("nes").join("smb.png"), "smb");
+    let mut config = config("snap", &[&snap]);
+    config.sources.insert("flyers".to_owned(), vec![flyers]);
+
+    assert_eq!(respond(&config, "/snap/machine/pacman/0").body, b"named");
+    assert_eq!(
+        respond(&config, "/snap%2Fmachine%2Fpacman%2F2").body,
+        b"screenshot 1"
+    );
+    assert_eq!(respond(&config, "/snap/machine/pacman/3").status, 404);
+    assert_eq!(respond(&config, "/snap/software/nes/smb/0").body, b"smb");
+    assert_eq!(respond(&config, "/snap/software/nes/smb/1").status, 404);
+    for bad in [
+        "/snap/machine/pacman/01",
+        "/snap/machine/pacman/-1",
+        "/snap/machine/pacman/1000",
+        "/snap/machine/pacman/",
+        "/snap/machine/pacman/1/2",
+        "/snap/software/nes/smb/x",
+    ] {
+        assert_eq!(respond(&config, bad).status, 400, "{bad}");
+    }
+
+    let machine: MediaTarget =
+        serde_json::from_str(r#"{ "kind": "machine", "name": "pacman" }"#).expect("machine");
+    assert_eq!(
+        list_images(&config, &machine),
+        [
+            CategoryImages {
+                category: "snap",
+                count: 3
+            },
+            CategoryImages {
+                category: "flyers",
+                count: 1
+            }
+        ]
+    );
+    let software: MediaTarget =
+        serde_json::from_str(r#"{ "kind": "software", "list": "nes", "name": "smb" }"#)
+            .expect("software");
+    assert_eq!(
+        serde_json::to_value(list_images(&config, &software)).expect("json"),
+        serde_json::json!([{ "category": "snap", "count": 1 }])
+    );
+    let invalid: MediaTarget =
+        serde_json::from_str(r#"{ "kind": "machine", "name": "../snap" }"#).expect("invalid");
+    assert!(list_images(&config, &invalid).is_empty());
 }

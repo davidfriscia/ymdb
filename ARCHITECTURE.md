@@ -57,6 +57,11 @@ React + TypeScript application rendered by the system WebView through Tauri.
 - `src/shared/useLoader.ts` runs an asynchronous load when its (memoized) input or
   a refresh key changes, ignores responses of superseded loads and keeps the last
   value for display while the next load runs.
+- `src/shared/Modal.tsx` is the modal window (focus moved inside, trapped and
+  returned to the opener; Escape and the backdrop close it; only the content
+  scrolls). `src/shared/icons.tsx` holds the small inline icons, drawn with
+  `currentColor` so they follow the theme; controls that show only an icon carry
+  an `aria-label` and a `title`.
 - Implemented features:
   - `mame-installation`: the MAME Installation panel (see below).
   - `catalog`: the MAME Catalog panel (catalog summary, import, progress, cancel).
@@ -68,7 +73,7 @@ React + TypeScript application rendered by the system WebView through Tauri.
     installation, `AddInstallationPanel`, `InstallationDetails` for Status).
   - `media`: **Settings → Media Sources** and `MediaProvider`, which shares the
     sources and their version with the Media Grid and `MediaGallery`, the image
-    gallery and lightbox of the detail pages (see
+    carousel, image categories and lightbox of the detail pages (see
     [Media sources](#media-sources--implemented)).
   - `launcher`: launch panels in the machine and software details, the **Launch
     Options** section of each installation on the MAME page and `LauncherProvider`,
@@ -76,7 +81,8 @@ React + TypeScript application rendered by the system WebView through Tauri.
     configuration and the session statuses (see [Launcher](#launcher--implemented)).
   - `remote`: **Settings → Remote Connections** and the **ROM Manager** section of
     each installation on the MAME page (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
-  - `roms`: Prepare Download and Download & Play in the launch panels (see
+  - `roms`: Prepare Download and Download & Play in the launch bar, with the plan in
+    a modal window (see
     [ROM Manager downloads](#rom-manager-downloads--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
@@ -247,15 +253,29 @@ what happens when the active installation changes).
   page size) lives in the browser state and the view (renderer and its options) in
   the interface preferences, so neither changes. Previous/Next move through the
   items of the current result page.
-- **Detail layout** (`DetailFrame`): a compact header (title, short name,
-  manufacturer/publisher and year, status and relation badges), then a "showcase"
-  grid with the `MediaGallery` of the record (left) and the launch controls (right),
-  then the technical sections: a side tab list (top tabs below 800 px) and the
-  selected section, keeping the selected tab when moving to the previous or next
-  result. The showcase stacks the gallery above the launch controls below 1000 px;
-  when the gallery reports that it has no image (`onAvailabilityChange`), the launch
-  controls take the whole row and the gallery shrinks to a one-line note below them.
-  Software list details have no showcase.
+- **Detail layout** (`DetailFrame`, the same for machines and software), from top
+  to bottom:
+  1. **Header**: Back to results (and Back after following a link) on the left,
+     the title centered (two lines at most, never covering the controls),
+     Previous / position / Next on the right. `CatalogBrowser` provides the
+     navigation controls (`DetailNavigation`), the views the title; the header is
+     shown while a detail loads too. Below 800 px the title moves under the controls.
+  2. **Media**: the `MediaGallery` of the record, a carousel with the image
+     categories in a column on its right (see
+     [Detail gallery](#detail-gallery)).
+  3. **Launch bar** (`LaunchBar`): the short information (short name,
+     manufacturer/publisher and year, status and relation badges; the title is not
+     repeated) and the launch actions (see
+     [Interface](#interface) of the launcher). Without launch (software lists), the
+     information alone.
+  4. **Advanced** launch options, collapsed by default.
+  5. **Technical sections**: a side tab list (top tabs below 800 px) and the
+     selected section, keeping the selected tab when moving to the previous or next
+     result.
+
+  The page scrolls as a whole; the gallery has a bounded height so that the bar and
+  the sections below stay perceptible. Software list details have no media and no
+  launch.
   - Machine: Overview (general data, parent, ROM parent, sample set, clones,
     driver and emulation features, samples), ROMs (BIOS sets, ROMs with hashes,
     regions, merge names, status), CHDs, Devices (device references linked to
@@ -274,6 +294,7 @@ what happens when the active installation changes).
     page) served by the search engine (`cloneOf`, `lists`, `softwareLists`).
   - Unresolved references (a parent or device missing from the catalog) are shown
     as plain text.
+
 - **States.** Loading, no MAME installation, no catalog for the active installation
   (with a link to the MAME page and the version menu), catalog unreadable, catalog
   not matching the installation's executable (warning banner, the
@@ -794,24 +815,35 @@ from it.
 
 #### Interface
 
-- Machine detail: a launch panel next to the media gallery with, always visible,
-  **Play**, the profile, **Prepare Download** and **Download & Play** (with the plan,
-  progress, cancellation and retry of the ROM Manager), launch errors and the status
-  of the last session (running with Stop and a confirmation, finished, failed with
-  MAME's exit code, message and output, or stopped). An **Advanced** disclosure
-  (`aria-expanded`, collapsed whenever a detail opens, with the number of overrides
-  as counter) holds **Options for this machine** (the machine override) and
-  **Command line** (the backend preview: executable, working directory, each
-  argument with its role or the level its option comes from, and the full command
-  line). Its content is mounted the first time it is opened and then kept, hidden,
-  so collapsing it keeps an unsaved override draft; no preview is requested before
-  it is opened. Devices and other non-runnable entries have no Play button. The
-  download plan keeps its own scrolling table (at most 360 px high), so long plans do
-  not stretch the panel.
-- Software detail: the same panel with a machine selector listing the candidates
-  with their relation, filter result and whether they can mount the software
-  (machines that cannot are disabled), a note on the limits of the catalog data,
-  the media assignment (one selector per compatible device) and **Options for this
+- Machine detail (`LaunchControls`): a compact launch bar below the media with the
+  short information of the record on the left and, on the right, **Prepare
+  Download** and **Download & Play** (icon buttons with an accessible name and a
+  tooltip explaining the action), the profile selector (the real profiles of the
+  installation, `Default (<name>)` first) and **Play**, the main and only filled
+  control. Launch errors and the status of the last session (running with Stop and
+  a confirmation, finished, failed with MAME's exit code, message and output, or
+  stopped) follow the bar. An **Advanced** section (`aria-expanded`, collapsed
+  whenever a detail opens, with the number of overrides as counter) holds **Options
+  for this machine** (the machine override) and **Command line** (the backend
+  preview: executable, working directory, each argument with its role or the level
+  its option comes from, and the full command line). Its content is mounted the
+  first time it is opened and then kept, hidden, so collapsing it keeps an unsaved
+  override draft; no preview is requested before it is opened. Devices and other
+  non-runnable entries have no Play button.
+- ROM downloads (`RomDownloadSection`) open a modal window (`shared/Modal.tsx`:
+  `role="dialog"`, `aria-modal`, focus moved inside, trapped and returned to the
+  opener, Escape and the backdrop close it) with the plan, the progress,
+  cancellation, retry and the result; only the content scrolls, and the actions stay
+  at the bottom of the window. Closing the window never cancels a download: while a
+  transfer runs, Escape, the header button and **Hide** only hide it, and a button
+  next to the actions (`Downloading 42%`, then the result) shows it again. A
+  download started before the page was opened is shown the same way, without
+  opening the window by itself.
+- Software detail: the same bar, with a second row holding the machine selector
+  (the candidates with their relation, filter result and whether they can mount the
+  software; machines that cannot are disabled) and the media assignment (one
+  selector per compatible device), then the badges of the chosen machine and a note
+  on the limits of the catalog data; **Advanced** holds **Options for this
   software**.
 - MAME page → Launch Options of an installation: its global options, profiles
   (create, rename, edit, make default, delete;
@@ -892,17 +924,21 @@ image in the catalog.
 Checked against the artwork collections (for example the Progetto-SNAPS packs) and
 MAME itself; images are matched by name only, not by content:
 
-| Record   | Path in a source directory                            | Origin of the convention                                    |
-| -------- | ----------------------------------------------------- | ----------------------------------------------------------- |
-| Machine  | `<machine>.<ext>`, e.g. `snap/pacman.png`             | artwork collections, one folder per category                |
-| Machine  | `<machine>/0000.png`                                  | first screenshot saved by MAME (`snapname` default `%g/%i`) |
-| Software | `<list>/<software>.<ext>`, e.g. `snap_SL/nes/smb.png` | software list artwork packs and MAME's internal interface   |
+| Record   | Path in a source directory                            | Origin of the convention                               |
+| -------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| Machine  | `<machine>.<ext>`, e.g. `snap/pacman.png`             | artwork collections, one folder per category           |
+| Machine  | `<machine>/0000.png`, `<machine>/0001.png`, …         | screenshots saved by MAME (`snapname` default `%g/%i`) |
+| Software | `<list>/<software>.<ext>`, e.g. `snap_SL/nes/smb.png` | software list artwork packs and MAME's internal UI     |
 
 - Extensions, in order: `png`, `jpg`, `jpeg`, `webp` (displayed by WebView2,
   WebKitGTK and WKWebView). Other files (`bmp`, `gif`, archives) are ignored.
-- Directories are searched in order, then extensions; the first existing file wins.
-  The rule is deterministic: an earlier directory wins even with a less preferred
-  format.
+- A category can hold several images of a title (`resolve_all`): the directories
+  are searched in order and each contributes its `<name>.<ext>` image (the first
+  existing extension) and, for machines, its numbered screenshots (1 to 8 digits,
+  sorted by number). A file reachable from two sources is listed once, and at most
+  100 images are listed per category and title. The first image is the one used
+  where a single image is needed (Media Grid, category thumbnails); the rule is
+  deterministic: an earlier directory wins even with a less preferred format.
 - Software names are only unique within a list, so the list is always part of the
   path, and a machine image is never used for a software of the same name.
 - No parent/clone fallback: a clone can be a different title (regional names, hacks,
@@ -919,9 +955,16 @@ MAME itself; images are matched by name only, not by content:
   `register_asynchronous_uri_scheme_protocol`, handled on the blocking thread pool.
   The Tauri asset protocol is not enabled, so the webview has no general file
   access.
-- Requests contain identifiers only: `<category>/machine/<machine>` or
-  `<category>/software/<list>/<software>` (`mediaUrl` in `mediaApi.ts`, built with
-  `convertFileSrc`, plus `?v=<version>` that changes when the sources are saved).
+- Requests contain identifiers only: `<category>/machine/<machine>[/<index>]` or
+  `<category>/software/<list>/<software>[/<index>]` (`mediaUrl` in `mediaApi.ts`,
+  built with `convertFileSrc`, plus `?v=<version>` that changes when the sources are
+  saved). `index` (decimal, no padding, below 100, default 0) selects an image in
+  the order of `resolve_all`; index 0 never lists the screenshot directory when a
+  named image exists.
+- `list_media` (`commands/media.rs`, `protocol::list_images`) returns, for one
+  machine or software, the categories with at least one image and their number of
+  images, in category order. It runs on the blocking pool and looks up only the
+  files of that title.
   The handler decodes the path, accepts only a registered category and MAME short
   names, and builds the candidate file names itself. There is no way to name a
   path, so traversal (`..`), absolute paths and other files are rejected (400) or not
@@ -954,42 +997,45 @@ max-age=3600` (errors are `no-store`). Missing, unreadable or unsupported files
 #### Detail gallery
 
 `src/features/media/MediaGallery.tsx` shows the artwork of one machine or software
-on its detail page. It does not resolve files itself: it builds the same
-`ymdb-media` URLs as the Media Grid (`mediaUrl`, by category and MAME names, so
-software artwork is looked up by list and software name) for each category that has
-at least one configured directory, and lets the backend resolver answer.
+on its detail page: a carousel of the images of one category, with the categories
+in a column on its right. It does not resolve files itself: `list_media` tells
+which categories have images of the title and how many, and the images are
+requested by category and index through the same `ymdb-media` URLs as the Media
+Grid (`mediaUrl`), so software artwork is looked up by list and software name.
 
-- **Availability.** Each configured category is requested once, through the
-  thumbnail `<img>` of that category (rendered hidden until it loads, never lazy so
-  that hidden images still load). `load` marks the category available, `error`
-  (missing file, unsupported or unreadable image) marks it missing and removes its
-  image. At most five requests are made per title, each checking at most
-  (sources × candidates) paths; nothing is scanned or indexed.
-- **Selection.** The main image is the first available category in registry order
-  (snapshots, title screens, flyers, cabinets, marquees). It is chosen only once
-  every preceding category is known, so a late answer never replaces the image on
-  screen. Clicking a thumbnail (a toggle button, `aria-pressed`) selects another
-  image; with a single image the thumbnail list is hidden. A main image that fails
-  to load is marked missing and the next one is shown.
+- **Categories.** Only the categories with at least one image are shown, in
+  registry order (snapshots, title screens, flyers, cabinets, marquees), each as a
+  toggle button (`aria-pressed`) with its first image as thumbnail, its label and
+  the number of images. The first one is selected initially. Selecting a category
+  shows its images only, from the first one. Below 760 px the categories become a
+  scrolling row under the carousel.
+- **Carousel.** Previous/next buttons (hidden with a single image, disabled on the
+  first and last image, no wrapping) and position dots (`aria-current`; as `n / N`
+  text above 12 images). With the focus in the carousel, the arrow keys, Home and
+  End move between images; the position is announced through a polite live region.
+  When an arrow button becomes disabled under the focus, the focus moves to the
+  image.
 - **Records.** The gallery state is keyed by the record and the media version: a
-  new record (Previous/Next, links) or saved sources start from scratch, so images of
-  the previous record are never shown; the detail views are also remounted per
-  record.
-- **Proportions.** The main image sits in a 4:3 frame (`max-height` bound to the
-  viewport) and the thumbnails in uniform boxes; every image uses `object-fit:
-contain`, so flyers, cabinets and marquees are never cropped or stretched.
-- **Lightbox.** Clicking the main image opens a modal (`role="dialog"`,
-  `aria-modal`, rendered in `document.body` through a portal) with the image at the
-  largest size that fits the window, its category and position. Arrow keys and
-  buttons move between available images (wrapping), Escape, the Close button or a
-  click on the backdrop close it. Focus moves to Close when it opens, Tab cycles
-  inside it, and focus returns to the main image when it closes; the image shown
+  new record (Previous/Next, links) or saved sources list the images again from
+  scratch, so images of the previous record are never shown while the new ones are
+  listed.
+- **Proportions.** The stage has a constant height (`clamp()` on the viewport
+  height) and keeps it between images and categories, the dot row included, so
+  nothing below moves; every image uses `object-fit: contain`, so flyers, cabinets
+  and marquees are never cropped or stretched.
+- **Lightbox.** Clicking the image opens a modal (`role="dialog"`, `aria-modal`,
+  rendered in `document.body` through a portal) with the images of the selected
+  category at the largest size that fits the window, the label and the position.
+  Arrow keys and buttons move between them (no wrapping), Escape, the Close button
+  or a click on the backdrop close it. Focus moves to Close when it opens, Tab cycles
+  inside it, and focus returns to the carousel image when it closes; the image shown
   last stays selected.
-- **States.** While the sources load: "Loading artwork…"; no configured directory or
-  no image found: a one-line note (no placeholders per category); sources that
-  cannot be read: a note.
-- Images are served with `Cache-Control: max-age=3600`, so the thumbnail, the main
-  image and the lightbox share one request per image. Images are decoded
+- **States.** While the sources or the images are listed: a placeholder of the
+  stage size; no configured directory or no image found: a one-line note, without
+  categories; listing failure: a note with Retry; an image that cannot be read: a
+  note in the stage, the other images stay available.
+- Images are served with `Cache-Control: max-age=3600`, so the thumbnail, the
+  carousel and the lightbox share one request per image. Images are decoded
   asynchronously (`decoding="async"`); no thumbnails are generated.
 
 #### Isolated data directory
@@ -1970,16 +2016,17 @@ operation; they are never stored or logged.
 
 #### Interface
 
-The launch panel of the machine and software detail views has **Prepare Download** and
-**Download & Play**. The plan shows the summary, connection issues (passphrase prompt,
+The launch bar of the machine and software detail views has **Prepare Download** and
+**Download & Play** (icon buttons with tooltips), which open a modal window. The plan shows the summary, connection issues (passphrase prompt,
 approval of an unknown identity, changed identity), plan warnings and a table of files
 (path, category, reason, status, size, local path or destination, warning, and the
 transfer status once downloading). Progress shows the current file, bytes and overall
 percentage, with **Cancel download**; the result shows the outcome, failed files with
 their errors, **Retry** and the Download & Play outcome. A plan is shown only for the
 installation and launch request it was built for; a download keeps running when the
-page or the installation changes, and the panel shows it again when its target is
-displayed (or notes that another download is running).
+page or the installation changes or the window is closed (closing hides it, never
+cancels), and a button in the launch bar shows it again when its target is displayed
+(or a note says that another download is running).
 
 #### Future HTTPS providers
 

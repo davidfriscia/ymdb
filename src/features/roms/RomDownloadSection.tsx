@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { describeCommandError, describeError } from "../../shared/ipc";
+import { DownloadIcon, DownloadPlayIcon, PlanIcon } from "../../shared/icons";
+import { Modal } from "../../shared/Modal";
 import { useInstallationScope } from "../installations/installationsContext";
 import { sameTarget, type LaunchRequest, type LaunchTarget } from "../launcher/launcherApi";
 import { useLauncher } from "../launcher/launcherContext";
@@ -39,9 +41,10 @@ interface RomDownloadSectionProps {
 }
 
 /**
- * Prepare Download and Download & Play for one launch. The plan and the
- * downloads belong to the backend: leaving the page does not stop them, and
- * coming back shows them again.
+ * Prepare Download and Download & Play for one launch: two compact buttons
+ * opening the plan, the progress and the result in a modal window. The plan
+ * and the downloads belong to the backend: hiding the window or leaving the
+ * page does not stop them, and a button next to the actions shows them again.
  */
 export function RomDownloadSection({
   request,
@@ -57,6 +60,8 @@ export function RomDownloadSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dismissedPlanId, setDismissedPlanId] = useState<string | null>(null);
+  // Whether the download window is shown; hiding it never stops a download.
+  const [open, setOpen] = useState(false);
 
   // The last download, possibly started before this page was opened.
   useEffect(() => {
@@ -111,6 +116,7 @@ export function RomDownloadSection({
     async (nextMode: Mode, nextPassphrases: Passphrases = passphrases) => {
       if (!request) return;
       setMode(nextMode);
+      setOpen(true);
       setBusy(true);
       setError(null);
       try {
@@ -142,6 +148,7 @@ export function RomDownloadSection({
     setError(null);
     try {
       await start(launchRequestOf(current));
+      close();
     } catch (startError) {
       setError(describeError(startError));
     } finally {
@@ -171,79 +178,151 @@ export function RomDownloadSection({
   }
 
   function close() {
+    setOpen(false);
     setPlan(null);
     setPassphrases({});
     setError(null);
     if (job && job.state !== "running") setDismissedPlanId(job.planId);
   }
 
+  const showModal = open && (busy || error !== null || visiblePlan !== null || ownJob !== null);
+  const percent = ownJob ? progressPercent(ownJob) : null;
+  const blockedTitle = otherRunning
+    ? `Another download is running: ${otherRunning.title} (${otherRunning.installationLabel}).`
+    : undefined;
+
   return (
     <div className="rom-download" aria-label="ROM download">
-      <div className="launch-panel__row">
-        <button
-          type="button"
-          className="button button--secondary"
-          disabled={!request || busy || running}
-          onClick={() => void prepare("download")}
-        >
-          Prepare Download
-        </button>
-        <button
-          type="button"
-          className="button button--secondary"
-          disabled={!request || busy || running}
-          onClick={() => void prepare("play")}
-        >
-          Download &amp; Play
-        </button>
-        {busy && !visiblePlan && (
-          <span className="message message--muted" role="status">
-            Looking for the files…
-          </span>
-        )}
-      </div>
+      <button
+        type="button"
+        className="button button--secondary icon-button"
+        aria-label="Prepare Download"
+        title={
+          blockedTitle ?? "Prepare Download: list the files to download, without starting MAME"
+        }
+        disabled={!request || busy || running}
+        onClick={() => void prepare("download")}
+      >
+        <PlanIcon size={18} />
+      </button>
+      <button
+        type="button"
+        className="button button--secondary icon-button"
+        aria-label="Download & Play"
+        title={blockedTitle ?? "Download & Play: download the missing files, then start MAME"}
+        disabled={!request || busy || running}
+        onClick={() => void prepare("play")}
+      >
+        <DownloadPlayIcon size={18} />
+      </button>
 
-      {error && (
-        <p className="message message--error" role="alert">
-          {error}
-        </p>
-      )}
       {otherRunning && (
-        <p className="message message--muted" role="status">
-          Another download is running: {otherRunning.title} ({otherRunning.installationLabel}).
-        </p>
+        <span className="rom-download__notice" role="status" title={blockedTitle}>
+          {blockedTitle}
+        </span>
       )}
-
+      {/* A download of this launch: shows its window again once closed. */}
       {ownJob && (
-        <JobProgress
-          job={ownJob}
-          plan={visiblePlan}
-          busy={busy}
-          onCancel={cancel}
-          onRetry={download}
-          onClose={close}
-        />
+        <button
+          type="button"
+          className="button button--secondary button--small rom-download__indicator"
+          onClick={() => {
+            setOpen(true);
+          }}
+        >
+          {ownJob.state === "running" ? (
+            <>
+              <DownloadIcon size={14} />
+              Downloading{percent !== null ? ` ${String(percent)}%` : "…"}
+            </>
+          ) : (
+            JOB_LABELS[ownJob.state]
+          )}
+        </button>
       )}
 
-      {visiblePlan && ownJob?.state !== "running" && (
-        <PlanView
-          plan={visiblePlan}
-          mode={mode}
-          busy={busy}
-          job={ownJob}
-          passphrases={passphrases}
-          onPassphrase={(connectionId, value) => {
-            setPassphrases({ ...passphrases, [connectionId]: value });
-          }}
-          onCheckAgain={() => void prepare(mode)}
-          onApprove={(issue, fingerprint) => void approve(issue, fingerprint)}
-          onDownload={() => void download(visiblePlan.id, mode === "play")}
-          onPlay={() => void playNow(visiblePlan)}
-          onClose={close}
-        />
+      {showModal && (
+        <Modal
+          title={mode === "play" ? "Download & Play" : "Download plan"}
+          // Closing never stops a running download: the window is only hidden.
+          closeLabel={running && ownJob ? "Hide (the download continues)" : undefined}
+          onClose={
+            running && ownJob
+              ? () => {
+                  setOpen(false);
+                }
+              : close
+          }
+        >
+          <div className="rom-download__dialog">
+            {busy && !visiblePlan && (
+              <p className="message message--muted" role="status">
+                Looking for the files…
+              </p>
+            )}
+            {error && (
+              <p className="message message--error" role="alert">
+                {error}
+              </p>
+            )}
+
+            {ownJob && (
+              <JobProgress
+                job={ownJob}
+                plan={visiblePlan}
+                busy={busy}
+                onCancel={cancel}
+                onRetry={download}
+                onHide={() => {
+                  setOpen(false);
+                }}
+                onClose={close}
+              />
+            )}
+
+            {visiblePlan && ownJob?.state !== "running" && (
+              <PlanView
+                plan={visiblePlan}
+                mode={mode}
+                busy={busy}
+                job={ownJob}
+                passphrases={passphrases}
+                onPassphrase={(connectionId, value) => {
+                  setPassphrases({ ...passphrases, [connectionId]: value });
+                }}
+                onCheckAgain={() => void prepare(mode)}
+                onApprove={(issue, fingerprint) => void approve(issue, fingerprint)}
+                onDownload={() => void download(visiblePlan.id, mode === "play")}
+                onPlay={() => void playNow(visiblePlan)}
+                onClose={close}
+              />
+            )}
+
+            {!busy && !visiblePlan && !ownJob && error && (
+              <div className="actions">
+                <button type="button" className="button button--secondary" onClick={close}>
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   );
+}
+
+const JOB_LABELS: Record<Exclude<DownloadJobStatus["state"], "running">, string> = {
+  completed: "Download completed",
+  completedWithWarnings: "Download completed with warnings",
+  failed: "Download failed",
+  cancelled: "Download cancelled",
+};
+
+function progressPercent(job: DownloadJobStatus): number | null {
+  return job.bytesTotal !== null && job.bytesTotal > 0
+    ? Math.min(100, Math.round((job.bytesTransferred / job.bytesTotal) * 100))
+    : null;
 }
 
 interface PlanViewProps {
@@ -278,7 +357,6 @@ function PlanView({
   const finished = job !== null && job.state !== "running";
   return (
     <section className="rom-plan" aria-label="Download plan">
-      <h3 className="rom-plan__title">Download plan</h3>
       <p className="rom-plan__summary" role="status">
         <span>{summary.present} present</span>
         <span>
@@ -556,17 +634,16 @@ interface JobProgressProps {
   busy: boolean;
   onCancel: () => Promise<void>;
   onRetry: (planId: string, play: boolean) => Promise<void>;
+  /** Hides the window of a running download, which continues. */
+  onHide: () => void;
   onClose: () => void;
 }
 
-function JobProgress({ job, plan, busy, onCancel, onRetry, onClose }: JobProgressProps) {
+function JobProgress({ job, plan, busy, onCancel, onRetry, onHide, onClose }: JobProgressProps) {
   const done = job.transfers.filter(
     (transfer) => transfer.status === "downloaded" || transfer.status === "skipped",
   ).length;
-  const percent =
-    job.bytesTotal !== null && job.bytesTotal > 0
-      ? Math.min(100, Math.round((job.bytesTransferred / job.bytesTotal) * 100))
-      : null;
+  const percent = progressPercent(job);
   const current = job.transfers.find((transfer) => transfer.status === "downloading");
   const fileName = (id: string) =>
     plan?.artifacts.find((artifact) => artifact.id === id)?.relativePath ??
@@ -600,6 +677,9 @@ function JobProgress({ job, plan, busy, onCancel, onRetry, onClose }: JobProgres
           {job.bytesTotal !== null && ` of ${shortSize(job.bytesTotal)}`}
           {percent !== null && ` (${String(percent)}%)`}
         </p>
+        <p className="message message--muted">
+          Hiding this window does not stop the download: it continues in the background.
+        </p>
         <div className="actions">
           <button
             type="button"
@@ -608,6 +688,9 @@ function JobProgress({ job, plan, busy, onCancel, onRetry, onClose }: JobProgres
             onClick={() => void onCancel()}
           >
             Cancel download
+          </button>
+          <button type="button" className="button button--secondary" onClick={onHide}>
+            Hide
           </button>
         </div>
       </section>

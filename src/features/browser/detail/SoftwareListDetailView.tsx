@@ -4,7 +4,14 @@ import { formatCount } from "../../catalog/catalogMessages";
 import type { DetailTarget } from "../browserState";
 import { getSoftwareListDetail } from "../detailApi";
 import { useInstallationScope } from "../../installations/installationsContext";
-import { DetailFrame, DetailStatus, Fields, Section, type DetailTab } from "./DetailParts";
+import {
+  DetailFrame,
+  DetailStatus,
+  Fields,
+  Section,
+  type DetailNavigation,
+  type DetailTab,
+} from "./DetailParts";
 import { RelatedList } from "./RelatedList";
 
 interface SoftwareListDetailViewProps {
@@ -15,6 +22,7 @@ interface SoftwareListDetailViewProps {
   softwareImported: boolean;
   onTab: (tab: string) => void;
   onOpen: (target: DetailTarget) => void;
+  navigation: DetailNavigation;
 }
 
 export function SoftwareListDetailView({
@@ -24,6 +32,7 @@ export function SoftwareListDetailView({
   softwareImported,
   onTab,
   onOpen,
+  navigation,
 }: SoftwareListDetailViewProps) {
   const installationId = useInstallationScope();
   const load = useCallback(
@@ -33,7 +42,9 @@ export function SoftwareListDetailView({
   const { state, reload } = useLoader(load, refreshKey);
 
   if (state.status !== "ready" || state.value === null) {
-    return <DetailStatus state={state} what="software list" onRetry={reload} />;
+    return (
+      <DetailStatus state={state} what="software list" navigation={navigation} onRetry={reload} />
+    );
   }
   const list = state.value;
   const machineCount = list.originalMachineCount + list.compatibleMachineCount;
@@ -45,6 +56,7 @@ export function SoftwareListDetailView({
 
   return (
     <DetailFrame
+      navigation={navigation}
       title={list.description ?? list.name}
       subtitle={
         <>

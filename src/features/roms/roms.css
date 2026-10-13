@@ -1,13 +1,50 @@
 /* ROM manager downloads. Colors come from the semantic theme tokens only. */
 
+/* The two compact actions sit in the launch bar; everything else is in a modal. */
 .rom-download {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .rom-download .message {
   margin: 0;
+}
+
+.rom-download__notice {
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rom-download__indicator {
+  font-variant-numeric: tabular-nums;
+}
+
+.rom-download__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 16px;
+}
+
+.rom-download__dialog .message {
+  margin: 0;
+}
+
+/* The actions stay visible at the bottom of the window while the plan scrolls. */
+.rom-download__dialog .actions {
+  position: sticky;
+  bottom: -16px;
+  margin: 0 0 -16px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
 }
 
 .rom-plan,
@@ -15,15 +52,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface);
-}
-
-.rom-plan__title {
-  margin: 0;
-  font-size: 1rem;
 }
 
 .rom-plan__summary {
@@ -41,7 +69,7 @@
 }
 
 .rom-plan__table-wrapper {
-  max-height: 360px;
+  max-height: min(360px, 45vh);
   overflow: auto;
   border: 1px solid var(--color-border);
   border-radius: 6px;
