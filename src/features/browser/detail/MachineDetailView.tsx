@@ -70,6 +70,7 @@ export function MachineDetailView({
         </>
       }
       badges={<MachineBadges machine={machine} />}
+      media={{ kind: "machine", name: machine.name }}
       actions={<MachineLaunchPanel name={machine.name} isRunnable={machine.isRunnable} />}
       tabs={tabs}
       activeTab={tab}

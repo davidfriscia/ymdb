@@ -390,6 +390,11 @@ function Workspace({
     .join(" ");
   const filterCount = countActiveFilters(query.filters);
   const top = stack.at(-1);
+  // One footer for every renderer, shown whenever there are results to page through.
+  const pageMeta =
+    !softwareUnavailable && search.state.status !== "error" && shown && shown.meta.total > 0
+      ? shown.meta
+      : null;
 
   return (
     <>
@@ -452,33 +457,47 @@ function Workspace({
             />
           )}
 
-          <div
-            ref={resultsRef}
-            className="browser__results"
-            aria-busy={search.state.status === "loading"}
-          >
-            <ActiveFilterBar scope={scope} state={state} dispatch={dispatch} />
-            {softwareUnavailable ? (
-              <div className="state-message">
-                <p className="message message--muted">
-                  The software lists have not been imported yet. Import them from the MAME page to
-                  browse software.
-                </p>
-                <button type="button" className="button" onClick={onOpenMame}>
-                  Open MAME settings
-                </button>
+          {/* Only the results scroll: the pagination footer stays visible below them. */}
+          <div className="browser__results" aria-busy={search.state.status === "loading"}>
+            <div ref={resultsRef} className="browser__scroll" data-testid="results-scroll">
+              <ActiveFilterBar scope={scope} state={state} dispatch={dispatch} />
+              {softwareUnavailable ? (
+                <div className="state-message">
+                  <p className="message message--muted">
+                    The software lists have not been imported yet. Import them from the MAME page to
+                    browse software.
+                  </p>
+                  <button type="button" className="button" onClick={onOpenMame}>
+                    Open MAME settings
+                  </button>
+                </div>
+              ) : (
+                <Results
+                  scope={scope}
+                  search={search}
+                  shown={shown}
+                  filterCount={filterCount}
+                  preferences={preferences}
+                  dispatch={dispatch}
+                  onOpen={openFromResults}
+                  onOpenMame={onOpenMame}
+                />
+              )}
+            </div>
+            {pageMeta && (
+              <div className="browser__footer">
+                <Pagination
+                  page={pageMeta.page}
+                  pageCount={pageMeta.pageCount}
+                  pageSize={pageMeta.pageSize}
+                  onPage={(page) => {
+                    dispatch({ type: "setPage", page });
+                  }}
+                  onPageSize={(pageSize) => {
+                    dispatch({ type: "setPageSize", pageSize });
+                  }}
+                />
               </div>
-            ) : (
-              <Results
-                scope={scope}
-                search={search}
-                shown={shown}
-                filterCount={filterCount}
-                preferences={preferences}
-                dispatch={dispatch}
-                onOpen={openFromResults}
-                onOpenMame={onOpenMame}
-              />
             )}
           </div>
           {showViewOptions && (
@@ -656,20 +675,6 @@ function Results({
           onOpen={onOpen}
         />
       </div>
-
-      {meta.pageCount > 1 && (
-        <Pagination
-          page={meta.page}
-          pageCount={meta.pageCount}
-          pageSize={meta.pageSize}
-          onPage={(page) => {
-            dispatch({ type: "setPage", page });
-          }}
-          onPageSize={(pageSize) => {
-            dispatch({ type: "setPageSize", pageSize });
-          }}
-        />
-      )}
     </>
   );
 }

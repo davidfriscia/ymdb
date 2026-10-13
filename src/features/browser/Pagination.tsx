@@ -71,6 +71,9 @@ export function Pagination({ page, pageCount, pageSize, onPage, onPageSize }: Pa
         </button>
       </div>
       <div className="pagination__options">
+        <span className="pagination__status">
+          Page {page + 1} of {Math.max(pageCount, 1)}
+        </span>
         <label className="pagination__option">
           <span>Per page</span>
           <select

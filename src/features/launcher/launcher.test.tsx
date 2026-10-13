@@ -181,6 +181,14 @@ function renderWithLauncher(children: ReactNode, showCommandPreview = false) {
   return { user, onShowCommandPreviewChange, view };
 }
 
+/** Expands the Advanced section, which holds the overrides and the command line. */
+async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+  const advanced = await screen.findByRole("button", { name: /^Advanced/ });
+  expect(advanced).toHaveAttribute("aria-expanded", "false");
+  await user.click(advanced);
+  expect(advanced).toHaveAttribute("aria-expanded", "true");
+}
+
 async function findPlay() {
   const play = await screen.findByRole("button", { name: "Play" });
   await waitFor(() => {
@@ -384,6 +392,7 @@ describe("launcher", () => {
         <MachineLaunchPanel name="pacman" isRunnable />,
       );
       await findPlay();
+      await openAdvanced(user);
 
       await user.click(screen.getByRole("button", { name: "Command line" }));
       expect(onShowCommandPreviewChange).toHaveBeenCalledWith(true);
@@ -414,10 +423,50 @@ describe("launcher", () => {
           },
         },
       });
-      renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
+      await openAdvanced(user);
       expect(
         await screen.findByText("This MAME installation is no longer registered."),
       ).toBeInTheDocument();
+    });
+
+    it("keeps the overrides and the command line in a collapsed Advanced section", async () => {
+      launcherBackend({
+        config: launchConfig({ machineOverrides: { pacman: { window: false } } }),
+      });
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
+      await findPlay();
+      // The main actions are always visible; the advanced ones are collapsed.
+      expect(screen.getByLabelText("Profile")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Prepare Download" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Download & Play" })).toBeVisible();
+      const advanced = screen.getByRole("button", { name: /^Advanced/ });
+      expect(advanced).toHaveAttribute("aria-expanded", "false");
+      // The number of overrides stays visible on the collapsed section.
+      expect(advanced).toHaveTextContent("1");
+      expect(screen.queryByText("Executable")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Options for this machine/ })).toBeNull();
+      // No preview is built while the section has never been opened.
+      expect(calls("preview_launch")).toHaveLength(0);
+
+      await user.click(advanced);
+      expect(await screen.findByText("Executable")).toBeVisible();
+      expect(screen.getByText("Working directory")).toBeVisible();
+
+      // Collapsing keeps an unsaved draft of the overrides.
+      await user.click(screen.getByRole("button", { name: /Options for this machine/ }));
+      const editor = screen.getByRole("group", { name: "Options for this machine" });
+      await user.selectOptions(within(editor).getByLabelText("Add option"), "volume");
+      await user.click(advanced);
+      expect(advanced).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("Executable")).not.toBeVisible();
+      await user.click(advanced);
+      expect(
+        within(screen.getByRole("group", { name: "Options for this machine" })).getByRole(
+          "spinbutton",
+          { name: /^Volume/ },
+        ),
+      ).toBeVisible();
     });
   });
 
@@ -426,6 +475,7 @@ describe("launcher", () => {
       const fake = launcherBackend();
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
       await findPlay();
+      await openAdvanced(user);
       await screen.findByLabelText("Full command line");
       const previews = calls("preview_launch").length;
 
@@ -460,6 +510,7 @@ describe("launcher", () => {
       });
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
       await findPlay();
+      await openAdvanced(user);
       await user.click(screen.getByRole("button", { name: "Options for this machine" }));
       const editor = screen.getByRole("group", { name: "Options for this machine" });
 
@@ -525,6 +576,7 @@ describe("launcher", () => {
       );
       expect(await screen.findByLabelText("Machine")).toHaveValue("apple2e");
       expect(screen.getByText(/Preselected/)).toBeInTheDocument();
+      await openAdvanced(user);
       expect(await screen.findByText("The software may not work fully.")).toBeInTheDocument();
 
       const media = screen.getByRole("group", { name: "Media" });

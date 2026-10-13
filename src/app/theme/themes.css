@@ -40,6 +40,7 @@
   --color-error-bg: #fbe5e3;
 
   --shadow-elevated: 0 4px 16px rgb(20 30 50 / 12%);
+  --color-overlay: rgb(15 20 30 / 82%);
 }
 
 :root[data-theme="dark"] {
@@ -77,4 +78,5 @@
   --color-error-bg: #3d1d1b;
 
   --shadow-elevated: 0 4px 16px rgb(0 0 0 / 45%);
+  --color-overlay: rgb(0 0 0 / 85%);
 }

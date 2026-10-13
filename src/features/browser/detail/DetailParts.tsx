@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { describeError } from "../../../shared/ipc";
 import type { LoadState } from "../../../shared/useLoader";
+import { MediaGallery } from "../../media/MediaGallery";
+import type { MediaTarget } from "../../media/mediaApi";
 import type { RecordLink } from "../detailApi";
 
 export interface DetailTab {
@@ -14,7 +16,9 @@ interface DetailFrameProps {
   title: string;
   subtitle: ReactNode;
   badges?: ReactNode;
-  /** Shown below the header, for example the launch controls. */
+  /** The record whose artwork is shown in a gallery next to the actions. */
+  media?: MediaTarget;
+  /** Shown next to the media, for example the launch controls. */
   actions?: ReactNode;
   tabs: DetailTab[];
   activeTab: string;
@@ -22,11 +26,16 @@ interface DetailFrameProps {
   children: ReactNode;
 }
 
-/** Title, tabs and content of a detail view. */
+/**
+ * Header, media and actions, then the tabs and content of a detail view.
+ * The media and the actions share a row when the window is wide enough; a
+ * gallery without images leaves the row to the actions.
+ */
 export function DetailFrame({
   title,
   subtitle,
   badges,
+  media,
   actions,
   tabs,
   activeTab,
@@ -34,6 +43,7 @@ export function DetailFrame({
   children,
 }: DetailFrameProps) {
   const active = tabs.some((tab) => tab.id === activeTab) ? activeTab : "overview";
+  const [hasImages, setHasImages] = useState(true);
   return (
     <article className="detail" aria-labelledby="detail-title">
       <header className="detail__header">
@@ -43,7 +53,20 @@ export function DetailFrame({
         <p className="detail__subtitle">{subtitle}</p>
         {badges && <p className="detail__badges">{badges}</p>}
       </header>
-      {actions}
+      {(media ?? actions) && (
+        <div
+          className="detail__showcase"
+          data-media={media && hasImages ? "shown" : "none"}
+          data-testid="detail-showcase"
+        >
+          {media && (
+            <div className="detail__media">
+              <MediaGallery target={media} title={title} onAvailabilityChange={setHasImages} />
+            </div>
+          )}
+          {actions && <div className="detail__launch">{actions}</div>}
+        </div>
+      )}
       <div className="detail__body">
         <div className="detail__tabs" role="tablist" aria-label="Sections">
           {tabs.map((tab) => (

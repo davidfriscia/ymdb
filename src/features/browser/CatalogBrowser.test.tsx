@@ -211,6 +211,13 @@ function renderBrowser(props: Partial<ComponentProps<typeof CatalogBrowser>> = {
 }
 
 const results = () => within(screen.getByRole("list", { name: "Results" }));
+/** The only scrolling element of the results column. */
+const resultsScroll = () => screen.getByTestId("results-scroll");
+
+function required<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("missing element");
+  return value;
+}
 
 async function openCard(text: string) {
   const user = userEvent.setup();
@@ -478,6 +485,95 @@ describe("CatalogBrowser", () => {
       });
       // Facets do not depend on the page: they are not recounted.
       expect(facetRequests()).toHaveLength(facetSearches);
+    });
+
+    it("keeps one pagination footer below the scrolling results, for every renderer", async () => {
+      commands({ search_catalog_machines: machineSearch(MACHINES, { total: 120 }) });
+      const { rerender } = renderBrowser();
+      await screen.findByText("1–3 of 120 machines");
+
+      for (const renderer of ["classicCards", "mediaGrid"] as const) {
+        rerender({ preferences: { ...PREFERENCES, renderer } });
+        const navigations = screen.getAllByRole("navigation", { name: "Pagination" });
+        expect(navigations).toHaveLength(1);
+        const [pagination] = navigations;
+        // The footer is outside the scrolling area, next to it in the results column.
+        expect(resultsScroll()).not.toContainElement(required(pagination));
+        expect(pagination?.closest(".browser__footer")?.parentElement).toBe(
+          resultsScroll().parentElement,
+        );
+        expect(within(required(pagination)).getByText("Page 1 of 3")).toBeInTheDocument();
+        expect(resultsScroll()).toContainElement(screen.getByRole("list", { name: "Results" }));
+      }
+    });
+
+    it("shows the footer for a single page and hides it without results", async () => {
+      let total = 3;
+      commands({
+        search_catalog_machines: (args) =>
+          machineSearch(total === 0 ? [] : MACHINES, { total })(args),
+      });
+      const { user } = renderBrowser({ debounceMs: 60_000 });
+      await screen.findByText("1–3 of 3 machines");
+      const pagination = within(screen.getByRole("navigation", { name: "Pagination" }));
+      expect(pagination.getByText("Page 1 of 1")).toBeInTheDocument();
+      expect(pagination.getByRole("button", { name: "Previous" })).toBeDisabled();
+      expect(pagination.getByRole("button", { name: "Next" })).toBeDisabled();
+      expect(pagination.getByLabelText("Per page")).toBeEnabled();
+
+      total = 0;
+      await user.type(screen.getByLabelText("Search text"), "zzz{Enter}");
+      expect(await screen.findByText("No machines found")).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
+    });
+
+    it("returns the results to the top on a new page, leaving filters and view options", async () => {
+      commands({ search_catalog_machines: machineSearch(MACHINES, { total: 400 }) });
+      const { user } = renderBrowser({
+        preferences: { ...PREFERENCES, viewOptionsVisible: true },
+      });
+      await screen.findByText("1–3 of 400 machines");
+      await user.click(await screen.findByRole("checkbox", { name: /Namco/ }));
+      await waitFor(() => {
+        expect(lastRequest()?.filters?.manufacturers).toEqual(["Namco"]);
+      });
+      const filters = screen.getByRole("complementary", { name: "Filters" });
+      const viewOptions = screen.getByRole("complementary", { name: "View options" });
+
+      const steps: [string, () => Promise<void>, Partial<MachineSearchRequest>][] = [
+        [
+          "page number",
+          () => user.click(screen.getByRole("button", { name: "Page 2" })),
+          { page: 1 },
+        ],
+        ["next", () => user.click(screen.getByRole("button", { name: "Next" })), { page: 2 }],
+        [
+          "go to",
+          async () => {
+            await user.type(screen.getByLabelText("Go to"), "7");
+            await user.click(screen.getByRole("button", { name: "Go" }));
+          },
+          { page: 6 },
+        ],
+        [
+          "page size",
+          () => user.selectOptions(screen.getByLabelText("Per page"), "200"),
+          { page: 0, pageSize: 200 },
+        ],
+      ];
+      for (const [step, act, expected] of steps) {
+        resultsScroll().scrollTop = 900;
+        filters.scrollTop = 250;
+        await act();
+        await waitFor(() => {
+          expect(lastRequest(), step).toMatchObject(expected);
+        });
+        expect(resultsScroll().scrollTop, step).toBe(0);
+        expect(filters.scrollTop, step).toBe(250);
+        expect(screen.getByRole("checkbox", { name: /Namco/ })).toBeChecked();
+        expect(screen.getByRole("complementary", { name: "View options" })).toBe(viewOptions);
+      }
+      expect(lastRequest()?.filters?.manufacturers).toEqual(["Namco"]);
     });
   });
 
@@ -769,6 +865,102 @@ describe("CatalogBrowser", () => {
       });
     });
 
+    it("returns to the same page, view and scroll position after browsing details", async () => {
+      commands({
+        search_catalog_machines: machineSearch(MACHINES, { total: 400 }),
+        get_machine_detail: (args) =>
+          machineDetail(String(args.name), {
+            description: MACHINES.find((entry) => entry.name === args.name)?.description,
+          }),
+      });
+      const preferences: BrowserPreferences = {
+        ...PREFERENCES,
+        renderer: "mediaGrid",
+        rendererOptions: {
+          ...PREFERENCES.rendererOptions,
+          mediaGrid: { ...PREFERENCES.rendererOptions.mediaGrid, tileSize: 320 },
+        },
+      };
+      const { user } = renderBrowser({ preferences, debounceMs: 60_000 });
+      await user.type(await screen.findByLabelText("Search text"), "pac{Enter}");
+      await user.selectOptions(screen.getByLabelText("Sort by"), "Year");
+      await user.click(await screen.findByRole("checkbox", { name: /Namco/ }));
+      await user.selectOptions(screen.getByLabelText("Per page"), "100");
+      await user.click(await screen.findByRole("button", { name: "Page 3" }));
+      await waitFor(() => {
+        expect(lastRequest()).toMatchObject({ text: "pac", sort: "year", page: 2, pageSize: 100 });
+      });
+      const searches = browserRequests().length;
+      resultsScroll().scrollTop = 640;
+      const filters = screen.getByRole("complementary", { name: "Filters" });
+      filters.scrollTop = 120;
+
+      await user.click(screen.getByRole("button", { name: "Ms. Pac-Man (mspacman)" }));
+      expect(await screen.findByRole("heading", { name: "Ms. Pac-Man" })).toBeInTheDocument();
+      // Browsers reset the position of hidden elements: the saved one is restored.
+      resultsScroll().scrollTop = 0;
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      expect(await screen.findByRole("heading", { name: "Galaga" })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Back to results" }));
+
+      expect(resultsScroll().scrollTop).toBe(640);
+      expect(filters.scrollTop).toBe(120);
+      expect(screen.getByLabelText("Search text")).toHaveValue("pac");
+      expect(screen.getByLabelText("Sort by")).toHaveValue("year");
+      expect(screen.getByRole("checkbox", { name: /Namco/ })).toBeChecked();
+      expect(screen.getByLabelText("Per page")).toHaveValue("100");
+      expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(screen.getByRole("list", { name: "Results" })).toHaveStyle("--tile-size: 320px");
+      // The results were kept: nothing was searched again.
+      expect(browserRequests()).toHaveLength(searches);
+    });
+
+    it("shows the artwork next to the launch controls, above the technical details", async () => {
+      commands({
+        get_media_sources: () =>
+          mediaSourcesView({ snap: ["C:/Artwork/snap"], flyers: ["C:/Artwork/flyers"] }),
+        get_machine_detail: (args) =>
+          machineDetail(String(args.name), {
+            description: MACHINES.find((entry) => entry.name === args.name)?.description,
+          }),
+      });
+      const { user } = renderBrowser();
+      await openCard("Pac-Man");
+      await screen.findByRole("heading", { name: "Pac-Man" });
+
+      const showcase = screen.getByTestId("detail-showcase");
+      const gallery = within(showcase).getByRole("region", { name: "Media" });
+      const launch = await within(showcase).findByRole("region", { name: "Launch" });
+      expect(showcase).toHaveAttribute("data-media", "shown");
+      expect(
+        gallery.compareDocumentPosition(launch) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        showcase.compareDocumentPosition(screen.getByRole("tablist", { name: "Sections" })),
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const snap = gallery.querySelector('img[data-category="snap"]');
+      expect(snap).toHaveAttribute("src", "ymdb-media://localhost/snap%2Fmachine%2Fpacman?v=0");
+      fireEvent.load(required(snap));
+      fireEvent.load(required(gallery.querySelector('img[data-category="flyers"]')));
+      expect(within(gallery).getByRole("button", { name: "Enlarge snapshots" })).toBeVisible();
+
+      // Next title: its own images, and without any the launcher takes the row.
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      await screen.findByRole("heading", { name: "Ms. Pac-Man" });
+      const next = within(screen.getByTestId("detail-showcase"));
+      expect(next.queryByRole("button", { name: /^Enlarge/ })).toBeNull();
+      for (const image of document.querySelectorAll(".detail__media img")) {
+        expect(image.getAttribute("src")).toContain("mspacman");
+        fireEvent.error(image);
+      }
+      expect(screen.getByTestId("detail-showcase")).toHaveAttribute("data-media", "none");
+      expect(next.getByText(/No artwork was found/)).toBeInTheDocument();
+      expect(next.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    });
+
     it("shows the detail sections", async () => {
       commands({
         get_machine_detail: () =>
@@ -920,12 +1112,20 @@ describe("CatalogBrowser", () => {
         list: "nes",
         name: "smb",
       });
+      // The artwork of a software is found by its list and name.
+      const gallery = within(screen.getByRole("region", { name: "Media" }));
+      const snap = document.querySelector('.detail__media img[data-category="snap"]');
+      expect(snap).toHaveAttribute("src", "ymdb-media://localhost/snap%2Fsoftware%2Fnes%2Fsmb?v=0");
+      fireEvent.load(required(snap));
+      expect(gallery.getByRole("img", { name: "Super Mario Bros.: Snapshots" })).toBeVisible();
       await user.click(screen.getByRole("tab", { name: /Parts/ }));
       expect(screen.getByText("smb.prg")).toBeInTheDocument();
 
       await user.click(screen.getByRole("tab", { name: "Overview" }));
       await user.click(screen.getByRole("button", { name: "nes list (nes)" }));
       expect(await screen.findByRole("heading", { name: "NES carts" })).toBeInTheDocument();
+      // A software list has no artwork of its own.
+      expect(screen.queryByRole("region", { name: "Media" })).toBeNull();
     });
 
     it("explains that software lists are not imported", async () => {

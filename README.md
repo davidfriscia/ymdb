@@ -283,14 +283,20 @@ the active MAME installation:
   show the title, the technical name and the status badge). Changing the view never
   changes the search, filters, sort or page. Both side panels can be hidden
   independently; the results then use the whole width. The number of columns adapts
-  to the window. Pages hold 25 to 200 results, with page numbers and **Go to**.
+  to the window. Pages hold 25 to 200 results. Only the results scroll: the
+  toolbar stays at the top, each side panel scrolls on its own and the pagination
+  bar (**Previous**/**Next**, page numbers, "Page N of M", **Per page** and **Go to**)
+  stays visible below the results. A new page, search, filter or sort shows the
+  results from the top, without moving the filters.
 - Click a card or tile (or press Enter on it) to open its detail: machines show general data, relations, emulation
   status, ROMs, CHDs, devices, displays, controls, chips and software lists;
   software shows its list, parts, ROMs and disks and the machines declaring its list;
   software lists show their software and machines. Parents, clones, devices and
-  software lists are links. **Back** returns to the previous detail and **Back to
-  results** to the results, with the search, filters, page and scroll position
-  unchanged; **Previous**/**Next** move through the current page.
+  software lists are links. Machine and software details open with their artwork
+  next to the launch controls (see [Artwork and screenshots](#artwork-and-screenshots)),
+  the technical sections below. **Back** returns to the previous detail and **Back to
+  results** to the results, with the search, filters, sort, view, page size, page and
+  scroll position unchanged; **Previous**/**Next** move through the current page.
 - ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
   and a software list declared by a machine does not guarantee compatibility.
 
@@ -323,7 +329,16 @@ Images are found by name:
   software list snapshots (such as `snap_SL`) can be added to Snapshots.
 
 When a title has no image, its tile shows a placeholder: YMDB never shows the image
-of another title, not even of the parent of a clone. Zipped collections are not
+of another title, not even of the parent of a clone.
+
+The detail page of a machine or software shows a gallery of the images found for it
+in every configured category: the first one in the order Snapshots, Title screens,
+Flyers, Cabinets, Marquees as main image, the others as thumbnails (click one to show
+it). Images keep their proportions (a flyer stays vertical, a marquee wide). Click
+the main image to enlarge it: the arrow keys (or the arrow buttons) move between the
+images, **Esc** or **Close** closes it. Categories without an image are simply
+left out; when there is none at all, the launch controls take the whole width. On
+narrower windows the gallery is shown above the launch controls. Zipped collections are not
 supported yet. Media sources are shared by all MAME installations: switching the MAME
 version uses the same directories (a title missing from one version's catalog is
 simply not listed).
@@ -465,8 +480,12 @@ are missing, MAME refuses to start and YMDB shows its message and output.
   (for example the disks of a multi-disk game) is mounted on a media device, for
   example `mame apple2e -flop1 apple2_flop_orig:ultima4:flop1 -flop2
 apple2_flop_orig:ultima4:flop2`; the assignment can be changed before launching.
-- **Command line** shows the exact command that **Play** runs, with the origin of
-  every option.
+- **Play**, the **Profile**, **Prepare Download** and **Download & Play** are always
+  visible. The **Advanced** section (collapsed when a detail opens; its counter shows
+  the number of options set for the title) holds **Options for this machine** or
+  **Options for this software** and **Command line**, which shows the exact command
+  that **Play** runs (executable, working directory and the origin of every option).
+  Closing the section keeps unsaved options.
 - While MAME runs, the detail page shows the session and the installation it was
   started from; **Stop** terminates MAME after a confirmation (unsaved progress and
   NVRAM changes are lost). Closing YMDB or switching the MAME version never closes
@@ -584,9 +603,10 @@ Implemented:
   (see [MAME catalog](#mame-catalog)).
 - Catalog search engine: FTS5 full-text search, combinable filters, facets with
   counts, sorting and pagination (see [Catalog search](#catalog-search)).
-- Catalog browser with filters, facets, card results, pagination and machine,
+- Catalog browser with filters, facets, card results, a persistent pagination bar and machine,
   software and software list detail views (see [Browsing the catalog](#browsing-the-catalog)).
-- Media Grid view with local artwork and screenshots from configurable media
+- Media Grid view and detail page galleries (with a lightbox) of local artwork and
+  screenshots from configurable media
   sources (see [Artwork and screenshots](#artwork-and-screenshots)).
 - MAME launcher: machines and software, with machine selection, part assignment,
   command line preview, global options, launch profiles, machine and software

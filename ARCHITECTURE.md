@@ -67,7 +67,8 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `installations`: `InstallationsProvider`, the MAME page (`MamePage`: navigation by
     installation, `AddInstallationPanel`, `InstallationDetails` for Status).
   - `media`: **Settings → Media Sources** and `MediaProvider`, which shares the
-    sources and their version with the Media Grid (see
+    sources and their version with the Media Grid and `MediaGallery`, the image
+    gallery and lightbox of the detail pages (see
     [Media sources](#media-sources--implemented)).
   - `launcher`: launch panels in the machine and software details, the **Launch
     Options** section of each installation on the MAME page and `LauncherProvider`,
@@ -122,6 +123,7 @@ results and open detail when their sum changes.
   `--color-border`/`-strong`, `--color-accent`/`-hover`, `--color-hover`,
   `--color-selected`, `--color-focus`, `--color-disabled-bg`/`-text`,
   `--color-success`/`-warning`/`-error` and their `-bg` variants,
+  `--color-overlay` (backdrop of modal views such as the lightbox),
   `--shadow-elevated`). Stylesheets use only these tokens.
 - `src/app/theme/themes.css` defines the complete token set of each theme under
   `:root[data-theme="<id>"]`; `themes.ts` registers the themes (`light`, `dark`) and
@@ -186,9 +188,18 @@ what happens when the active installation changes).
   View Options panel (right). The **Filters** and **View** toolbar buttons
   (`aria-pressed`) show or hide each panel independently; the body grid only has
   columns for visible panels, so the results take the freed width. Hiding a panel
-  keeps filters, search, page and scroll, and never searches again. A new search,
-  filter, sort or page scrolls the results back to the top. Below 1100 px
+  keeps filters, search, page and scroll, and never searches again. Below 1100 px
   both panels narrow; below 800 px they stack above the results.
+- **Scrolling.** The page itself never scrolls: `.browser` fills the shell's main
+  area, the toolbar keeps its height and the body grid takes the rest
+  (`min-height: 0` on every flex/grid level). Each side panel scrolls on its own.
+  The results column (`.browser__results`) is a flex column with the only
+  scrolling element of the results (`.browser__scroll`: active filter chips,
+  summary, renderer output) above a footer (`.browser__footer`) holding the
+  pagination, which never scrolls; no fixed positioning or window-based heights are
+  used. A new request (search, filter, sort, page or page size) sets the scroll of
+  `.browser__scroll` back to the top before the new results arrive, without touching
+  the filter or view panels.
 - **Renderers.** Results are displayed by a renderer implementing
   `ResultRendererProps` (`renderers/types.ts`): the items of the current page (the
   same search DTOs for every renderer), the renderer's options and `onOpen(index)`.
@@ -221,15 +232,30 @@ what happens when the active installation changes).
   placeholder ("No snapshots"), only for that tile. When the category has no
   directory, no image is requested and a note points to Settings.
 - Pages hold at most 200 items, so no virtualization is used.
-- **Pagination.** Page numbers around the current page, previous/next, page size
-  (25, 50, 100, 200) and "Go to".
+- **Pagination.** Page numbers around the current page, previous/next, "Page N of
+  M", page size (25, 50, 100, 200) and "Go to". The workspace renders one
+  `Pagination` in the results footer for every renderer, whenever the current
+  results have at least one match (also for a single page, so the page size stays
+  reachable); it is hidden without results, on search errors and when software
+  lists are not imported. Its controls wrap to several rows on narrow windows.
 - **Details.** Opening a result pushes a detail entry on the stack; links inside a
   detail push further entries. "Back" pops one entry, "Back to results" clears the
   stack. Results stay mounted (hidden) so the query and results are unchanged; the
-  results scroll position is saved when a detail opens and restored on return.
-  Previous/Next move through the items of the current result page. Each detail view
-  has a side tab list (top tabs below 800 px) and keeps the selected tab when moving
-  to the previous or next result.
+  results scroll position (of `.browser__scroll`) is saved when a detail opens and
+  restored when the results are shown again; the results stayed rendered meanwhile,
+  so the position applies to the same content. The query (text, filters, sort, page,
+  page size) lives in the browser state and the view (renderer and its options) in
+  the interface preferences, so neither changes. Previous/Next move through the
+  items of the current result page.
+- **Detail layout** (`DetailFrame`): a compact header (title, short name,
+  manufacturer/publisher and year, status and relation badges), then a "showcase"
+  grid with the `MediaGallery` of the record (left) and the launch controls (right),
+  then the technical sections: a side tab list (top tabs below 800 px) and the
+  selected section, keeping the selected tab when moving to the previous or next
+  result. The showcase stacks the gallery above the launch controls below 1000 px;
+  when the gallery reports that it has no image (`onAvailabilityChange`), the launch
+  controls take the whole row and the gallery shrinks to a one-line note below them.
+  Software list details have no showcase.
   - Machine: Overview (general data, parent, ROM parent, sample set, clones,
     driver and emulation features, samples), ROMs (BIOS sets, ROMs with hashes,
     regions, merge names, status), CHDs, Devices (device references linked to
@@ -768,12 +794,20 @@ from it.
 
 #### Interface
 
-- Machine detail: a launch panel with **Play**, the profile, **Command line**
-  (the backend preview: executable, working directory, each argument with its role
-  or the level its option comes from, and the full command line), **Options for
-  this machine** (the machine override) and the status of the last session (running
-  with Stop and a confirmation, finished, failed with MAME's exit code, message and
-  output, or stopped). Devices and other non-runnable entries have no Play button.
+- Machine detail: a launch panel next to the media gallery with, always visible,
+  **Play**, the profile, **Prepare Download** and **Download & Play** (with the plan,
+  progress, cancellation and retry of the ROM Manager), launch errors and the status
+  of the last session (running with Stop and a confirmation, finished, failed with
+  MAME's exit code, message and output, or stopped). An **Advanced** disclosure
+  (`aria-expanded`, collapsed whenever a detail opens, with the number of overrides
+  as counter) holds **Options for this machine** (the machine override) and
+  **Command line** (the backend preview: executable, working directory, each
+  argument with its role or the level its option comes from, and the full command
+  line). Its content is mounted the first time it is opened and then kept, hidden,
+  so collapsing it keeps an unsaved override draft; no preview is requested before
+  it is opened. Devices and other non-runnable entries have no Play button. The
+  download plan keeps its own scrolling table (at most 360 px high), so long plans do
+  not stretch the panel.
 - Software detail: the same panel with a machine selector listing the candidates
   with their relation, filter result and whether they can mount the software
   (machines that cannot are disabled), a note on the limits of the catalog data,
@@ -916,6 +950,47 @@ max-age=3600` (errors are `no-store`). Missing, unreadable or unsupported files
   shares were not measured; requests to an offline share only cost the failed
   look-ups of that share.
 - No thumbnails are generated; images are served as they are.
+
+#### Detail gallery
+
+`src/features/media/MediaGallery.tsx` shows the artwork of one machine or software
+on its detail page. It does not resolve files itself: it builds the same
+`ymdb-media` URLs as the Media Grid (`mediaUrl`, by category and MAME names, so
+software artwork is looked up by list and software name) for each category that has
+at least one configured directory, and lets the backend resolver answer.
+
+- **Availability.** Each configured category is requested once, through the
+  thumbnail `<img>` of that category (rendered hidden until it loads, never lazy so
+  that hidden images still load). `load` marks the category available, `error`
+  (missing file, unsupported or unreadable image) marks it missing and removes its
+  image. At most five requests are made per title, each checking at most
+  (sources × candidates) paths; nothing is scanned or indexed.
+- **Selection.** The main image is the first available category in registry order
+  (snapshots, title screens, flyers, cabinets, marquees). It is chosen only once
+  every preceding category is known, so a late answer never replaces the image on
+  screen. Clicking a thumbnail (a toggle button, `aria-pressed`) selects another
+  image; with a single image the thumbnail list is hidden. A main image that fails
+  to load is marked missing and the next one is shown.
+- **Records.** The gallery state is keyed by the record and the media version: a
+  new record (Previous/Next, links) or saved sources start from scratch, so images of
+  the previous record are never shown; the detail views are also remounted per
+  record.
+- **Proportions.** The main image sits in a 4:3 frame (`max-height` bound to the
+  viewport) and the thumbnails in uniform boxes; every image uses `object-fit:
+contain`, so flyers, cabinets and marquees are never cropped or stretched.
+- **Lightbox.** Clicking the main image opens a modal (`role="dialog"`,
+  `aria-modal`, rendered in `document.body` through a portal) with the image at the
+  largest size that fits the window, its category and position. Arrow keys and
+  buttons move between available images (wrapping), Escape, the Close button or a
+  click on the backdrop close it. Focus moves to Close when it opens, Tab cycles
+  inside it, and focus returns to the main image when it closes; the image shown
+  last stays selected.
+- **States.** While the sources load: "Loading artwork…"; no configured directory or
+  no image found: a one-line note (no placeholders per category); sources that
+  cannot be read: a note.
+- Images are served with `Cache-Control: max-age=3600`, so the thumbnail, the main
+  image and the lightbox share one request per image. Images are decoded
+  asynchronously (`decoding="async"`); no thumbnails are generated.
 
 #### Isolated data directory
 

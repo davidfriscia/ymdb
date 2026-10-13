@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { describeError } from "../../shared/ipc";
 import { CommandPreview } from "./CommandPreview";
 import type {
@@ -27,8 +27,9 @@ interface LaunchControlsProps {
 }
 
 /**
- * Play button, profile, overrides, command line preview and session status,
- * for the installation whose catalog is browsed.
+ * Play button, profile, ROM downloads and session status, for the
+ * installation whose catalog is browsed, with the overrides and the command
+ * line preview in a collapsed Advanced section.
  */
 export function LaunchControls({ target, request, children }: LaunchControlsProps) {
   const installationId = useInstallationScope();
@@ -38,6 +39,10 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
   // while switching.
   const view = launcher.view?.installationId === installationId ? launcher.view : null;
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  // Mounted once opened, so that closing the section keeps an unsaved draft.
+  const [advancedOpened, setAdvancedOpened] = useState(false);
+  const advancedId = useId();
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,28 +121,6 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
               ))}
           </select>
         </label>
-        <button
-          type="button"
-          className="button button--secondary"
-          aria-pressed={showCommandPreview}
-          onClick={() => {
-            setShowCommandPreview(!showCommandPreview);
-          }}
-        >
-          Command line
-        </button>
-        <button
-          type="button"
-          className="button button--secondary"
-          aria-expanded={editing}
-          disabled={!view}
-          onClick={() => {
-            setEditing(!editing);
-          }}
-        >
-          Options for {overrideLabel}
-          {overrideCount > 0 && <span className="counter">{overrideCount}</span>}
-        </button>
       </div>
 
       <RomDownloadSection request={fullRequest} target={target} />
@@ -160,26 +143,85 @@ export function LaunchControls({ target, request, children }: LaunchControlsProp
 
       {session && <SessionStatus session={session} onStop={stop} />}
 
-      {editing && view && (
-        <OverrideEditor
-          key={launcher.configVersion}
-          label={`Options for ${overrideLabel}`}
-          installationId={installationId}
-          definitions={view.definitions}
-          config={view.config}
-          target={target}
-          onClose={() => {
-            setEditing(false);
+      {/* Overrides and the command line: collapsed by default, below the main actions. */}
+      <div className="launch-panel__advanced">
+        <button
+          type="button"
+          className="launch-panel__disclosure"
+          aria-expanded={advanced}
+          aria-controls={advancedId}
+          onClick={() => {
+            setAdvanced(!advanced);
+            setAdvancedOpened(true);
           }}
-        />
-      )}
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+            <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.75" />
+          </svg>
+          Advanced
+          {overrideCount > 0 && (
+            <span
+              className="counter"
+              title={`${String(overrideCount)} options for ${overrideLabel}`}
+            >
+              {overrideCount}
+            </span>
+          )}
+        </button>
+        <div id={advancedId} className="launch-panel__advanced-body" hidden={!advanced}>
+          {advancedOpened && (
+            <>
+              <div className="launch-panel__row">
+                <button
+                  type="button"
+                  className="button button--secondary button--small"
+                  aria-expanded={editing}
+                  disabled={!view}
+                  onClick={() => {
+                    setEditing(!editing);
+                  }}
+                >
+                  Options for {overrideLabel}
+                  {overrideCount > 0 && <span className="counter">{overrideCount}</span>}
+                </button>
+                <button
+                  type="button"
+                  className="button button--secondary button--small"
+                  aria-pressed={showCommandPreview}
+                  onClick={() => {
+                    setShowCommandPreview(!showCommandPreview);
+                  }}
+                >
+                  Command line
+                </button>
+              </div>
 
-      {showCommandPreview &&
-        (fullRequest ? (
-          <CommandPreview request={fullRequest} configVersion={launcher.configVersion} />
-        ) : (
-          <p className="message message--muted">Choose what to launch to see the command line.</p>
-        ))}
+              {editing && view && (
+                <OverrideEditor
+                  key={launcher.configVersion}
+                  label={`Options for ${overrideLabel}`}
+                  installationId={installationId}
+                  definitions={view.definitions}
+                  config={view.config}
+                  target={target}
+                  onClose={() => {
+                    setEditing(false);
+                  }}
+                />
+              )}
+
+              {showCommandPreview &&
+                (fullRequest ? (
+                  <CommandPreview request={fullRequest} configVersion={launcher.configVersion} />
+                ) : (
+                  <p className="message message--muted">
+                    Choose what to launch to see the command line.
+                  </p>
+                ))}
+            </>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

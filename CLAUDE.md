@@ -163,6 +163,12 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   `choice` with defaults); the View Options panel and the preferences are generic and
   must not get renderer-specific code. Renderers only display the current page and
   never change the request. Do not register unimplemented renderers.
+- In the catalog browser only `.browser__scroll` scrolls the results; the single
+  `Pagination` lives in the results footer, outside renderers. Solve heights
+  structurally (flex/grid with `min-height: 0`), never with fixed positioning or
+  window-based heights.
+- Detail artwork goes through `MediaGallery` (same `mediaUrl` requests as the Media
+  Grid, one per configured category); never add another way to look up image files.
 - Interface preferences have a versioned key; a format change gets a new key and a
   migration from the previous one in `src/app/preferences.ts`. The active MAME
   installation is not an interface preference: it is saved in `installations.json`.

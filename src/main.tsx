@@ -6,6 +6,7 @@ import { applyTheme } from "./app/theme/themes";
 import "./app/theme/themes.css";
 import "./app/App.css";
 import "./features/browser/browser.css";
+import "./features/media/media.css";
 import "./features/launcher/launcher.css";
 import "./features/remote/remote.css";
 import "./features/roms/roms.css";

@@ -204,13 +204,31 @@
   margin: 4px 0;
 }
 
+/* Results column: a scrollable area above a pagination footer that never scrolls. */
 .browser__results {
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browser__scroll {
+  display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
   padding: 16px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.browser__footer {
+  flex: none;
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
 
 .active-filters {
@@ -567,8 +585,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border);
 }
 
 .pagination__pages,
@@ -588,6 +604,12 @@
 
 .pagination__page {
   min-width: 2.25em;
+}
+
+.pagination__status {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .pagination__gap {
@@ -623,7 +645,37 @@
 }
 
 .detail__header {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+}
+
+/* Media and launch: side by side when wide enough, the launcher alone without images. */
+.detail__showcase {
+  display: grid;
+  grid-template-areas: "media launch";
+  grid-template-columns: minmax(0, 5fr) minmax(300px, 4fr);
+  gap: 16px 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.detail__showcase[data-media="none"] {
+  grid-template-areas: "launch" "media";
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.detail__media {
+  grid-area: media;
+  min-width: 0;
+}
+
+.detail__launch {
+  grid-area: launch;
+  min-width: 0;
+}
+
+.detail__launch > .launch-panel {
+  margin: 0;
 }
 
 .detail__title {
@@ -769,6 +821,17 @@
   gap: 8px;
   margin-top: 8px;
   font-size: 0.875rem;
+}
+
+@media (width <= 1000px) {
+  .detail__showcase {
+    grid-template-areas: "media" "launch";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail__media .media-gallery__stage {
+    max-height: min(50vh, 420px);
+  }
 }
 
 @media (width <= 800px) {
