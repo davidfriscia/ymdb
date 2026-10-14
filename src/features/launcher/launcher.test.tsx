@@ -709,6 +709,115 @@ describe("launcher", () => {
     });
   });
 
+  describe("launch bar and status", () => {
+    const failed = {
+      state: "exited",
+      exitCode: 2,
+      success: false,
+      message: "Required files are missing (ROMs, CHDs or software media).",
+      logTail: "pacman.6e NOT FOUND",
+      finishedAt: Date.UTC(2026, 9, 10, 20, 31),
+    } as const;
+
+    it("shows Play as an icon button with a tooltip, before the profile", async () => {
+      launcherBackend();
+      renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
+
+      const play = await findPlay();
+      expect(play).toHaveAccessibleName("Play");
+      expect(play).toHaveTextContent("");
+      expect(play.querySelector("svg")).not.toBeNull();
+      expect(play).toHaveAttribute("title", "Play: start MAME with the selected profile");
+      const profile = screen.getByRole("combobox", { name: "Profile" });
+      expect(play.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Nothing was launched: no status panel.
+      expect(screen.queryByRole("region", { name: "Launch status" })).not.toBeInTheDocument();
+    });
+
+    it("shows a spinner while MAME starts", async () => {
+      const pending = deferred<unknown>();
+      launcherBackend({ overrides: { start_launch: () => pending.promise } });
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
+
+      await user.click(await findPlay());
+      const starting = screen.getByRole("button", { name: "Starting…" });
+      expect(starting).toHaveAttribute("aria-busy", "true");
+      expect(starting.querySelector(".launch-bar__spinner")).not.toBeNull();
+      pending.resolve(session(1, "pacman"));
+    });
+
+    it("summarizes a failed launch and keeps the MAME output collapsed", async () => {
+      const fake = launcherBackend();
+      fake.setSessions([session(3, "pacman", failed)]);
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
+
+      const panel = await screen.findByRole("region", { name: "Launch status" });
+      const status = within(panel).getByRole("status", { name: "Session" });
+      expect(status).toHaveTextContent(
+        "Failed Required files are missing (ROMs, CHDs or software media). (exit code 2)",
+      );
+      const disclosure = within(panel).getByRole("button", { name: "Last launch" });
+      expect(disclosure).toHaveAttribute("aria-expanded", "false");
+      expect(within(panel).queryByLabelText("MAME output")).not.toBeVisible();
+
+      await user.click(disclosure);
+      expect(disclosure).toHaveAttribute("aria-expanded", "true");
+      expect(within(panel).getByLabelText("MAME output")).toHaveTextContent("pacman.6e NOT FOUND");
+      expect(within(panel).getByText("Exit code").nextSibling).toHaveTextContent("2");
+
+      await user.click(disclosure);
+      expect(disclosure).toHaveAttribute("aria-expanded", "false");
+      expect(within(panel).queryByLabelText("MAME output")).not.toBeVisible();
+    });
+
+    it("reports a completed launch", async () => {
+      const fake = launcherBackend();
+      fake.setSessions([
+        session(3, "pacman", {
+          ...failed,
+          exitCode: 0,
+          success: true,
+          message: "MAME exited normally.",
+          logTail: "",
+        }),
+      ]);
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
+
+      const status = await screen.findByRole("status", { name: "Session" });
+      expect(status).toHaveTextContent("Completed MAME exited normally.");
+      expect(status).not.toHaveTextContent("exit code");
+      await user.click(screen.getByRole("button", { name: "Last launch" }));
+      expect(screen.getByText("No output of MAME was captured for this session.")).toBeVisible();
+    });
+
+    it("opens and closes the launch status and Advanced independently", async () => {
+      const fake = launcherBackend();
+      fake.setSessions([session(3, "pacman", failed)]);
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
+
+      const status = await screen.findByRole("button", { name: "Last launch" });
+      const advanced = screen.getByRole("button", { name: /^Advanced/ });
+      const panel = screen.getByRole("region", { name: "Launch status" });
+      const options = screen.getByRole("region", { name: "Advanced launch options" });
+      expect(
+        panel.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      await user.click(status);
+      expect(status).toHaveAttribute("aria-expanded", "true");
+      expect(advanced).toHaveAttribute("aria-expanded", "false");
+
+      await user.click(advanced);
+      expect(advanced).toHaveAttribute("aria-expanded", "true");
+      expect(status).toHaveAttribute("aria-expanded", "true");
+
+      await user.click(status);
+      expect(status).toHaveAttribute("aria-expanded", "false");
+      expect(advanced).toHaveAttribute("aria-expanded", "true");
+      expect(within(options).getByRole("button", { name: "Command line" })).toBeVisible();
+    });
+  });
+
   describe("installations", () => {
     it("tells sessions of other installations apart", async () => {
       const fake = launcherBackend();
@@ -716,7 +825,7 @@ describe("launcher", () => {
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
 
       // Pac-Man runs from MAME 0.252: it can still start from MAME 0.280.
-      expect(await findPlay()).toHaveTextContent("Play");
+      expect(await findPlay()).toHaveAccessibleName("Play");
       expect(screen.queryByRole("status", { name: "Session" })).not.toBeInTheDocument();
       await user.click(await findPlay());
       expect(await screen.findByText(/MAME 0.280 is running since/)).toBeInTheDocument();

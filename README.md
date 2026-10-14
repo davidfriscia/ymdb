@@ -293,10 +293,11 @@ the active MAME installation:
   software shows its list, parts, ROMs and disks and the machines declaring its list;
   software lists show their software and machines. Parents, clones, devices and
   software lists are links. Machine and software details share one layout: a header
-  with **Back to results**, the title and **Previous** / position / **Next**; the
-  artwork (see [Artwork and screenshots](#artwork-and-screenshots)); a compact launch
-  bar with the short information, the download actions, the profile and **Play**;
-  the collapsed **Advanced** launch options; and the technical sections. **Back** returns to the previous detail and **Back to
+  with **Back to results** and **Previous** / position / **Next**; the artwork (see
+  [Artwork and screenshots](#artwork-and-screenshots)); a compact bar with the title,
+  the short information, the download actions, **Play** and the profile; the status
+  of the last launch, when there is one; the collapsed **Advanced** launch options;
+  and the technical sections. **Back** returns to the previous detail and **Back to
   results** to the results, with the search, filters, sort, view, page size, page and
   scroll position unchanged; **Previous**/**Next** move through the current page.
 - ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
@@ -334,7 +335,7 @@ When a title has no image, its tile shows a placeholder: YMDB never shows the im
 of another title, not even of the parent of a clone.
 
 The detail page of a machine or software shows a large carousel of its images with
-the categories that have images on its right (Snapshots, Title screens, Flyers,
+the categories that have images in a two-column grid on its right (Snapshots, Title screens, Flyers,
 Cabinets, Marquees; categories without an image are left out). The first category
 is selected; click another to browse its images only. A category can hold several
 images: the image of each configured directory and, for machines, every screenshot

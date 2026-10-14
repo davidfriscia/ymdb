@@ -255,21 +255,21 @@ what happens when the active installation changes).
   items of the current result page.
 - **Detail layout** (`DetailFrame`, the same for machines and software), from top
   to bottom:
-  1. **Header**: Back to results (and Back after following a link) on the left,
-     the title centered (two lines at most, never covering the controls),
-     Previous / position / Next on the right. `CatalogBrowser` provides the
-     navigation controls (`DetailNavigation`), the views the title; the header is
-     shown while a detail loads too. Below 800 px the title moves under the controls.
-  2. **Media**: the `MediaGallery` of the record, a carousel with the image
-     categories in a column on its right (see
+  1. **Header**: one compact row with Back to results (and Back after following a
+     link) on the left and Previous / position / Next on the right; no title.
+     `CatalogBrowser` provides the navigation controls (`DetailNavigation`); the
+     header is shown while a detail loads too.
+  2. **Media**: the `MediaGallery` of the record, a carousel on the left with the
+     image categories in a grid of two columns on its right (see
      [Detail gallery](#detail-gallery)).
-  3. **Launch bar** (`LaunchBar`): the short information (short name,
-     manufacturer/publisher and year, status and relation badges; the title is not
-     repeated) and the launch actions (see
-     [Interface](#interface) of the launcher). Without launch (software lists), the
-     information alone.
-  4. **Advanced** launch options, collapsed by default.
-  5. **Technical sections**: a side tab list (top tabs below 800 px) and the
+  3. **Information and launch bar** (`LaunchBar`): the title (the page's only
+     `h2`, two lines at most), the short information (short name,
+     manufacturer/publisher and year, status and relation badges) and the launch
+     actions (see [Interface](#interface) of the launcher). Without launch
+     (software lists), the information alone.
+  4. **Launch status** (`LaunchStatus`), only once there is something to report.
+  5. **Advanced** launch options, collapsed by default.
+  6. **Technical sections**: a side tab list (top tabs below 800 px) and the
      selected section, keeping the selected tab when moving to the previous or next
      result.
 
@@ -817,12 +817,19 @@ from it.
 
 - Machine detail (`LaunchControls`): a compact launch bar below the media with the
   short information of the record on the left and, on the right, **Prepare
-  Download** and **Download & Play** (icon buttons with an accessible name and a
-  tooltip explaining the action), the profile selector (the real profiles of the
-  installation, `Default (<name>)` first) and **Play**, the main and only filled
-  control. Launch errors and the status of the last session (running with Stop and
-  a confirmation, finished, failed with MAME's exit code, message and output, or
-  stopped) follow the bar. An **Advanced** section (`aria-expanded`, collapsed
+  Download** and **Download & Play**, **Play** and the profile selector (the real
+  profiles of the installation, `Default (<name>)` first). The three actions are
+  icon buttons with an accessible name and a tooltip explaining the action; Play is
+  the only filled control, named `Starting…` (with a spinner and `aria-busy`) or
+  `Running` while disabled. Below the bar, a collapsible **Launch status** section
+  (`LaunchStatus`, shown only when there is a message or a session) keeps the
+  launch errors and a summary line of the last session always visible (running
+  with Stop and a confirmation, completed, failed with MAME's message and exit
+  code, or stopped); its **Last launch** disclosure, collapsed by default and
+  independent from Advanced, shows the installation, the start and end times, the
+  exit code and the end of MAME's output already kept by the session (`logTail`).
+  Both sections use the same `Disclosure` button and `.launch-section` frame.
+  An **Advanced** section (`aria-expanded`, collapsed
   whenever a detail opens, with the number of overrides as counter) holds **Options
   for this machine** (the machine override) and **Command line** (the backend
   preview: executable, working directory, each argument with its role or the level
@@ -998,7 +1005,8 @@ max-age=3600` (errors are `no-store`). Missing, unreadable or unsupported files
 
 `src/features/media/MediaGallery.tsx` shows the artwork of one machine or software
 on its detail page: a carousel of the images of one category, with the categories
-in a column on its right. It does not resolve files itself: `list_media` tells
+in a grid of two columns on its right (three rows as tall as the carousel, so
+all five categories fit). It does not resolve files itself: `list_media` tells
 which categories have images of the title and how many, and the images are
 requested by category and index through the same `ymdb-media` URLs as the Media
 Grid (`mediaUrl`), so software artwork is looked up by list and software name.

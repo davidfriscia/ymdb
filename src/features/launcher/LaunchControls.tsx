@@ -12,7 +12,8 @@ import type {
 import { softwareKey } from "./launcherApi";
 import { latestSession, useLauncher } from "./launcherContext";
 import { OptionSetEditor } from "./OptionSetEditor";
-import { SessionStatus } from "./SessionStatus";
+import { Disclosure } from "./Disclosure";
+import { LaunchStatus } from "./LaunchStatus";
 import { useInstallationScope } from "../installations/installationsContext";
 import { RomDownloadSection } from "../roms/RomDownloadSection";
 
@@ -52,9 +53,9 @@ interface LaunchControlsProps {
 }
 
 /**
- * The launch bar (ROM downloads, profile and Play) for the installation whose
- * catalog is browsed, the session status below it, and the overrides and the
- * command line preview in a collapsed Advanced section.
+ * The launch bar (ROM downloads, Play and the profile) for the installation
+ * whose catalog is browsed, the collapsible launch status below it, and the
+ * overrides and the command line preview in a collapsed Advanced section.
  */
 export function LaunchControls({ target, request, summary, children }: LaunchControlsProps) {
   const installationId = useInstallationScope();
@@ -108,8 +109,29 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
     }
   }
 
-  const hasMessages =
-    launcher.error !== null || Boolean(view?.loadError) || error !== null || session !== undefined;
+  const messages: { text: string; tone: "error" | "warning" }[] = [];
+  if (launcher.error !== null) {
+    messages.push({
+      text: `The launch options could not be loaded: ${describeError(launcher.error)}`,
+      tone: "error",
+    });
+  }
+  if (view?.loadError) {
+    messages.push({
+      text: `${view.loadError}. The default options are used until they are saved in Settings.`,
+      tone: "warning",
+    });
+  }
+  if (error) messages.push({ text: error, tone: "error" });
+
+  const playLabel = starting ? "Starting…" : running ? "Running" : "Play";
+  const playTitle = starting
+    ? "Starting MAME…"
+    : running
+      ? "MAME is running: stop it from the launch status below"
+      : !fullRequest
+        ? "Play: choose what to launch first"
+        : "Play: start MAME with the selected profile";
 
   return (
     <>
@@ -119,6 +141,22 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
         actions={
           <>
             <RomDownloadSection request={fullRequest} target={target} />
+            {/* The main action: the only filled control of the bar. */}
+            <button
+              type="button"
+              className="button icon-button launch-bar__play"
+              aria-label={playLabel}
+              title={playTitle}
+              aria-busy={starting || undefined}
+              disabled={!fullRequest || starting || running || !view}
+              onClick={() => void play()}
+            >
+              {starting ? (
+                <span className="launch-bar__spinner" aria-hidden="true" />
+              ) : (
+                <PlayIcon size={20} />
+              )}
+            </button>
             <label className="launch-bar__profile" title="Launch profile">
               <span className="visually-hidden">Profile</span>
               <select
@@ -139,55 +177,22 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                   ))}
               </select>
             </label>
-            <button
-              type="button"
-              className="button launch-bar__play"
-              disabled={!fullRequest || starting || running || !view}
-              onClick={() => void play()}
-            >
-              <PlayIcon size={16} />
-              {starting ? "Starting…" : running ? "Running" : "Play"}
-            </button>
           </>
         }
       />
 
-      {hasMessages && (
-        <div className="launch-messages">
-          {launcher.error !== null && (
-            <p className="message message--error" role="alert">
-              The launch options could not be loaded: {describeError(launcher.error)}
-            </p>
-          )}
-          {view?.loadError && (
-            <p className="message message--warning" role="alert">
-              {view.loadError}. The default options are used until they are saved in Settings.
-            </p>
-          )}
-          {error && (
-            <p className="message message--error" role="alert">
-              {error}
-            </p>
-          )}
-          {session && <SessionStatus session={session} onStop={stop} />}
-        </div>
-      )}
+      <LaunchStatus messages={messages} session={session} onStop={stop} />
 
-      {/* Overrides and the command line: collapsed by default, below the launch bar. */}
-      <section className="launch-advanced" aria-label="Advanced launch options">
-        <button
-          type="button"
-          className="launch-advanced__disclosure"
-          aria-expanded={advanced}
-          aria-controls={advancedId}
-          onClick={() => {
+      {/* Overrides and the command line: collapsed by default, below the launch status. */}
+      <section className="launch-section" aria-label="Advanced launch options">
+        <Disclosure
+          expanded={advanced}
+          controls={advancedId}
+          onToggle={() => {
             setAdvanced(!advanced);
             setAdvancedOpened(true);
           }}
         >
-          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-            <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.75" />
-          </svg>
           Advanced
           {overrideCount > 0 && (
             <span
@@ -197,8 +202,8 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
               {overrideCount}
             </span>
           )}
-        </button>
-        <div id={advancedId} className="launch-advanced__body" hidden={!advanced}>
+        </Disclosure>
+        <div id={advancedId} className="launch-section__body" hidden={!advanced}>
           {advancedOpened && (
             <>
               <div className="launch-panel__row">

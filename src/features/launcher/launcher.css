@@ -43,13 +43,28 @@
   height: 36px;
 }
 
-/* The main action: the largest and only filled control of the bar. */
+/* The main action: an icon, the widest and only filled control of the bar. */
 .launch-bar__play {
-  min-width: 7.5em;
-  height: 40px;
-  padding: 0 18px;
-  font-size: 1rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+}
+
+/* Shown in place of the Play icon while MAME starts. */
+.launch-bar__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: launch-spin 0.8s linear infinite;
+}
+
+@keyframes launch-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .launch-bar__error {
@@ -80,16 +95,6 @@
   flex-direction: column;
   gap: 6px;
   font-size: 0.875rem;
-}
-
-.launch-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.launch-messages .message {
-  margin: 0;
 }
 
 .launch-panel__row {
@@ -141,8 +146,8 @@
   font-size: 0.875rem;
 }
 
-/* Advanced launch options: a thin bar when collapsed. */
-.launch-advanced {
+/* Collapsible launch sections (launch status, Advanced): a thin bar when collapsed. */
+.launch-section {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -152,15 +157,15 @@
   background: var(--color-surface);
 }
 
-.launch-advanced:has(> .launch-advanced__body:not([hidden])) {
+.launch-section:has(> .launch-section__body:not([hidden])) {
   padding-bottom: 14px;
 }
 
-.launch-advanced .message {
+.launch-section .message {
   margin: 0;
 }
 
-.launch-advanced__disclosure {
+.launch-section__disclosure {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
@@ -176,20 +181,20 @@
   cursor: pointer;
 }
 
-.launch-advanced__disclosure:hover {
+.launch-section__disclosure:hover {
   background: var(--color-hover);
   color: var(--color-text-primary);
 }
 
-.launch-advanced__disclosure svg {
+.launch-section__disclosure svg {
   transition: transform 120ms ease;
 }
 
-.launch-advanced__disclosure[aria-expanded="true"] svg {
+.launch-section__disclosure[aria-expanded="true"] svg {
   transform: rotate(90deg);
 }
 
-.launch-advanced__body {
+.launch-section__body {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -197,13 +202,17 @@
   padding: 0 6px;
 }
 
-.launch-advanced__body[hidden] {
+.launch-section__body[hidden] {
   display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .launch-advanced__disclosure svg {
+  .launch-section__disclosure svg {
     transition: none;
+  }
+
+  .launch-bar__spinner {
+    animation-duration: 2.4s;
   }
 }
 
@@ -222,20 +231,70 @@
   border-top: 1px solid var(--color-border);
 }
 
+/* Launch status: the disclosure and the summary of the session on one row. */
+.launch-section__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+
 .session-status {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
 }
 
 .session-status__line {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.session-status__confirm {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-status__confirm .actions {
+  margin-top: 0;
+}
+
+.launch-status .details-list {
   margin: 0;
 }
 
-.session-status .raw-output {
-  align-self: stretch;
+.session-status__output {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-status__output-title {
   margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.session-status__output pre {
+  max-height: 320px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--color-app-bg);
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .command-preview {

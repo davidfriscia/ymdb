@@ -1,17 +1,18 @@
 /* Media gallery and lightbox. Colors come from the semantic theme tokens only. */
 
 /*
- * The carousel takes the width, the categories a narrow column of the same
- * height. The stage has a constant height, so changing image or category
- * never moves the content below.
+ * The carousel on the left takes most of the width, the categories a grid of
+ * two columns on the right, as tall as the carousel. The stage has a constant
+ * height, so changing image or category never moves the content below.
  */
 .media-gallery {
   --media-stage-height: clamp(220px, 46vh, 460px);
   --media-indicators-height: 28px;
+  --media-categories-gap: 8px;
 
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 156px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 3fr) minmax(220px, 2fr);
+  gap: 16px;
   align-items: start;
   min-width: 0;
 }
@@ -171,11 +172,26 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Categories: as tall as the carousel at most, scrolling inside if needed. */
+/*
+ * Categories: two columns of tiles of a constant size, three rows filling the
+ * height of the carousel (all five categories fit). Fewer categories leave the
+ * remaining space empty instead of stretching the tiles.
+ */
 .media-gallery__categories {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: max(
+    84px,
+    calc(
+      (
+          var(--media-stage-height) + var(--media-indicators-height) - 2 *
+            var(--media-categories-gap)
+        ) /
+        3
+    )
+  );
+  gap: var(--media-categories-gap);
+  align-content: start;
   max-height: calc(var(--media-stage-height) + var(--media-indicators-height));
   margin: 0;
   padding: 0;
@@ -185,8 +201,8 @@
 
 .media-gallery__categories li {
   display: flex;
-  flex: 0 1 108px;
-  min-height: 72px;
+  min-width: 0;
+  min-height: 0;
 }
 
 .media-gallery__category {
@@ -268,6 +284,7 @@
   }
 
   .media-gallery__categories {
+    display: flex;
     flex-direction: row;
     max-height: none;
     padding-bottom: 4px;

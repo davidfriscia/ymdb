@@ -12,7 +12,7 @@ export interface DetailTab {
   count?: number;
 }
 
-/** The navigation controls of the page, around the title in the header. */
+/** The navigation controls of the page, in the header above the media. */
 export interface DetailNavigation {
   /** Back to the results (or to the previous detail). */
   start: ReactNode;
@@ -40,9 +40,9 @@ interface DetailFrameProps {
 
 /**
  * The layout shared by the detail pages, from top to bottom: the header
- * (navigation and title), the media gallery, the launch bar with the short
- * information about the record, the Advanced launch options, and the
- * technical sections with their content.
+ * (navigation only), the media gallery, the information and launch bar with
+ * the title, the status of the last launch, the Advanced launch options, and
+ * the technical sections with their content.
  */
 export function DetailFrame({
   title,
@@ -59,13 +59,16 @@ export function DetailFrame({
   const active = tabs.some((tab) => tab.id === activeTab) ? activeTab : "overview";
   const summary = (
     <div className="detail-summary">
+      <h2 id="detail-title" className="detail-summary__title" title={title}>
+        {title}
+      </h2>
       <p className="detail-summary__line">{subtitle}</p>
       {badges && <p className="detail-summary__badges">{badges}</p>}
     </div>
   );
   return (
     <article className="detail" aria-labelledby="detail-title">
-      <DetailHeader title={title} navigation={navigation} />
+      <DetailHeader navigation={navigation} />
       {media && <MediaGallery target={media} title={title} />}
       <div className="detail__launch">
         {launch ? launch(summary) : <div className="launch-bar">{summary}</div>}
@@ -103,26 +106,16 @@ export function DetailFrame({
   );
 }
 
-/** Back on the left, the title in the middle, the result navigation on the right. */
-function DetailHeader({
-  title,
-  navigation,
-}: {
-  title: string | null;
-  navigation: DetailNavigation;
-}) {
+/**
+ * Back on the left, the result navigation on the right. The title is shown in
+ * the information bar below the media, never a second time here.
+ */
+function DetailHeader({ navigation }: { navigation: DetailNavigation }) {
   return (
     <header className="detail-header">
       <nav className="detail-header__start" aria-label="Detail navigation">
         {navigation.start}
       </nav>
-      {title !== null ? (
-        <h2 id="detail-title" className="detail-header__title" title={title}>
-          {title}
-        </h2>
-      ) : (
-        <span className="detail-header__title" />
-      )}
       <nav className="detail-header__end" aria-label="Result navigation">
         {navigation.end}
       </nav>
@@ -144,7 +137,7 @@ export function DetailStatus({
 }) {
   return (
     <div className="detail">
-      <DetailHeader title={null} navigation={navigation} />
+      <DetailHeader navigation={navigation} />
       {state.status === "loading" ? (
         <p className="message message--muted" role="status">
           Loading {what}…

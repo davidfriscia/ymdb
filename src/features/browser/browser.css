@@ -630,8 +630,9 @@
 }
 
 /*
- * Detail page, from top to bottom: header, media, launch bar, Advanced and
- * technical sections. The page scrolls as a whole; nothing is fixed.
+ * Detail page, from top to bottom: header, media, information and launch bar,
+ * launch status, Advanced and technical sections. The page scrolls as a whole;
+ * nothing is fixed.
  */
 .detail {
   display: flex;
@@ -647,13 +648,13 @@
   margin: 0;
 }
 
-/* Back on the left, the title centered, the result navigation on the right. */
+/* Back on the left, the result navigation on the right: one compact row. */
 .detail-header {
-  display: grid;
-  grid-template-areas: "start title end";
-  grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr);
-  gap: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
   min-height: 32px;
 }
 
@@ -664,28 +665,8 @@
   gap: 8px;
 }
 
-.detail-header__start {
-  grid-area: start;
-}
-
 .detail-header__end {
-  grid-area: end;
-  justify-content: flex-end;
-}
-
-/* Long titles take two lines at most, never covering the controls. */
-.detail-header__title {
-  display: -webkit-box;
-  grid-area: title;
-  margin: 0;
-  overflow: hidden;
-  font-size: 1.25rem;
-  line-height: 1.3;
-  text-align: center;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  margin-left: auto;
 }
 
 .detail-header__position {
@@ -707,6 +688,19 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+/* The title stands out from the metadata; long titles take two lines at most. */
+.detail-summary__title {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .detail-summary__line {
@@ -850,11 +844,6 @@
 }
 
 @media (width <= 800px) {
-  .detail-header {
-    grid-template-areas: "start end" "title title";
-    grid-template-columns: auto auto;
-  }
-
   .browser__body,
   .browser__body--filters,
   .browser__body--view,

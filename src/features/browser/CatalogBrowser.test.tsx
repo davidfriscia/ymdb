@@ -939,12 +939,14 @@ describe("CatalogBrowser", () => {
       await openCard("Pac-Man");
       const title = await screen.findByRole("heading", { name: "Pac-Man" });
 
-      // Header: back, title, then the position in the results.
-      const back = screen.getByRole("button", { name: "Back to results" });
-      const next = screen.getByRole("button", { name: "Next" });
-      expect(back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(title.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(screen.getByText("1 / 3")).toBeInTheDocument();
+      // Header: back, then the position in the results; the title is below the media.
+      const start = screen.getByRole("navigation", { name: "Detail navigation" });
+      const end = screen.getByRole("navigation", { name: "Result navigation" });
+      const back = within(start).getByRole("button", { name: "Back to results" });
+      const next = within(end).getByRole("button", { name: "Next" });
+      expect(back.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(end).getByText("1 / 3")).toBeInTheDocument();
+      expect(next.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
       const gallery = await screen.findByRole("region", { name: "Media" });
       await within(gallery).findByRole("list", { name: "Image categories" });
@@ -960,11 +962,24 @@ describe("CatalogBrowser", () => {
           before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
         ).toBeTruthy();
       }
-      // The title is not repeated: the bar shows the short information and the actions.
+      // The bar shows the title, the short information and the actions, in order.
+      expect(screen.getAllByRole("heading", { level: 2 })).toEqual([title]);
+      expect(launch).toContainElement(title);
       expect(within(launch).getByText("pacman")).toBeInTheDocument();
-      expect(within(launch).getByRole("button", { name: "Play" })).toBeInTheDocument();
-      expect(within(launch).getByRole("button", { name: "Prepare Download" })).toBeInTheDocument();
-      expect(within(launch).getByRole("button", { name: "Download & Play" })).toBeInTheDocument();
+      const controls = [
+        within(launch).getByRole("button", { name: "Prepare Download" }),
+        within(launch).getByRole("button", { name: "Download & Play" }),
+        within(launch).getByRole("button", { name: "Play" }),
+        within(launch).getByRole("combobox", { name: "Profile" }),
+      ];
+      controls.slice(1).forEach((control, index) => {
+        expect(
+          (controls[index]?.compareDocumentPosition(control) ?? 0) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      });
+      // No launch yet: no status panel.
+      expect(screen.queryByRole("region", { name: "Launch status" })).toBeNull();
       expect(within(advanced).getByRole("button", { name: /^Advanced/ })).toHaveAttribute(
         "aria-expanded",
         "false",

@@ -54,7 +54,8 @@ export function SoftwareLaunchPanel({ list, name, refreshKey, summary }: Softwar
       />
     );
   }
-  if (state.value === null) return null;
+  // The bar keeps the title of the software even when it cannot be launched.
+  if (state.value === null) return <LaunchBar summary={summary} actions={null} />;
   return <SoftwareLauncher key={`${list}:${name}`} info={state.value} summary={summary} />;
 }
 
