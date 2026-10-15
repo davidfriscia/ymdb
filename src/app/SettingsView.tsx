@@ -2,17 +2,19 @@ import { useState, type ReactNode } from "react";
 import { HealthCheck } from "../features/health-check/HealthCheck";
 import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
 import { RemoteConnectionsSettings } from "../features/remote/RemoteConnectionsSettings";
+import { FavoritesSettings } from "../features/lists/FavoritesSettings";
 import { TwoPaneLayout, TwoPaneNavItem } from "../shared/TwoPaneLayout";
 import { useVisited } from "../shared/useVisited";
 import { THEMES, type ThemeId } from "./theme/themes";
 
 type SettingsSection =
-  "appearance" | "mediaSources" | "remoteConnections" | "about" | "diagnostics";
+  "appearance" | "mediaSources" | "remoteConnections" | "favorites" | "about" | "diagnostics";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "mediaSources", label: "Media Sources" },
   { id: "remoteConnections", label: "Remote Connections" },
+  { id: "favorites", label: "Favorites" },
   { id: "about", label: "About" },
   { id: "diagnostics", label: "Diagnostics" },
 ];
@@ -41,6 +43,8 @@ export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
         return <MediaSourcesSettings />;
       case "remoteConnections":
         return <RemoteConnectionsSettings />;
+      case "favorites":
+        return <FavoritesSettings />;
       case "about":
         return <About />;
       case "diagnostics":

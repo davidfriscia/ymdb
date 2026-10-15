@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ComponentProps, ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   catalogStatus,
@@ -23,13 +23,16 @@ import type {
 import { DEFAULT_BROWSER_PREFERENCES, type BrowserPreferences } from "./browserPreferences";
 import { MediaProvider } from "../media/MediaProvider";
 import { mediaSourcesView } from "../../test/mediaFixtures";
+import { favoritesList } from "../../test/listFixtures";
 import { CatalogBrowser } from "./CatalogBrowser";
+import type { ListEntry } from "../lists/listsApi";
 import { LauncherProvider } from "../launcher/LauncherProvider";
 import { launchConfigView } from "../../test/launcherFixtures";
 import { installation, installationsView, NEW_ID, OLD_ID } from "../../test/installationFixtures";
 import { InstallationsProvider } from "../installations/InstallationsProvider";
 import type { InstallationSummary } from "../installations/installationsApi";
 import { useInstallations } from "../installations/installationsContext";
+import { FavoritesProvider } from "../lists/FavoritesProvider";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -132,6 +135,7 @@ function commands(
     get_software_launch_info: () => null,
     get_media_sources: () => mediaSourcesView({ snap: ["C:/Artwork ✓/snap"] }),
     list_media: () => [],
+    get_list: () => favoritesList([]),
     ...overrides,
   });
 }
@@ -184,7 +188,9 @@ function withLauncher(children: ReactNode) {
     <MediaProvider>
       <InstallationsProvider>
         <SwitchToOld />
-        <ActiveLauncher>{children}</ActiveLauncher>
+        <FavoritesProvider>
+          <ActiveLauncher>{children}</ActiveLauncher>
+        </FavoritesProvider>
       </InstallationsProvider>
     </MediaProvider>
   );
@@ -1452,6 +1458,325 @@ describe("CatalogBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Open MAME settings" }));
       expect(onOpenMame).toHaveBeenCalled();
       expect(invokeMock).not.toHaveBeenCalledWith("get_catalog_status", expect.anything());
+    });
+  });
+
+  describe("favorites", () => {
+    const pacman: ListEntry = { kind: "machine", name: "pacman" };
+    const bookmark = (title: string) =>
+      results().getByRole("button", { name: `Favorite: ${title}` });
+    const membershipCalls = () =>
+      invokeMock.mock.calls
+        .filter(([name]) => name === "set_list_membership")
+        .map(([, args]) => args as Args);
+    const saveMembership: Handler = (args) => args.member;
+
+    /** The browser with preferences kept in state, as the application does. */
+    function renderWithPreferences(initial: Partial<BrowserPreferences> = {}) {
+      const user = userEvent.setup();
+      function Stateful() {
+        const [preferences, setPreferences] = useState<BrowserPreferences>({
+          ...PREFERENCES,
+          ...initial,
+        });
+        return (
+          <CatalogBrowser
+            refreshKey={0}
+            preferences={preferences}
+            onPreferencesChange={(change) => {
+              setPreferences((current) => ({ ...current, ...change }));
+            }}
+            onOpenMame={() => undefined}
+            debounceMs={20}
+          />
+        );
+      }
+      render(withLauncher(<Stateful />));
+      return user;
+    }
+
+    it("bookmarks a classic card without opening it and shows the change at once", async () => {
+      const saving = deferred<boolean>();
+      commands({
+        get_list: () => favoritesList([pacman]),
+        set_list_membership: () => saving.promise,
+      });
+      const { user } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      await waitFor(() => {
+        expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "true");
+      });
+
+      expect(bookmark("Pac-Man")).toHaveAttribute("title", "Remove from favorites");
+      const galaga = bookmark("Galaga");
+      expect(galaga).toHaveAttribute("aria-pressed", "false");
+      expect(galaga).toHaveAttribute("title", "Add to favorites");
+      // Next to the card button, never inside it.
+      expect(galaga.closest(".card")).toBeNull();
+
+      await user.click(galaga);
+
+      expect(galaga).toHaveAttribute("aria-pressed", "true");
+      expect(galaga).toHaveAttribute("aria-busy", "true");
+      expect(membershipCalls()).toEqual([
+        { listId: "favorites", entry: { kind: "machine", name: "galaga" }, member: true },
+      ]);
+      // A second click while saving is ignored.
+      await user.click(galaga);
+      expect(membershipCalls()).toHaveLength(1);
+      saving.resolve(true);
+      await waitFor(() => {
+        expect(galaga).not.toHaveAttribute("aria-busy");
+      });
+      expect(galaga).toHaveAttribute("title", "Remove from favorites");
+      expect(screen.queryByRole("heading", { name: "Galaga" })).not.toBeInTheDocument();
+      expect(invokeMock).not.toHaveBeenCalledWith("get_machine_detail", expect.anything());
+    });
+
+    it("toggles a bookmark with the keyboard", async () => {
+      commands({ get_list: () => favoritesList([pacman]), set_list_membership: saveMembership });
+      const { user } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      await waitFor(() => {
+        expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "true");
+      });
+
+      bookmark("Pac-Man").focus();
+      await user.keyboard(" ");
+
+      await waitFor(() => {
+        expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "false");
+      });
+      expect(bookmark("Pac-Man")).toHaveFocus();
+      expect(membershipCalls()).toEqual([{ listId: "favorites", entry: pacman, member: false }]);
+      expect(screen.queryByRole("heading", { name: "Pac-Man" })).not.toBeInTheDocument();
+    });
+
+    it("restores the bookmark and explains a change that cannot be saved", async () => {
+      commands({
+        set_list_membership: () => {
+          throw Object.assign(new Error("settings"), { kind: "settings", message: "disk full" });
+        },
+      });
+      const { user } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      await waitFor(() => {
+        expect(bookmark("Galaga")).toBeEnabled();
+      });
+
+      await user.click(bookmark("Galaga"));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Could not add to favorites: Settings error: disk full",
+      );
+      expect(bookmark("Galaga")).toHaveAttribute("aria-pressed", "false");
+      await user.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("disables bookmarks when the favorites cannot be read", async () => {
+      commands({
+        get_list: () => {
+          throw Object.assign(new Error("settings"), { kind: "settings", message: "invalid" });
+        },
+      });
+      renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+
+      await waitFor(() => {
+        expect(bookmark("Pac-Man")).toHaveAttribute("title", "Favorites are unavailable");
+      });
+      expect(bookmark("Pac-Man")).toBeDisabled();
+    });
+
+    it("uses the same bookmark on media tiles, for machines and software", async () => {
+      commands({
+        get_list: () => favoritesList([{ kind: "software", listName: "nes", name: "smb" }]),
+        set_list_membership: saveMembership,
+        search_catalog_software: () =>
+          response([
+            software("nes", "smb", { description: "Super Mario Bros." }),
+            software("snes", "smw", { description: "Super Mario World" }),
+          ]),
+      });
+      const { user } = renderBrowser({
+        preferences: { ...PREFERENCES, renderer: "mediaGrid" },
+      });
+      await screen.findByText("1–3 of 3 machines");
+      expect(results().getByRole("button", { name: "Pac-Man (pacman)" })).toBeInTheDocument();
+      expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "false");
+      expect(bookmark("Pac-Man").closest(".media-tile")).toBeNull();
+
+      await user.selectOptions(screen.getByLabelText("Catalog type"), "Software");
+      await screen.findByRole("button", { name: "Super Mario Bros. (nes/smb)" });
+      await waitFor(() => {
+        expect(bookmark("Super Mario Bros.")).toHaveAttribute("aria-pressed", "true");
+      });
+      await user.click(bookmark("Super Mario World"));
+
+      expect(membershipCalls()).toEqual([
+        {
+          listId: "favorites",
+          entry: { kind: "software", listName: "snes", name: "smw" },
+          member: true,
+        },
+      ]);
+      expect(invokeMock).not.toHaveBeenCalledWith("get_software_detail", expect.anything());
+    });
+
+    it("restricts the search to favorites with the text, filters and sort, from the first page", async () => {
+      commands({ search_catalog_machines: machineSearch(MACHINES, { total: 400 }) });
+      const user = renderWithPreferences({ viewOptionsVisible: true });
+      await user.type(await screen.findByLabelText("Search text"), "pac{Enter}");
+      await user.click(await screen.findByRole("checkbox", { name: /Namco/ }));
+      await user.selectOptions(screen.getByLabelText("Sort by"), "year");
+      await user.click(await screen.findByRole("button", { name: "Page 2" }));
+      await waitFor(() => {
+        expect(lastRequest()?.page).toBe(1);
+      });
+      resultsScroll().scrollTop = 900;
+      const panel = within(screen.getByRole("complementary", { name: "View options" }));
+
+      await user.click(panel.getByRole("checkbox", { name: "Favorites only" }));
+
+      await waitFor(() => {
+        expect(lastRequest()).toMatchObject({
+          text: "pac",
+          sort: "year",
+          page: 0,
+          filters: { manufacturers: ["Namco"], list: "favorites" },
+        });
+      });
+      expect(lastFacetRequest()?.filters).toMatchObject({ list: "favorites" });
+      expect(resultsScroll().scrollTop).toBe(0);
+      const active = within(screen.getByRole("group", { name: "Active filters" }));
+      expect(active.getByText("Favorites only")).toBeInTheDocument();
+
+      // Clearing the filters keeps the view option.
+      await user.click(active.getByRole("button", { name: "Clear all filters" }));
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({ list: "favorites" });
+      });
+
+      await user.click(
+        screen.getByRole("button", { name: "Show all results, not only favorites" }),
+      );
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({});
+      });
+      expect(panel.getByRole("checkbox", { name: "Favorites only" })).not.toBeChecked();
+    });
+
+    it("removes an unbookmarked favorite from the results and keeps a valid page", async () => {
+      const names = Array.from({ length: 51 }, (_, index) => `m${String(index).padStart(2, "0")}`);
+      const favorites = new Set(names);
+      commands({
+        get_list: () => favoritesList(names.map((name) => ({ kind: "machine", name }))),
+        set_list_membership: (args) => {
+          const entry = args.entry as { name: string };
+          if (args.member) favorites.add(entry.name);
+          else favorites.delete(entry.name);
+          return args.member;
+        },
+        // The backend applies the list before paging.
+        search_catalog_machines: (args) => {
+          const request = machineRequest(args);
+          const matching = names
+            .filter((name) => request.filters?.list !== "favorites" || favorites.has(name))
+            .map((name) => machine(name, { description: `Machine ${name}` }));
+          const pageSize = request.pageSize ?? 50;
+          const page = request.page ?? 0;
+          return response(matching.slice(page * pageSize, (page + 1) * pageSize), {
+            page,
+            pageSize,
+            total: matching.length,
+            facets: facets(),
+          });
+        },
+      });
+      const user = renderWithPreferences({ favoritesOnly: true });
+      expect(await screen.findByText("1–50 of 51 machines")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Page 2" }));
+      expect(await screen.findByText("51–51 of 51 machines")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(bookmark("Machine m50")).toHaveAttribute("aria-pressed", "true");
+      });
+
+      await user.click(bookmark("Machine m50"));
+
+      // Reloaded without the removed favorite: the empty second page gives way to the first.
+      expect(await screen.findByText("1–50 of 50 machines")).toBeInTheDocument();
+      expect(lastRequest()).toMatchObject({ page: 0, filters: { list: "favorites" } });
+      expect(results().queryByText("Machine m50")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Page 2" })).not.toBeInTheDocument();
+    });
+
+    it("explains when no favorite matches and shows all results again", async () => {
+      commands({
+        search_catalog_machines: (args) =>
+          machineRequest(args).filters?.list === "favorites"
+            ? machineSearch([], { total: 0 })(args)
+            : machineSearch()(args),
+      });
+      const user = renderWithPreferences({ favoritesOnly: true });
+
+      expect(
+        await screen.findByText("No favorites match the search and filters in this catalog."),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Show all results" }));
+
+      expect(await screen.findByText("1–3 of 3 machines")).toBeInTheDocument();
+      expect(lastRequest()?.filters).toEqual({});
+    });
+
+    it("keeps the same favorites with another MAME installation", async () => {
+      commands({
+        get_list: () => favoritesList([pacman]),
+        search_catalog_machines: (args) =>
+          args.installationId === OLD_ID
+            ? machineSearch(MACHINES.slice(0, 1))(args)
+            : machineSearch()(args),
+      });
+      const { user } = renderBrowser({ preferences: { ...PREFERENCES, viewOptionsVisible: true } });
+      await screen.findByText("1–3 of 3 machines");
+      await waitFor(() => {
+        expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "true");
+      });
+
+      const panel = within(screen.getByRole("complementary", { name: "View options" }));
+      await user.selectOptions(panel.getByRole("combobox", { name: "MAME version" }), OLD_ID);
+
+      expect(await screen.findByText("1–1 of 1 machines")).toBeInTheDocument();
+      expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "true");
+      // Favorites are global: they are not read again for another installation.
+      expect(invokeMock.mock.calls.filter(([name]) => name === "get_list")).toHaveLength(1);
+    });
+
+    it("shares the bookmark of the detail header with the results", async () => {
+      commands({
+        get_list: () => favoritesList([pacman]),
+        set_list_membership: saveMembership,
+        get_machine_detail: () => machineDetail("pacman", { description: "Pac-Man" }),
+      });
+      const { user } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      await waitFor(() => {
+        expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "true");
+      });
+      await openCard("Pac-Man");
+      const header = await screen.findByRole("heading", { name: "Pac-Man" });
+      const detail = within(required(header.closest("article")));
+      const detailBookmark = detail.getByRole("button", { name: "Favorite: Pac-Man" });
+      expect(detailBookmark).toHaveAttribute("aria-pressed", "true");
+
+      await user.click(detailBookmark);
+      await waitFor(() => {
+        expect(detailBookmark).toHaveAttribute("aria-pressed", "false");
+      });
+      await user.click(screen.getByRole("button", { name: "Back to results" }));
+
+      expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "false");
+      expect(membershipCalls()).toEqual([{ listId: "favorites", entry: pacman, member: false }]);
     });
   });
 });

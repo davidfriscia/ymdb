@@ -3,6 +3,7 @@ import { MEDIA_CATEGORIES, mediaUrl, type MediaTarget } from "../../media/mediaA
 import { hasSources, useMedia } from "../../media/mediaContext";
 import { DriverStatusBadge, SupportBadge } from "../badges";
 import { booleanOption, numberOption, stringOption } from "./options";
+import { ResultBookmark } from "./ResultBookmark";
 import type { ResultItem, ResultRendererProps } from "./types";
 
 /**
@@ -44,6 +45,7 @@ export function MediaGridRenderer({ items, options, onOpen }: ResultRendererProp
                 onOpen(index);
               }}
             />
+            <ResultBookmark item={item} />
           </li>
         ))}
       </ul>

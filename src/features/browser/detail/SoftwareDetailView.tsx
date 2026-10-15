@@ -79,6 +79,7 @@ export function SoftwareDetailView({
           {software.parent && <Badge tone="neutral">Clone</Badge>}
         </>
       }
+      favorite={{ kind: "software", listName: software.listName, name: software.name }}
       media={{ kind: "software", list: software.listName, name: software.name }}
       launch={(summary) => (
         <SoftwareLaunchPanel

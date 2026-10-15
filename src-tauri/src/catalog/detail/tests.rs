@@ -373,6 +373,7 @@ fn clone_counts_match_the_paginated_clone_search() {
                 page_size: Some(1),
                 ..MachineSearchRequest::default()
             },
+            None,
         )
         .expect("search")
     });
@@ -391,6 +392,7 @@ fn clone_counts_match_the_paginated_clone_search() {
                 },
                 ..SoftwareSearchRequest::default()
             },
+            None,
         )
         .expect("search")
     });

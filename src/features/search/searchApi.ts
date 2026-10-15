@@ -61,6 +61,8 @@ export interface MachineFilters {
   hasRoms?: boolean;
   hasDisks?: boolean;
   softwareLists?: string[];
+  /** Only machines of this user list (for example `favorites`). */
+  list?: string;
 }
 
 export interface MachineSearchRequest {
@@ -107,6 +109,8 @@ export interface SoftwareFilters {
   hasRoms?: boolean;
   hasDisks?: boolean;
   interfaces?: string[];
+  /** Only software of this user list (for example `favorites`). */
+  list?: string;
 }
 
 export interface SoftwareSearchRequest {

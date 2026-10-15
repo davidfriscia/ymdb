@@ -34,6 +34,7 @@ describe("UI preferences", () => {
           showBadges: true,
         },
       },
+      favoritesOnly: false,
       showCommandPreview: false,
     });
   });
@@ -89,6 +90,13 @@ describe("UI preferences", () => {
     store(LEGACY_PREFERENCES_KEY, { theme: "dark" });
     store(PREFERENCES_KEY, { theme: "light", renderer: "mediaGrid" });
     expect(loadPreferences()).toMatchObject({ theme: "light", renderer: "mediaGrid" });
+  });
+
+  it("keeps the Favorites only option, separate from the favorites themselves", () => {
+    savePreferences({ ...DEFAULT_PREFERENCES, favoritesOnly: true });
+    expect(loadPreferences().favoritesOnly).toBe(true);
+    store(PREFERENCES_KEY, { favoritesOnly: "yes" });
+    expect(loadPreferences().favoritesOnly).toBe(false);
   });
 
   it("ignores malformed data", () => {

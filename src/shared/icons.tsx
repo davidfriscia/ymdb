@@ -78,3 +78,12 @@ export function DownloadIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/** A bookmark; filled when the item is bookmarked. */
+export function BookmarkIcon({ filled = false, ...props }: IconProps & { filled?: boolean }) {
+  return (
+    <Icon {...props}>
+      <path d="M4 2.25h8v11.5L8 10.75l-4 3z" fill={filled ? "currentColor" : "none"} />
+    </Icon>
+  );
+}

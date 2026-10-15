@@ -10,6 +10,7 @@ pub mod detail;
 pub mod health;
 pub mod installations;
 pub mod launcher;
+pub mod lists;
 pub mod mame;
 pub mod media;
 pub mod remote;
@@ -46,6 +47,8 @@ pub enum CommandError {
     ImportInProgress,
     /// ROM manager downloads are already running (one download at a time).
     DownloadInProgress,
+    /// A file chosen by the user cannot be imported (format, version, content).
+    InvalidFile { message: String },
     /// The request is invalid (for example a page size out of range).
     InvalidRequest { message: String },
     /// No catalog has been imported yet for the installation.

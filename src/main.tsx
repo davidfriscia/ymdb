@@ -10,6 +10,7 @@ import "./features/media/media.css";
 import "./features/launcher/launcher.css";
 import "./features/remote/remote.css";
 import "./features/roms/roms.css";
+import "./features/lists/lists.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

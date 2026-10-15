@@ -113,6 +113,7 @@ export type BrowserAction =
   | { type: "setDetailTab"; tab: string }
   | { type: "back" }
   | { type: "backToResults" }
+  | { type: "resetPages" }
   | { type: "installationChanged" }
   | { type: "dismissFiltersKept" };
 
@@ -238,6 +239,15 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
       return { ...state, stack: state.stack.slice(0, -1) };
     case "backToResults":
       return { ...state, stack: [] };
+    case "resetPages":
+      // The results of both scopes changed (for example Favorites only): first pages.
+      return {
+        ...state,
+        queries: {
+          machines: { ...state.queries.machines, page: 0 },
+          software: { ...state.queries.software, page: 0 },
+        },
+      };
     case "installationChanged":
       // Detail views and pages belong to the previous catalog. The search
       // text, filters and sorting are kept.
@@ -369,7 +379,7 @@ function textOf(text: string): string | undefined {
   return text.trim() === "" ? undefined : text.trim();
 }
 
-export function machineFilters(filters: ScopeFilters): MachineFilters {
+export function machineFilters(filters: ScopeFilters, list?: string): MachineFilters {
   return compact<MachineFilters>({
     manufacturers: selected(filters, "manufacturer"),
     years: selected(filters, "year"),
@@ -383,10 +393,11 @@ export function machineFilters(filters: ScopeFilters): MachineFilters {
     runnable: bool(filters.flags.runnable),
     hasRoms: bool(filters.flags.hasRoms),
     hasDisks: bool(filters.flags.hasDisks),
+    list,
   });
 }
 
-export function softwareFilters(filters: ScopeFilters): SoftwareFilters {
+export function softwareFilters(filters: ScopeFilters, list?: string): SoftwareFilters {
   return compact<SoftwareFilters>({
     lists: present(filters, "list"),
     publishers: selected(filters, "publisher"),
@@ -396,6 +407,7 @@ export function softwareFilters(filters: ScopeFilters): SoftwareFilters {
     clones: filters.flags.clones as CloneFilter | undefined,
     hasRoms: bool(filters.flags.hasRoms),
     hasDisks: bool(filters.flags.hasDisks),
+    list,
   });
 }
 
@@ -408,7 +420,12 @@ export type BrowserRequest =
  * ({@link buildFacetRequest}) because they do not depend on the page or the
  * sort, and computing them over the whole catalog is the expensive part.
  */
-export function buildResultsRequest(scope: Scope, text: string, query: ScopeQuery): BrowserRequest {
+export function buildResultsRequest(
+  scope: Scope,
+  text: string,
+  query: ScopeQuery,
+  list?: string,
+): BrowserRequest {
   const common = compact({
     text: textOf(text),
     direction: query.direction,
@@ -421,7 +438,7 @@ export function buildResultsRequest(scope: Scope, text: string, query: ScopeQuer
       request: {
         ...common,
         ...compact({ sort: effectiveSort(query, text) as MachineSort | undefined }),
-        filters: machineFilters(query.filters),
+        filters: machineFilters(query.filters, list),
       },
     };
   }
@@ -430,7 +447,7 @@ export function buildResultsRequest(scope: Scope, text: string, query: ScopeQuer
     request: {
       ...common,
       ...compact({ sort: effectiveSort(query, text) as SoftwareSort | undefined }),
-      filters: softwareFilters(query.filters),
+      filters: softwareFilters(query.filters, list),
     },
   };
 }
@@ -441,6 +458,7 @@ export function buildFacetRequest(
   text: string,
   filters: ScopeFilters,
   facetOptions: ScopeQuery["facetOptions"],
+  list?: string,
 ): BrowserRequest {
   const query = { facetOptions };
   const common = compact({ text: textOf(text), pageSize: 1 });
@@ -449,7 +467,7 @@ export function buildFacetRequest(
       scope,
       request: {
         ...common,
-        filters: machineFilters(filters),
+        filters: machineFilters(filters, list),
         facets: facetRequests(
           FACET_FILTERS.machines.map((definition) => definition.facet as MachineFacet),
           query,
@@ -461,7 +479,7 @@ export function buildFacetRequest(
     scope,
     request: {
       ...common,
-      filters: softwareFilters(filters),
+      filters: softwareFilters(filters, list),
       facets: facetRequests(
         FACET_FILTERS.software.map((definition) => definition.facet as SoftwareFacet),
         query,

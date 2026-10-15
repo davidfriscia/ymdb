@@ -917,3 +917,27 @@
 .browser__notice .message {
   margin: 0;
 }
+
+/* Favorite bookmark (`lists.css`): in the top right corner of every result
+   card, next to (never inside) the button that opens the card. */
+
+.card-grid__item,
+.media-grid__item {
+  position: relative;
+}
+
+/* Room for the bookmark on the first line of a card. */
+.card__title {
+  padding-right: 26px;
+}
+
+.detail-summary__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detail-summary__heading .detail-summary__title {
+  min-width: 0;
+}

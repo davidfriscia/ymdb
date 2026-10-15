@@ -101,6 +101,8 @@ pub struct MachineFilters {
     pub has_disks: Option<bool>,
     /// Machines referencing at least one of these software lists.
     pub software_lists: Vec<String>,
+    /// Only machines of this user list (for example `favorites`).
+    pub list: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -179,6 +181,8 @@ pub struct SoftwareFilters {
     pub has_disks: Option<bool>,
     /// Software with at least one part using one of these interfaces.
     pub interfaces: Vec<String>,
+    /// Only software of this user list (for example `favorites`).
+    pub list: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]

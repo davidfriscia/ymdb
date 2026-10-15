@@ -71,7 +71,7 @@ impl Catalog {
         request: &MachineSearchRequest,
     ) -> Result<MachineSearchResponse, SearchError> {
         self.store
-            .with_reader(|connection| Ok(search_machines(connection, request)))
+            .with_reader(|connection| Ok(search_machines(connection, request, None)))
             .expect("store")
             .expect("catalog")
     }
@@ -81,7 +81,7 @@ impl Catalog {
         request: &SoftwareSearchRequest,
     ) -> Result<SoftwareSearchResponse, SearchError> {
         self.store
-            .with_reader(|connection| Ok(search_software(connection, request)))
+            .with_reader(|connection| Ok(search_software(connection, request, None)))
             .expect("store")
             .expect("catalog")
     }

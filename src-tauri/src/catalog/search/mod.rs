@@ -52,6 +52,49 @@ pub struct FacetValue {
     pub count: u64,
 }
 
+/// Entries of a user list that restrict a search (`list` filter). Lists are
+/// global and never stored in a catalog: the caller resolves the list and the
+/// entries are bound as one JSON parameter, read with `json_each`, so the
+/// restriction applies before counting, faceting and paging, whatever the size
+/// of the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListMembers {
+    json: String,
+}
+
+impl ListMembers {
+    /// Machines by short name.
+    pub fn machines<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
+        let names: Vec<&str> = names.into_iter().collect();
+        Self {
+            json: serde_json::json!(names).to_string(),
+        }
+    }
+
+    /// Software by `(software list name, short name)`.
+    pub fn software<'a>(keys: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        let keys: Vec<[&str; 2]> = keys.into_iter().map(|(list, name)| [list, name]).collect();
+        Self {
+            json: serde_json::json!(keys).to_string(),
+        }
+    }
+
+    pub(super) fn json(&self) -> &str {
+        &self.json
+    }
+}
+
+/// The members are given exactly when the request has a `list` filter.
+fn check_members(list: Option<&str>, members: Option<&ListMembers>) -> Result<(), SearchError> {
+    if list.is_some() == members.is_some() {
+        Ok(())
+    } else {
+        Err(SearchError::InvalidRequest(
+            "the list filter was not resolved".to_owned(),
+        ))
+    }
+}
+
 #[derive(Debug)]
 pub enum SearchError {
     /// The request is invalid; the message explains why.

@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import type { MachineSummary, SoftwareSummary } from "../../search/searchApi";
 import { DriverStatusBadge, SupportBadge } from "../badges";
 import { numberOption } from "./options";
+import { ResultBookmark } from "./ResultBookmark";
 import type { ResultRendererProps } from "./types";
 
 /** Text cards: the original renderer. The card size sets the minimum card width. */
@@ -26,6 +27,7 @@ export function ClassicCardRenderer({ items, options, onOpen }: ResultRendererPr
               <SoftwareCard software={item.software} />
             )}
           </button>
+          <ResultBookmark item={item} />
         </li>
       ))}
     </ul>

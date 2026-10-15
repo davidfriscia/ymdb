@@ -12,6 +12,7 @@ export type CommandError =
   | { kind: "migrationFailed"; message: string }
   | { kind: "importInProgress" }
   | { kind: "downloadInProgress" }
+  | { kind: "invalidFile"; message: string }
   | { kind: "invalidRequest"; message: string }
   | { kind: "catalogNotImported" }
   | { kind: "catalogUnreadable"; message: string }
@@ -49,6 +50,7 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "migrationFailed" ||
     kind === "importInProgress" ||
     kind === "downloadInProgress" ||
+    kind === "invalidFile" ||
     kind === "invalidRequest" ||
     kind === "catalogNotImported" ||
     kind === "catalogUnreadable" ||
@@ -97,6 +99,8 @@ export function describeCommandError(error: CommandError): string {
       return "A catalog import is already running.";
     case "downloadInProgress":
       return "A ROM download is already running. Wait for it to end or cancel it first.";
+    case "invalidFile":
+      return `The file cannot be imported: ${error.message}`;
     case "invalidRequest":
       return `Invalid request: ${error.message}`;
     case "catalogNotImported":

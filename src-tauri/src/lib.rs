@@ -6,6 +6,7 @@ mod commands;
 mod health;
 mod installations;
 mod launcher;
+mod lists;
 mod mame;
 mod media;
 mod remote;
@@ -20,6 +21,7 @@ use tauri::Manager;
 use crate::commands::catalog::CatalogState;
 use crate::commands::installations::InstallationsState;
 use crate::commands::launcher::LauncherState;
+use crate::commands::lists::ListsState;
 use crate::commands::media::MediaState;
 use crate::commands::remote::RemoteState;
 use crate::commands::roms::RomManagerState;
@@ -56,6 +58,7 @@ pub fn run() {
             app.manage(CatalogState::default());
             app.manage(LauncherState::new(launch_logs));
             app.manage(MediaState::new(media));
+            app.manage(ListsState::new(config_dir.as_deref()));
             app.manage(RemoteState::new(config_dir.as_deref()));
             app.manage(RomManagerState::default());
             Ok(())
@@ -91,6 +94,11 @@ pub fn run() {
             commands::media::save_media_sources,
             commands::media::pick_media_directory,
             commands::media::list_media,
+            commands::lists::get_list,
+            commands::lists::set_list_membership,
+            commands::lists::export_lists,
+            commands::lists::preview_lists_import,
+            commands::lists::apply_lists_import,
             commands::remote::get_remote_connections,
             commands::remote::save_remote_connection,
             commands::remote::remove_remote_connection,

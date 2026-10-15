@@ -105,6 +105,7 @@ impl App {
                     page_size: Some(100),
                     ..MachineSearchRequest::default()
                 },
+                None,
             )
         })
         .expect("search");

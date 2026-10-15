@@ -74,6 +74,7 @@ export function MachineDetailView({
         </>
       }
       badges={<MachineBadges machine={machine} />}
+      favorite={{ kind: "machine", name: machine.name }}
       media={{ kind: "machine", name: machine.name }}
       launch={(summary) => (
         <MachineLaunchPanel name={machine.name} isRunnable={machine.isRunnable} summary={summary} />

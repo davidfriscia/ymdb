@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCatalogStatus } from "../test/catalogFixtures";
 import { launchConfigView } from "../test/launcherFixtures";
 import { mediaSourcesView } from "../test/mediaFixtures";
+import { favoritesList } from "../test/listFixtures";
 import { installationsView, OLD_ID } from "../test/installationFixtures";
 import { App } from "./App";
 import { LEGACY_PREFERENCES_KEY, PREFERENCES_KEY } from "./preferences";
@@ -21,6 +22,7 @@ const EMPTY: Record<string, unknown> = {
   get_launch_sessions: [],
   get_media_sources: mediaSourcesView(),
   get_remote_connections: { connections: [], loadError: null },
+  get_list: favoritesList(),
 };
 
 function storedPreferences(): unknown {
@@ -88,6 +90,7 @@ describe("App", () => {
       "Appearance",
       "Media Sources",
       "Remote Connections",
+      "Favorites",
       "About",
       "Diagnostics",
     ]);

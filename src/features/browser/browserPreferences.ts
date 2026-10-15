@@ -2,13 +2,18 @@ import { normalizeOptions } from "./renderers/options";
 import { DEFAULT_RENDERER, RENDERERS, isRendererId, type RendererId } from "./renderers/registry";
 import type { RendererOptionValues } from "./renderers/types";
 
-/** Display preferences of the browser; they never change the search. */
+/**
+ * Display preferences of the browser. Only `favoritesOnly` restricts the
+ * search; the others never change it.
+ */
 export interface BrowserPreferences {
   filtersVisible: boolean;
   viewOptionsVisible: boolean;
   renderer: RendererId;
   /** Options of every renderer, by renderer id, kept when switching renderer. */
   rendererOptions: Readonly<Record<string, RendererOptionValues>>;
+  /** Shows only the entries of the global Favorites list (not the list itself). */
+  favoritesOnly: boolean;
 }
 
 /** Valid options for every registered renderer, from stored values or defaults. */
@@ -27,6 +32,7 @@ export const DEFAULT_BROWSER_PREFERENCES: BrowserPreferences = {
   viewOptionsVisible: false,
   renderer: DEFAULT_RENDERER,
   rendererOptions: normalizeRendererOptions(undefined),
+  favoritesOnly: false,
 };
 
 /** Reads browser preferences from stored values; invalid values use the defaults. */
@@ -44,5 +50,9 @@ export function parseBrowserPreferences(values: Record<string, unknown>): Browse
       ? values.renderer
       : DEFAULT_BROWSER_PREFERENCES.renderer,
     rendererOptions: normalizeRendererOptions(values.rendererOptions),
+    favoritesOnly:
+      typeof values.favoritesOnly === "boolean"
+        ? values.favoritesOnly
+        : DEFAULT_BROWSER_PREFERENCES.favoritesOnly,
   };
 }

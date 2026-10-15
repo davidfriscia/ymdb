@@ -55,6 +55,41 @@ describe("browser state", () => {
     expect(countActiveFilters(state.queries.machines.filters)).toBe(6);
   });
 
+  it("restricts results and facets to a list with the other filters", () => {
+    const state = browserReducer(initialBrowserState, {
+      type: "toggleValue",
+      facet: "manufacturer",
+      value: "Capcom",
+    });
+    const query = state.queries.machines;
+
+    expect(buildResultsRequest("machines", "", query, "favorites").request.filters).toEqual({
+      manufacturers: ["Capcom"],
+      list: "favorites",
+    });
+    expect(
+      buildFacetRequest("machines", "", query.filters, query.facetOptions, "favorites").request
+        .filters,
+    ).toEqual({ manufacturers: ["Capcom"], list: "favorites" });
+    expect(
+      buildResultsRequest("software", "", state.queries.software, "favorites").request.filters,
+    ).toEqual({ list: "favorites" });
+    expect(buildResultsRequest("machines", "", query).request.filters).toEqual({
+      manufacturers: ["Capcom"],
+    });
+  });
+
+  it("returns both scopes to their first page", () => {
+    const paged = browserReducer(
+      browserReducer(initialBrowserState, { type: "setPage", page: 3 }),
+      { type: "setScope", scope: "software" },
+    );
+    const state = browserReducer(browserReducer(paged, { type: "setPage", page: 2 }), {
+      type: "resetPages",
+    });
+    expect([state.queries.machines.page, state.queries.software.page]).toEqual([0, 0]);
+  });
+
   it("maps software filters", () => {
     const state = apply(
       { type: "setScope", scope: "software" },

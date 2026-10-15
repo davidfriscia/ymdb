@@ -5,6 +5,7 @@ import { useInstallations } from "../features/installations/installationsContext
 import { InstallationsProvider } from "../features/installations/InstallationsProvider";
 import { MamePage } from "../features/installations/MamePage";
 import { LauncherProvider } from "../features/launcher/LauncherProvider";
+import { FavoritesProvider } from "../features/lists/FavoritesProvider";
 import { MediaProvider } from "../features/media/MediaProvider";
 import { loadPreferences, savePreferences, type UiPreferences } from "./preferences";
 import { SettingsView } from "./SettingsView";
@@ -39,7 +40,9 @@ export function App() {
   return (
     <MediaProvider>
       <InstallationsProvider>
-        <Shell />
+        <FavoritesProvider>
+          <Shell />
+        </FavoritesProvider>
       </InstallationsProvider>
     </MediaProvider>
   );
@@ -78,6 +81,7 @@ function Shell() {
     viewOptionsVisible: preferences.viewOptionsVisible,
     renderer: preferences.renderer,
     rendererOptions: preferences.rendererOptions,
+    favoritesOnly: preferences.favoritesOnly,
   };
 
   return (

@@ -1,0 +1,85 @@
+/* Favorite bookmark: discreet until hovered or focused, solid when the item is a favorite. */
+
+.bookmark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.bookmark--overlay {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: var(--bookmark-opacity, 0.55);
+}
+
+/* A hovered card shows its bookmark more clearly. */
+.card-grid__item:hover,
+.media-grid__item:hover {
+  --bookmark-opacity: 0.85;
+}
+
+.bookmark:hover,
+.bookmark:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  opacity: 1;
+}
+
+.bookmark[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  opacity: 1;
+}
+
+.bookmark[aria-pressed="true"]:hover {
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
+}
+
+.bookmark[aria-busy="true"] {
+  cursor: progress;
+}
+
+.bookmark:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bookmark {
+    transition: none;
+  }
+}
+
+/* Favorites import summary (Settings) */
+
+.favorites-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.favorites-import__counts {
+  margin: 0;
+  padding-left: 20px;
+}

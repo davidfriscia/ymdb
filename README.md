@@ -307,13 +307,70 @@ The **MAME** page holds the MAME installations and everything configured per
 installation (see above). The **Settings** page uses the same layout for the global
 settings: **Appearance** (the **Light**, default, or **Dark** theme, applied
 immediately to the whole application), **Media Sources**, **Remote Connections**,
-**About** (product name and version) and **Diagnostics** (a backend connection check).
+**Favorites** (export and import, see [Favorites](#favorites)), **About** (product
+name and version) and **Diagnostics** (a backend connection check).
 It opens on Appearance and keeps the chosen section while you visit other pages.
 Theme, panel visibility, view mode, the
 options of each view and the command line preview are saved in the application's
 web storage, separately from the MAME, launch and media configuration; they are the
 same for every MAME installation. The active installation is saved with the
 installations, not with these preferences.
+
+## Favorites
+
+Every card of the catalog, in **Classic Cards** and **Media Grid**, has a bookmark in
+its top right corner: faint while the machine or software is not a favorite, solid
+when it is. Click it (or focus it and press Enter or Space) to add or remove the
+favorite; the card does not open. The same bookmark sits next to the title of a
+machine or software detail page. A change shows at once; if it cannot be saved, the
+bookmark returns to its previous state and an error explains why.
+
+Favorites belong to YMDB, not to a MAME installation. A machine is identified by its
+MAME short name (`pacman`), a software by its software list and short name
+(`nes`/`smb`), never by a catalog id, a description or a ROM file name. So:
+
+- a favorite added with MAME 0.252 is a favorite with MAME 0.280 too, when that
+  catalog has the same short name;
+- a favorite missing from the active catalog is kept and shows up again with an
+  installation that has it;
+- switching, updating, re-importing or removing an installation never changes the
+  favorites, and a renamed short name is a different machine (YMDB never matches
+  titles by description).
+
+**Favorites only**, in the **View Options** panel, shows only the favorites of the
+active catalog, for machines or software. It combines with the search text, the
+filters, the sort order and the pages: counts, facets and pages cover the matching
+favorites only, and a chip above the results turns it off. Removing a favorite
+while it is on removes it from the results. The option is an interface preference;
+it never changes the favorites themselves.
+
+**Settings › Favorites** shows how many favorites you have and exports them to a JSON
+file, or imports such a file. An import first shows how many entries are new,
+already present or duplicated, then **Merge** (add the new ones, remove nothing) or
+**Replace** (keep exactly those of the file, after a confirmation that says how many
+will be removed). Imports are checked completely and applied at once: an invalid
+file changes nothing. The file holds only MAME names, so it works on another
+computer and with any MAME version:
+
+```json
+{
+  "format": "ymdb-lists",
+  "version": 1,
+  "lists": [
+    {
+      "id": "favorites",
+      "kind": "system",
+      "entries": [
+        { "kind": "machine", "name": "1942" },
+        { "kind": "software", "listName": "nes", "name": "smb" }
+      ]
+    }
+  ]
+}
+```
+
+Favorites are saved in `lists.json`, in the configuration directory (see
+[Where installations are stored](#where-installations-are-stored)).
 
 ## Artwork and screenshots
 
@@ -616,6 +673,9 @@ Implemented:
   counts, sorting and pagination (see [Catalog search](#catalog-search)).
 - Catalog browser with filters, facets, card results, a persistent pagination bar and machine,
   software and software list detail views (see [Browsing the catalog](#browsing-the-catalog)).
+- Global favorites for machines and software: bookmarks on every card and detail
+  page, a **Favorites only** view applied by the search engine, and JSON export and
+  import with merge or replace (see [Favorites](#favorites)).
 - Media Grid view and detail page galleries (with a lightbox) of local artwork and
   screenshots from configurable media
   sources (see [Artwork and screenshots](#artwork-and-screenshots)).

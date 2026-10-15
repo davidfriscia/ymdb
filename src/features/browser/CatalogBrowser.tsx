@@ -14,6 +14,8 @@ import { getCatalogStatus, type CatalogStatus } from "../catalog/catalogApi";
 import { describeFreshness, formatCount } from "../catalog/catalogMessages";
 import { InstallationSelect } from "../installations/InstallationSelect";
 import { InstallationScope, useInstallations } from "../installations/installationsContext";
+import { useFavorites } from "../lists/favoritesContext";
+import { FAVORITES_LIST_ID } from "../lists/listsApi";
 import { searchMachines, searchSoftware, type FacetResult } from "../search/searchApi";
 import {
   activeFilters,
@@ -323,23 +325,31 @@ function Workspace({
   const { scope, appliedText, stack } = state;
   const query = state.queries[scope];
   const softwareUnavailable = scope === "software" && !softwareImported;
+  const favorites = useFavorites();
+  const { favoritesOnly } = preferences;
+  // Favorites only restricts the search itself, so counts, facets and pages
+  // cover the favorites of this catalog only.
+  const list = favoritesOnly ? FAVORITES_LIST_ID : undefined;
+  // Favorites-only results change with the list: they reload after every
+  // saved change. Both keys only grow, so their sum changes with either.
+  const searchKey = refreshKey + (favoritesOnly ? favorites.revision : 0);
 
   // New request objects only when the query changes, so rendering never searches again.
   const request = useMemo(
-    () => buildResultsRequest(scope, appliedText, query),
-    [scope, appliedText, query],
+    () => buildResultsRequest(scope, appliedText, query, list),
+    [scope, appliedText, query, list],
   );
   // Facets do not depend on the page or the sort: changing them does not recount.
   const { filters, facetOptions } = query;
   const facetRequest = useMemo(
-    () => buildFacetRequest(scope, appliedText, filters, facetOptions),
-    [scope, appliedText, filters, facetOptions],
+    () => buildFacetRequest(scope, appliedText, filters, facetOptions, list),
+    [scope, appliedText, filters, facetOptions, list],
   );
   const load = useCallback(
     () => (softwareUnavailable ? Promise.resolve(null) : runSearch(installationId, request)),
     [installationId, request, softwareUnavailable],
   );
-  const search = useLoader(load, refreshKey);
+  const search = useLoader(load, searchKey);
   const current = search.state.status === "ready" ? search.state.value : null;
   // While searching, keep showing the previous results of the same catalog
   // and type; results of another installation are never shown.
@@ -351,7 +361,7 @@ function Workspace({
       softwareUnavailable ? Promise.resolve(null) : runFacetSearch(installationId, facetRequest),
     [installationId, facetRequest, softwareUnavailable],
   );
-  const facetSearch = useLoader(loadFacets, refreshKey);
+  const facetSearch = useLoader(loadFacets, searchKey);
   const currentFacets = facetSearch.state.status === "ready" ? facetSearch.state.value : null;
   const shownFacets =
     currentFacets ?? (sameCatalog(facetSearch.latest) ? facetSearch.latest : null);
@@ -372,6 +382,20 @@ function Workspace({
     savedScroll.current = 0;
     if (resultsRef.current) resultsRef.current.scrollTop = 0;
   }, [request]);
+
+  // Removing the last favorite of the last page leaves it empty: show the new last page.
+  const pastLastPage =
+    favoritesOnly && current && current.meta.total > 0 && current.items.length === 0
+      ? current.meta.pageCount - 1
+      : null;
+  useEffect(() => {
+    if (pastLastPage !== null) dispatch({ type: "setPage", page: pastLastPage });
+  }, [pastLastPage, dispatch]);
+
+  const setFavoritesOnly = (value: boolean) => {
+    onPreferencesChange({ favoritesOnly: value });
+    dispatch({ type: "resetPages" });
+  };
 
   const openFromResults = (index: number) => {
     const item = shown?.items[index];
@@ -399,6 +423,14 @@ function Workspace({
 
   return (
     <>
+      {favorites.error && (
+        <div className="browser__banner browser__notice" role="alert">
+          <p className="message message--error">{favorites.error}</p>
+          <button type="button" className="link-button" onClick={favorites.dismissError}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {freshnessWarning && showingResults && (
         <p className="message message--warning browser__banner" role="status">
           {freshnessWarning}
@@ -461,7 +493,15 @@ function Workspace({
           {/* Only the results scroll: the pagination footer stays visible below them. */}
           <div className="browser__results" aria-busy={search.state.status === "loading"}>
             <div ref={resultsRef} className="browser__scroll" data-testid="results-scroll">
-              <ActiveFilterBar scope={scope} state={state} dispatch={dispatch} />
+              <ActiveFilterBar
+                scope={scope}
+                state={state}
+                dispatch={dispatch}
+                favoritesOnly={favoritesOnly}
+                onShowAll={() => {
+                  setFavoritesOnly(false);
+                }}
+              />
               {softwareUnavailable ? (
                 <div className="state-message">
                   <p className="message message--muted">
@@ -480,6 +520,9 @@ function Workspace({
                   filterCount={filterCount}
                   preferences={preferences}
                   dispatch={dispatch}
+                  onShowAll={() => {
+                    setFavoritesOnly(false);
+                  }}
                   onOpen={openFromResults}
                   onOpenMame={onOpenMame}
                 />
@@ -507,6 +550,19 @@ function Workspace({
                 <legend className="view-panel__title">MAME Version</legend>
                 <InstallationSelect onOpenMame={onOpenMame} />
               </fieldset>
+              <fieldset className="view-panel__section">
+                <legend className="view-panel__title">Results</legend>
+                <label className="view-panel__option view-panel__option--toggle">
+                  <input
+                    type="checkbox"
+                    checked={favoritesOnly}
+                    onChange={(event) => {
+                      setFavoritesOnly(event.target.checked);
+                    }}
+                  />
+                  <span>Favorites only</span>
+                </label>
+              </fieldset>
             </ViewOptionsPanel>
           )}
         </div>
@@ -530,15 +586,33 @@ function ActiveFilterBar({
   scope,
   state,
   dispatch,
+  favoritesOnly,
+  onShowAll,
 }: {
   scope: Scope;
   state: BrowserState;
   dispatch: Dispatch<BrowserAction>;
+  favoritesOnly: boolean;
+  onShowAll: () => void;
 }) {
   const active = activeFilters(scope, state.queries[scope].filters);
-  if (active.length === 0) return null;
+  if (active.length === 0 && !favoritesOnly) return null;
   return (
     <div className="active-filters" aria-label="Active filters" role="group">
+      {/* A view option, not a filter: "Clear all filters" keeps it. */}
+      {favoritesOnly && (
+        <span className="chip">
+          Favorites only
+          <button
+            type="button"
+            className="chip__remove"
+            aria-label="Show all results, not only favorites"
+            onClick={onShowAll}
+          >
+            ×
+          </button>
+        </span>
+      )}
       {active.map((filter) => (
         <span key={filter.key} className="chip">
           {filter.label}
@@ -554,15 +628,17 @@ function ActiveFilterBar({
           </button>
         </span>
       ))}
-      <button
-        type="button"
-        className="link-button"
-        onClick={() => {
-          dispatch({ type: "clearFilters" });
-        }}
-      >
-        Clear all filters
-      </button>
+      {active.length > 0 && (
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => {
+            dispatch({ type: "clearFilters" });
+          }}
+        >
+          Clear all filters
+        </button>
+      )}
     </div>
   );
 }
@@ -574,6 +650,8 @@ interface ResultsProps {
   filterCount: number;
   preferences: BrowserPreferences;
   dispatch: Dispatch<BrowserAction>;
+  /** Turns Favorites only off. */
+  onShowAll: () => void;
   onOpen: (index: number) => void;
   onOpenMame: () => void;
 }
@@ -585,6 +663,7 @@ function Results({
   filterCount,
   preferences,
   dispatch,
+  onShowAll,
   onOpen,
   onOpenMame,
 }: ResultsProps) {
@@ -639,7 +718,16 @@ function Results({
 
       {meta.total === 0 && (
         <div className="state-message">
-          <p className="message message--muted">No results match the search and filters.</p>
+          <p className="message message--muted">
+            {preferences.favoritesOnly
+              ? "No favorites match the search and filters in this catalog."
+              : "No results match the search and filters."}
+          </p>
+          {preferences.favoritesOnly && (
+            <button type="button" className="button button--secondary" onClick={onShowAll}>
+              Show all results
+            </button>
+          )}
           {filterCount > 0 && (
             <button
               type="button"

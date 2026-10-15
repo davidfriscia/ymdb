@@ -3,6 +3,8 @@ import { describeError } from "../../../shared/ipc";
 import type { LoadState } from "../../../shared/useLoader";
 import { MediaGallery } from "../../media/MediaGallery";
 import type { MediaTarget } from "../../media/mediaApi";
+import { FavoriteBookmark } from "../../lists/FavoriteBookmark";
+import type { ListEntry } from "../../lists/listsApi";
 import type { RecordLink } from "../detailApi";
 
 export interface DetailTab {
@@ -25,6 +27,8 @@ interface DetailFrameProps {
   subtitle: ReactNode;
   badges?: ReactNode;
   navigation: DetailNavigation;
+  /** The machine or software that can be added to Favorites from the title. */
+  favorite?: ListEntry;
   /** The record whose artwork is shown in the gallery below the header. */
   media?: MediaTarget;
   /**
@@ -49,6 +53,7 @@ export function DetailFrame({
   subtitle,
   badges,
   navigation,
+  favorite,
   media,
   launch,
   tabs,
@@ -59,9 +64,12 @@ export function DetailFrame({
   const active = tabs.some((tab) => tab.id === activeTab) ? activeTab : "overview";
   const summary = (
     <div className="detail-summary">
-      <h2 id="detail-title" className="detail-summary__title" title={title}>
-        {title}
-      </h2>
+      <div className="detail-summary__heading">
+        <h2 id="detail-title" className="detail-summary__title" title={title}>
+          {title}
+        </h2>
+        {favorite && <FavoriteBookmark entry={favorite} title={title} variant="inline" />}
+      </div>
       <p className="detail-summary__line">{subtitle}</p>
       {badges && <p className="detail-summary__badges">{badges}</p>}
     </div>

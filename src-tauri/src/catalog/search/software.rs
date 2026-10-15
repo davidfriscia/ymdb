@@ -12,7 +12,7 @@ use super::request::{
 };
 use super::sql::{Conditions, count, facet_values, nulls_last, placeholders, text_values};
 use super::text::{self, TextQuery};
-use super::{FacetResult, SearchError, SearchResponse};
+use super::{FacetResult, ListMembers, SearchError, SearchResponse, check_members};
 
 /// Lightweight software data for result lists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -46,11 +46,13 @@ const WITH_DISKS: &str = "SELECT p.software_id FROM software_parts p
 pub fn search_software(
     connection: &Connection,
     request: &SoftwareSearchRequest,
+    members: Option<&ListMembers>,
 ) -> Result<SoftwareSearchResponse, SearchError> {
     let started = Instant::now();
     let page = validate_page(request.page, request.page_size)?;
     validate_text(request.text.as_deref())?;
     validate_filters(&request.filters)?;
+    check_members(request.filters.list.as_deref(), members)?;
     let facet_queries = validate_facets(&request.facets)?;
     let text = text::parse(request.text.as_deref())?;
     let imported: bool = connection.query_row(
@@ -63,7 +65,7 @@ pub fn search_software(
     }
 
     let from = from_clause(text.as_ref());
-    let conditions = conditions(&request.filters, text.as_ref(), None);
+    let conditions = conditions(&request.filters, members, text.as_ref(), None);
     let total = count(connection, from, &conditions)?;
 
     let (order, order_params) = order_by(request.sort, request.direction, text.as_ref());
@@ -98,7 +100,7 @@ pub fn search_software(
 
     let facets = facet_queries
         .iter()
-        .map(|query| facet(connection, &request.filters, text.as_ref(), query))
+        .map(|query| facet(connection, &request.filters, members, text.as_ref(), query))
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(SearchResponse {
@@ -132,11 +134,21 @@ pub(super) fn from_clause(text: Option<&TextQuery>) -> &'static str {
 /// (used to count the values of that facet).
 pub(super) fn conditions(
     filters: &SoftwareFilters,
+    members: Option<&ListMembers>,
     text: Option<&TextQuery>,
     excluded: Option<SoftwareFacet>,
 ) -> Conditions {
     let applies = |facet| excluded != Some(facet);
     let mut conditions = Conditions::default();
+    if let Some(members) = members {
+        // Uncorrelated: the list is read once, then matched on the unique
+        // (list, name) pair, so equal names of different lists never mix.
+        conditions.push(
+            "(s.list_name, s.name) IN (SELECT json_extract(value, '$[0]'), \
+             json_extract(value, '$[1]') FROM json_each(?))",
+            [Value::Text(members.json().to_owned())],
+        );
+    }
     if let Some(text) = text {
         conditions.push(
             "software_fts MATCH ?",
@@ -229,10 +241,11 @@ pub(super) fn order_by(
 fn facet(
     connection: &Connection,
     filters: &SoftwareFilters,
+    members: Option<&ListMembers>,
     text: Option<&TextQuery>,
     query: &FacetQuery<SoftwareFacet>,
 ) -> Result<FacetResult<SoftwareFacet>, SearchError> {
-    let mut conditions = conditions(filters, text, Some(query.facet));
+    let mut conditions = conditions(filters, members, text, Some(query.facet));
     let (column, join) = match query.facet {
         SoftwareFacet::List => ("s.list_name", ""),
         SoftwareFacet::Publisher => ("s.publisher", ""),

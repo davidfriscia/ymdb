@@ -142,6 +142,14 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   `unresolved`, never "not found". Downloads go through temporary files and are
   finalized without ever replacing an existing file. Download plans are snapshots of
   their installation and request; Download & Play launches only that request.
+- `src-tauri/src/lists/`: global user lists in `lists.json` (Favorites is the system
+  list `favorites`; user lists share the model). Entries reference machines by MAME
+  short name and software by list and short name only; entries missing from a
+  catalog are kept, never matched approximately. Lists never go into a catalog:
+  searches restricted to a list receive its entries through `ListMembers` (one JSON
+  parameter read with `json_each`). Changes are saved before being kept in memory; an
+  invalid `lists.json` is reported, never replaced. Imports are previewed, then
+  applied atomically.
 - Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
   unbounded one-to-many relations (clones, software of a list, machines of a list)
   in them: return a count and list them through the paginated search.
@@ -167,6 +175,10 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   `Pagination` lives in the results footer, outside renderers. Solve heights
   structurally (flex/grid with `min-height: 0`), never with fixed positioning or
   window-based heights.
+- Favorite state comes only from `FavoritesProvider` and is changed only through
+  `FavoriteBookmark` (cards and detail pages); never request membership per card.
+  Bookmarks sit next to, never inside, the button that opens a card. "Favorites
+  only" is an interface preference that adds the `list` filter to backend requests.
 - Detail artwork goes through `MediaGallery` (same `mediaUrl` requests as the Media
   Grid, one per configured category); never add another way to look up image files.
 - Interface preferences have a versioned key; a format change gets a new key and a
