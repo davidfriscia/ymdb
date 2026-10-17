@@ -164,6 +164,7 @@ export function machineDetail(name: string, overrides: Partial<MachineDetail> = 
     softwareLists: [],
     ramOptions: [],
     samples: [],
+    classifications: { genres: [], categories: [], series: [], versionAdded: null },
     ...overrides,
   };
 }

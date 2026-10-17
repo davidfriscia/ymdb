@@ -15,7 +15,9 @@ pub const MAX_PAGE_SIZE: u32 = 200;
 /// Highest accepted page index; deep pages are slower with offset pagination.
 pub const MAX_PAGE: u32 = 100_000;
 pub const DEFAULT_FACET_LIMIT: u32 = 50;
-pub const MAX_FACET_LIMIT: u32 = 200;
+/// High enough for every value of the classification facets (about 800
+/// category nodes and 720 series in the support files of MAME 0.288).
+pub const MAX_FACET_LIMIT: u32 = 1000;
 /// Maximum length of the search text, in characters.
 pub const MAX_TEXT_LENGTH: usize = 200;
 /// Maximum length of a facet value search, in characters.
@@ -73,6 +75,22 @@ pub enum MachineFacet {
     DriverStatus,
     EmulationStatus,
     SoftwareList,
+    /// Classifications from the support files (see `catalog::classification`).
+    Genre,
+    /// Category nodes, every ancestor included, in path order.
+    Category,
+    Series,
+    /// Versions in MAME version order.
+    VersionAdded,
+}
+
+/// Versions added between `from` and `to` (both included, in MAME version
+/// order); a missing bound is open.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct VersionRange {
+    pub from: Option<String>,
+    pub to: Option<String>,
 }
 
 /// Machine filters. Within a filter, values are alternatives (OR); different
@@ -101,6 +119,15 @@ pub struct MachineFilters {
     pub has_disks: Option<bool>,
     /// Machines referencing at least one of these software lists.
     pub software_lists: Vec<String>,
+    /// Machines of these genres (active support file source).
+    pub genres: Vec<String>,
+    /// Machines of these category nodes; a node selects its descendants.
+    pub categories: Vec<String>,
+    /// Machines of these series (a machine may belong to several).
+    pub series: Vec<String>,
+    /// Machines added in these versions; alternatives of `version_added_range`.
+    pub versions_added: Vec<String>,
+    pub version_added_range: Option<VersionRange>,
     /// Only machines of this user list (for example `favorites`).
     pub list: Option<String>,
 }

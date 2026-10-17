@@ -1,7 +1,14 @@
 import type { MachineFacet, SoftwareFacet } from "../search/searchApi";
+import type { Dimension } from "../support-files/supportFilesApi";
 
 /** The catalog type being browsed. */
 export type Scope = "machines" | "software";
+
+/**
+ * How the values of a facet are shown: a list (searched by the backend), a
+ * tree of category paths or versions with a range (both loaded completely).
+ */
+export type FacetPresentation = "list" | "tree" | "version";
 
 export interface FacetFilterDefinition {
   facet: MachineFacet | SoftwareFacet;
@@ -11,6 +18,12 @@ export interface FacetFilterDefinition {
   /** Label of the `null` entry. */
   emptyLabel: string;
   formatValue?: (value: string) => string;
+  /**
+   * A classification of the support files: shown only when the catalog has
+   * it (an active source), since its values come from the support files.
+   */
+  classification?: Dimension;
+  presentation?: FacetPresentation;
 }
 
 export interface FlagOption {
@@ -43,6 +56,24 @@ const CLONES: FlagFilterDefinition = {
 
 export const FACET_FILTERS: Record<Scope, FacetFilterDefinition[]> = {
   machines: [
+    { facet: "genre", label: "Genre", nullable: false, emptyLabel: "", classification: "genre" },
+    {
+      facet: "category",
+      label: "Category",
+      nullable: false,
+      emptyLabel: "",
+      classification: "category",
+      presentation: "tree",
+    },
+    { facet: "series", label: "Series", nullable: false, emptyLabel: "", classification: "series" },
+    {
+      facet: "versionAdded",
+      label: "Version Added",
+      nullable: false,
+      emptyLabel: "",
+      classification: "versionAdded",
+      presentation: "version",
+    },
     { facet: "manufacturer", label: "Manufacturer", nullable: true, emptyLabel: "Unknown" },
     { facet: "year", label: "Year", nullable: true, emptyLabel: "Unknown" },
     {
@@ -109,4 +140,13 @@ export function supportLabel(value: string): string {
 export function formatFacetValue(definition: FacetFilterDefinition, value: string | null): string {
   if (value === null) return definition.emptyLabel;
   return definition.formatValue ? definition.formatValue(value) : value;
+}
+
+/** Whether the facet's values are loaded completely (tree and version facets). */
+export function isCompleteFacet(definition: FacetFilterDefinition): boolean {
+  return definition.presentation === "tree" || definition.presentation === "version";
+}
+
+export function facetDefinition(scope: Scope, facet: string): FacetFilterDefinition | undefined {
+  return FACET_FILTERS[scope].find((definition) => definition.facet === facet);
 }

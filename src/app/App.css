@@ -260,6 +260,10 @@ body {
   outline: none;
 }
 
+.modal__dialog--narrow {
+  width: min(600px, 100%);
+}
+
 .modal__header {
   display: flex;
   align-items: center;

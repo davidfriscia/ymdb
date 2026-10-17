@@ -9,6 +9,7 @@ use tauri::State;
 
 use super::installations::InstallationsState;
 use super::lists::ListsState;
+use super::support_files::{SupportFilesState, sync_catalog};
 use super::{CommandError, run_blocking};
 use crate::catalog::search::SearchError;
 use crate::catalog::search::machines::{MachineSearchResponse, search_machines};
@@ -22,10 +23,14 @@ pub async fn search_catalog_machines(
     request: MachineSearchRequest,
     installations: State<'_, InstallationsState>,
     lists: State<'_, ListsState>,
+    support: State<'_, SupportFilesState>,
 ) -> Result<MachineSearchResponse, CommandError> {
     let store = installations.resolve(&installation_id)?.catalog;
     let members = lists.machine_members(request.filters.list.as_deref())?;
+    let target = support.target();
     run_blocking(move || {
+        // A failure keeps the previous projection; the status reports it.
+        let _ = sync_catalog(&store, target);
         search(&store, |connection| {
             search_machines(connection, &request, members.as_ref())
         })

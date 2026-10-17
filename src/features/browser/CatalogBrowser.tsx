@@ -17,14 +17,24 @@ import { InstallationScope, useInstallations } from "../installations/installati
 import { useFavorites } from "../lists/favoritesContext";
 import { FAVORITES_LIST_ID } from "../lists/listsApi";
 import { searchMachines, searchSoftware, type FacetResult } from "../search/searchApi";
+import { SavedFiltersSection } from "../saved-filters/SavedFiltersSection";
+import {
+  DIMENSION_LABELS,
+  findMissingClassificationValues,
+  getClassificationStatus,
+  type Dimension,
+  type DimensionValues,
+} from "../support-files/supportFilesApi";
 import {
   activeFilters,
   browserReducer,
   buildFacetRequest,
+  buildFacetValuesRequest,
   buildResultsRequest,
   countActiveFilters,
   initialBrowserState,
   type BrowserAction,
+  type BrowserCriteria,
   type BrowserRequest,
   type BrowserState,
   type DetailEntry,
@@ -34,8 +44,8 @@ import { MachineDetailView } from "./detail/MachineDetailView";
 import { SoftwareDetailView } from "./detail/SoftwareDetailView";
 import { SoftwareListDetailView } from "./detail/SoftwareListDetailView";
 import type { DetailNavigation } from "./detail/DetailParts";
-import type { Scope } from "./filterDefinitions";
-import { FilterPanel } from "./FilterPanel";
+import { FACET_FILTERS, type Scope } from "./filterDefinitions";
+import { FilterPanel, type ClassificationsState } from "./FilterPanel";
 import { Pagination } from "./Pagination";
 import type { BrowserPreferences } from "./browserPreferences";
 import { rendererById } from "./renderers/registry";
@@ -50,6 +60,8 @@ interface CatalogBrowserProps {
   onPreferencesChange: (change: Partial<BrowserPreferences>) => void;
   /** Opens the MAME page, where installations are managed and catalogs imported. */
   onOpenMame: () => void;
+  /** Opens Settings › Support Files, where classifications are imported. */
+  onOpenSupportFiles: () => void;
   /** Delay after the last keystroke before searching. */
   debounceMs?: number;
 }
@@ -65,6 +77,7 @@ export function CatalogBrowser({
   preferences,
   onPreferencesChange,
   onOpenMame,
+  onOpenSupportFiles,
   debounceMs = 300,
 }: CatalogBrowserProps) {
   const [state, dispatch] = useReducer(browserReducer, initialBrowserState);
@@ -168,6 +181,7 @@ export function CatalogBrowser({
           preferences={preferences}
           onPreferencesChange={onPreferencesChange}
           onOpenMame={onOpenMame}
+          onOpenSupportFiles={onOpenSupportFiles}
           debounceMs={debounceMs}
         />
       </InstallationScope>
@@ -195,6 +209,7 @@ interface CatalogContentProps {
   preferences: BrowserPreferences;
   onPreferencesChange: (change: Partial<BrowserPreferences>) => void;
   onOpenMame: () => void;
+  onOpenSupportFiles: () => void;
   debounceMs: number;
 }
 
@@ -318,6 +333,7 @@ function Workspace({
   preferences,
   onPreferencesChange,
   onOpenMame,
+  onOpenSupportFiles,
   debounceMs,
   softwareImported,
   freshnessWarning,
@@ -339,12 +355,99 @@ function Workspace({
     () => buildResultsRequest(scope, appliedText, query, list),
     [scope, appliedText, query, list],
   );
+  // The classifications of this catalog (support files), brought up to date
+  // by the backend when they are read; tagged so that another catalog's
+  // dimensions are never used.
+  const loadClassifications = useCallback(
+    async () => ({ installationId, status: await getClassificationStatus(installationId) }),
+    [installationId],
+  );
+  const classificationLoad = useLoader(loadClassifications, refreshKey);
+  const classificationStatus =
+    classificationLoad.latest?.installationId === installationId
+      ? classificationLoad.latest.status
+      : null;
+  const availableKey = classificationStatus?.dimensions.map((entry) => entry.dimension).join(",");
+  const available = useMemo(
+    () =>
+      availableKey === undefined ? null : (availableKey.split(",").filter(Boolean) as Dimension[]),
+    [availableKey],
+  );
+  const classifications: ClassificationsState = {
+    available,
+    syncError: classificationStatus?.syncError ?? null,
+    error:
+      classificationLoad.state.status === "error"
+        ? describeError(classificationLoad.state.error)
+        : null,
+    onRetry: classificationLoad.reload,
+  };
+
   // Facets do not depend on the page or the sort: changing them does not recount.
   const { filters, facetOptions } = query;
+  // Keyed by text: "loading" and "none" request the same facets, so the
+  // facets are not recounted when the status arrives without classifications.
+  const facetDimensions = availableKey ?? "";
   const facetRequest = useMemo(
-    () => buildFacetRequest(scope, appliedText, filters, facetOptions, list),
-    [scope, appliedText, filters, facetOptions, list],
+    () =>
+      buildFacetRequest(
+        scope,
+        appliedText,
+        filters,
+        facetOptions,
+        list,
+        facetDimensions.split(",").filter(Boolean) as Dimension[],
+      ),
+    [scope, appliedText, filters, facetOptions, list, facetDimensions],
   );
+  const loadFacetValues = useCallback(
+    async (facet: string, valueSearch: string): Promise<FacetResult<string>> => {
+      const { facets } = await runFacetSearch(
+        installationId,
+        buildFacetValuesRequest(scope, appliedText, filters, facet, valueSearch, list),
+      );
+      return facets[0] ?? { facet, values: [], hasMore: false };
+    },
+    [installationId, scope, appliedText, filters, list],
+  );
+
+  // Classification values that no machine of this catalog has (a saved
+  // filter from another catalog, a removed source): they match nothing, and
+  // the user is told so instead of seeing results silently change.
+  const selectedClassifications = useMemo(() => {
+    if (scope !== "machines") return [];
+    return FACET_FILTERS.machines.flatMap((definition): DimensionValues[] => {
+      const values = (filters.values[definition.facet] ?? []).filter(
+        (value): value is string => value !== null,
+      );
+      return definition.classification && values.length > 0
+        ? [{ dimension: definition.classification, values }]
+        : [];
+    });
+  }, [scope, filters]);
+  const loadMissing = useCallback(
+    async () =>
+      selectedClassifications.length === 0
+        ? { installationId, missing: [] }
+        : {
+            installationId,
+            missing: await findMissingClassificationValues(installationId, selectedClassifications),
+          },
+    [installationId, selectedClassifications],
+  );
+  const missingLoad = useLoader(loadMissing, refreshKey);
+  const missing =
+    missingLoad.state.status === "ready" &&
+    missingLoad.state.value.installationId === installationId
+      ? missingLoad.state.value.missing
+      : [];
+  const [presetNotice, setPresetNotice] = useState<string | null>(null);
+  const criteria: BrowserCriteria = {
+    scope,
+    text: state.text.trim(),
+    filters,
+    favoritesOnly,
+  };
   const load = useCallback(
     () => (softwareUnavailable ? Promise.resolve(null) : runSearch(installationId, request)),
     [installationId, request, softwareUnavailable],
@@ -436,6 +539,41 @@ function Workspace({
           {freshnessWarning}
         </p>
       )}
+      {missing.length > 0 && showingResults && (
+        <div className="browser__banner browser__notice" role="status">
+          <p className="message message--warning">
+            These classification criteria match nothing in this catalog:{" "}
+            {missing
+              .map(
+                (entry) =>
+                  `${DIMENSION_LABELS[entry.dimension]}: ${entry.values.join(", ")}${
+                    available?.includes(entry.dimension) === false
+                      ? " (no active support file)"
+                      : ""
+                  }`,
+              )
+              .join("; ")}
+            .
+          </p>
+          <button type="button" className="link-button" onClick={onOpenSupportFiles}>
+            Support Files settings
+          </button>
+        </div>
+      )}
+      {presetNotice && showingResults && (
+        <div className="browser__banner browser__notice" role="status">
+          <p className="message message--warning">{presetNotice}</p>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              setPresetNotice(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {state.filtersKept && showingResults && (
         <div className="browser__banner browser__notice" role="status">
           <p className="message message--muted">
@@ -487,6 +625,9 @@ function Workspace({
               onRetryFacets={facetSearch.reload}
               dispatch={dispatch}
               debounceMs={debounceMs}
+              classifications={classifications}
+              loadFacetValues={loadFacetValues}
+              onOpenSupportFiles={onOpenSupportFiles}
             />
           )}
 
@@ -563,6 +704,24 @@ function Workspace({
                   <span>Favorites only</span>
                 </label>
               </fieldset>
+              <SavedFiltersSection
+                criteria={criteria}
+                activeId={state.presetId}
+                onLoad={(presetId, loaded, ignored) => {
+                  dispatch({ type: "applyCriteria", criteria: loaded, presetId });
+                  if (loaded.favoritesOnly !== favoritesOnly) {
+                    onPreferencesChange({ favoritesOnly: loaded.favoritesOnly });
+                  }
+                  setPresetNotice(
+                    ignored.length > 0
+                      ? `Some criteria of this saved filter are not supported by this version of YMDB and were not applied: ${ignored.join(", ")}.`
+                      : null,
+                  );
+                }}
+                onActiveChange={(presetId) => {
+                  dispatch({ type: "setPreset", presetId });
+                }}
+              />
             </ViewOptionsPanel>
           )}
         </div>
@@ -868,6 +1027,9 @@ function DetailNavigation({
           refreshKey={refreshKey}
           onTab={onTab}
           onOpen={onOpen}
+          onShowClassification={(facet, value) => {
+            dispatch({ type: "showClassification", facet, value });
+          }}
           navigation={navigation}
         />
       ) : target.kind === "software" ? (

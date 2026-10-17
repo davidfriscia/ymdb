@@ -171,7 +171,8 @@ in the application configuration directory:
 Each installation's launch options are in `installations/<id>/launch.json` next to it
 (with its ROM Manager settings in `remote-sources.json`),
 and its catalog in `installations/<id>/catalog.sqlite` in the local data directory
-(see below).
+(see below), with the copy of the support file classifications for that catalog in
+`classifications.sqlite` (see [Support files](#support-files-and-saved-filters)).
 
 ### Upgrading from a single installation
 
@@ -264,9 +265,14 @@ the active MAME installation:
 - The **Filters** panel lists, with counts, the manufacturers, years, driver and
   emulation statuses and software lists of the machines (publishers, lists, years,
   support statuses and part interfaces for software), plus parent/clone, BIOS,
-  device, mechanical, runnable and "declares ROMs/CHDs" filters. Values of one
-  filter are alternatives; different filters combine. Large lists have a value
-  search and **Show more**. Active filters appear as chips above the results; remove
+  device, mechanical, runnable and "declares ROMs/CHDs" filters. With imported
+  [support files](#support-files-and-saved-filters), machines can also be filtered by
+  **Genre**, **Category** (a tree: a category includes its subcategories), **Series**
+  and **Version Added** (a From/To range in MAME version order, or exact versions).
+  Values of one filter are alternatives; different filters combine. Long lists scroll
+  on their own, have a value search, **Show more** and **Browse all**, a window with
+  every value, a search, the number of selected values and **Clear selection**:
+  **Apply** changes the filter, **Cancel** (or Escape) leaves it as it was. Active filters appear as chips above the results; remove
   them one by one or with **Clear all filters**. The **Filters** button hides the
   panel to give the results the whole width; the filters stay active.
 - The **View** button opens the **View Options** panel on the right. Its **MAME
@@ -288,6 +294,8 @@ the active MAME installation:
   bar (**Previous**/**Next**, page numbers, "Page N of M", **Per page** and **Go to**)
   stays visible below the results. A new page, search, filter or sort shows the
   results from the top, without moving the filters.
+- **Saved Filters**, in View Options, saves the current search and filters under a
+  name and loads them again (see [Saved filters](#saved-filters)).
 - Click a card or tile (or press Enter on it) to open its detail: machines show general data, relations, emulation
   status, ROMs, CHDs, devices, displays, controls, chips and software lists;
   software shows its list, parts, ROMs and disks and the machines declaring its list;
@@ -297,7 +305,9 @@ the active MAME installation:
   [Artwork and screenshots](#artwork-and-screenshots)); a compact bar with the title,
   the short information, the download actions, **Play** and the profile; the status
   of the last launch, when there is one; the collapsed **Advanced** launch options;
-  and the technical sections. **Back** returns to the previous detail and **Back to
+  and the technical sections. With support files, the Overview of a machine shows its
+  **Classification** (genre, category, series, version added); each value, and each
+  level of a category, shows the catalog filtered by it. **Back** returns to the previous detail and **Back to
   results** to the results, with the search, filters, sort, view, page size, page and
   scroll position unchanged; **Previous**/**Next** move through the current page.
 - ROMs, CHDs and disks are what MAME declares; YMDB does not check files on disk yet,
@@ -307,8 +317,8 @@ The **MAME** page holds the MAME installations and everything configured per
 installation (see above). The **Settings** page uses the same layout for the global
 settings: **Appearance** (the **Light**, default, or **Dark** theme, applied
 immediately to the whole application), **Media Sources**, **Remote Connections**,
-**Favorites** (export and import, see [Favorites](#favorites)), **About** (product
-name and version) and **Diagnostics** (a backend connection check).
+**Favorites** (export and import, see [Favorites](#favorites)), **Support Files** (see
+[Support files](#support-files-and-saved-filters)), **About** (product name and version) and **Diagnostics** (a backend connection check).
 It opens on Appearance and keeps the chosen section while you visit other pages.
 Theme, panel visibility, view mode, the
 options of each view and the command line preview are saved in the application's
@@ -371,6 +381,60 @@ computer and with any MAME version:
 
 Favorites are saved in `lists.json`, in the configuration directory (see
 [Where installations are stored](#where-installations-are-stored)).
+
+## Support files and saved filters
+
+MAME itself does not classify machines as shooters or platformers. Third-party
+_support files_ do (for example those of [progettoSNAPS](https://www.progettosnaps.net/)).
+YMDB imports five of them, from files you download yourself:
+
+| File          | Provides                                                         |
+| ------------- | ---------------------------------------------------------------- |
+| `catver.ini`  | **Category** (`[Category]`) and **Version Added** (`[VerAdded]`) |
+| `genre.ini`   | **Genre**                                                        |
+| `catlist.ini` | **Category** (an alternative to `catver.ini`)                    |
+| `version.ini` | **Version Added** (an alternative to `catver.ini`)               |
+| `series.ini`  | **Series** (a machine can belong to several series)              |
+
+**Settings › Support Files** imports them: **Import support file…** opens the file
+picker, YMDB recognizes the file by its header and structure (not only its name),
+checks it and shows a summary (declared MAME version, machines, values, warnings such
+as invalid lines or duplicates) before anything is stored; importing a file of a
+format that is already imported replaces it after confirmation. Each imported file
+shows its name, declared version, import date, machines, values and whether it is
+used; it can be reimported or removed (after confirmation; the file on disk is never
+modified or deleted). Each classification uses one source: the first file imported
+for it, or the one selected in **Classifications**. Removing the source in use leaves
+the classification without one until you select or import another; YMDB never
+switches source on its own. Nothing is downloaded or updated automatically.
+
+Support files are shared by every MAME installation. Each catalog keeps its own copy
+of the classifications of its machines, matched by short name, and brings it up to
+date the next time the catalog is opened after a change (or after the catalog is
+imported again); machines a catalog does not have are simply ignored. Imported data
+is stored in `support-files.sqlite` (local data directory) and the copy of each
+catalog in `installations/<id>/classifications.sqlite`, next to the catalog.
+
+In the **Filters** panel, Genre, Category, Series and Version Added appear for
+machines when the catalog has them; otherwise a note leads to Settings. Values of one
+classification are alternatives, different classifications and the other filters
+combine, and the counts, sorting, pages and **Favorites only** work as for every other
+filter.
+
+### Saved filters
+
+**Saved Filters**, in the **View Options** panel, keeps named search and filter
+configurations: **Save current filters** stores the catalog type, the search text,
+every filter (including classifications and version ranges) and **Favorites only**,
+not the view (renderer, sizes, panels, theme) or the sort. Clicking a saved filter
+applies it at once and returns to the first page. After a change the saved filter is
+marked **Modified** until you **Update** it; it never changes on its own. Saved
+filters can be renamed and deleted, belong to YMDB (not to an installation) and apply
+to the catalog of the active installation. Criteria that match nothing in that
+catalog (a series it does not have, or a classification without source) are kept and
+reported above the results: they narrow the results, they are never dropped or
+replaced. Saved filters are stored in `saved-filters.json` in the configuration
+directory; filters saved by a newer YMDB are kept unchanged but cannot be loaded.
 
 ## Artwork and screenshots
 
@@ -676,6 +740,11 @@ Implemented:
 - Global favorites for machines and software: bookmarks on every card and detail
   page, a **Favorites only** view applied by the search engine, and JSON export and
   import with merge or replace (see [Favorites](#favorites)).
+- MAME support files (catver.ini, genre.ini, catlist.ini, version.ini, series.ini):
+  manual import into a global repository, one projection per catalog synchronized when
+  the catalog is opened, Genre, Category, Series and Version Added filters and facets,
+  and saved filter presets (see
+  [Support files and saved filters](#support-files-and-saved-filters)).
 - Media Grid view and detail page galleries (with a lightbox) of local artwork and
   screenshots from configurable media
   sources (see [Artwork and screenshots](#artwork-and-screenshots)).

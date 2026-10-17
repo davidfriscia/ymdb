@@ -8,7 +8,7 @@ import { LauncherProvider } from "../features/launcher/LauncherProvider";
 import { FavoritesProvider } from "../features/lists/FavoritesProvider";
 import { MediaProvider } from "../features/media/MediaProvider";
 import { loadPreferences, savePreferences, type UiPreferences } from "./preferences";
-import { SettingsView } from "./SettingsView";
+import { SettingsView, type SettingsSection } from "./SettingsView";
 import { applyTheme } from "./theme/themes";
 
 type View = "catalog" | "mame" | "settings";
@@ -54,6 +54,12 @@ function Shell() {
   const installations = useInstallations();
   // Incremented when an import replaces a catalog.
   const [catalogVersion, setCatalogVersion] = useState(0);
+  // Incremented when the support files change (classifications of every catalog).
+  const [supportVersion, setSupportVersion] = useState(0);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+  const onSupportFilesChanged = useCallback(() => {
+    setSupportVersion((version) => version + 1);
+  }, []);
 
   useEffect(() => {
     applyTheme(preferences.theme);
@@ -128,11 +134,16 @@ function Shell() {
         {/* Views stay mounted so that their state (search, filters, scroll) survives navigation. */}
         <main className="shell__main shell__main--catalog" hidden={view !== "catalog"}>
           <CatalogBrowser
-            refreshKey={catalogVersion}
+            // Both only grow, so their sum changes with either.
+            refreshKey={catalogVersion + supportVersion}
             preferences={browserPreferences}
             onPreferencesChange={updatePreferences}
             onOpenMame={() => {
               setView("mame");
+            }}
+            onOpenSupportFiles={() => {
+              setSettingsSection("supportFiles");
+              setView("settings");
             }}
           />
         </main>
@@ -147,6 +158,9 @@ function Shell() {
             onThemeChange={(theme) => {
               updatePreferences({ theme });
             }}
+            section={settingsSection}
+            onSectionChange={setSettingsSection}
+            onSupportFilesChanged={onSupportFilesChanged}
           />
         </main>
       </div>

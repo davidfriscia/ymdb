@@ -1,20 +1,28 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { HealthCheck } from "../features/health-check/HealthCheck";
 import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
 import { RemoteConnectionsSettings } from "../features/remote/RemoteConnectionsSettings";
 import { FavoritesSettings } from "../features/lists/FavoritesSettings";
+import { SupportFilesSettings } from "../features/support-files/SupportFilesSettings";
 import { TwoPaneLayout, TwoPaneNavItem } from "../shared/TwoPaneLayout";
 import { useVisited } from "../shared/useVisited";
 import { THEMES, type ThemeId } from "./theme/themes";
 
-type SettingsSection =
-  "appearance" | "mediaSources" | "remoteConnections" | "favorites" | "about" | "diagnostics";
+export type SettingsSection =
+  | "appearance"
+  | "mediaSources"
+  | "remoteConnections"
+  | "favorites"
+  | "supportFiles"
+  | "about"
+  | "diagnostics";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "mediaSources", label: "Media Sources" },
   { id: "remoteConnections", label: "Remote Connections" },
   { id: "favorites", label: "Favorites" },
+  { id: "supportFiles", label: "Support Files" },
   { id: "about", label: "About" },
   { id: "diagnostics", label: "Diagnostics" },
 ];
@@ -22,15 +30,24 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 interface SettingsViewProps {
   theme: ThemeId;
   onThemeChange: (theme: ThemeId) => void;
+  /** The selected section; the page stays mounted, so it survives visits elsewhere. */
+  section: SettingsSection;
+  onSectionChange: (section: SettingsSection) => void;
+  /** The support files changed: catalogs reload their classifications. */
+  onSupportFilesChanged: () => void;
 }
 
 /**
  * The global settings, one section at a time. Launch options and ROM Manager
  * settings belong to an installation: they are on the MAME page.
  */
-export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
-  // The page stays mounted, so the selection survives a visit to another page.
-  const [selected, setSelected] = useState<SettingsSection>("appearance");
+export function SettingsView({
+  theme,
+  onThemeChange,
+  section: selected,
+  onSectionChange: setSelected,
+  onSupportFilesChanged,
+}: SettingsViewProps) {
   // Sections stay mounted once opened, so that unsaved forms are kept.
   const visited = useVisited(selected);
   const heading = SECTIONS.find((section) => section.id === selected)?.label ?? "";
@@ -45,6 +62,8 @@ export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
         return <RemoteConnectionsSettings />;
       case "favorites":
         return <FavoritesSettings />;
+      case "supportFiles":
+        return <SupportFilesSettings onChanged={onSupportFilesChanged} />;
       case "about":
         return <About />;
       case "diagnostics":
@@ -84,7 +103,7 @@ export function SettingsView({ theme, onThemeChange }: SettingsViewProps) {
   );
 }
 
-function Appearance({ theme, onThemeChange }: SettingsViewProps) {
+function Appearance({ theme, onThemeChange }: Pick<SettingsViewProps, "theme" | "onThemeChange">) {
   return (
     <section className="panel" aria-label="Appearance">
       <fieldset className="choice-group">

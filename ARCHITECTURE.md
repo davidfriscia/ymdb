@@ -84,6 +84,11 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `roms`: Prepare Download and Download & Play in the launch bar, with the plan in
     a modal window (see
     [ROM Manager downloads](#rom-manager-downloads--implemented)).
+  - `support-files`: **Settings → Support Files** and the typed wrappers of the
+    support file and classification commands (see
+    [MAME support files](#mame-support-files--implemented)).
+  - `saved-filters`: the **Saved Filters** section of View Options and the criteria
+    format (see [Saved filter presets](#saved-filter-presets--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 #### Application shell
@@ -114,8 +119,13 @@ state (no persistence): the pages stay mounted, so it survives visits to other p
   installation (or the one already registering a chosen executable) is shown at once.
   Choosing a section never changes the active installation.
 - **Settings** (`SettingsView`): **Appearance** (theme), **Media Sources**, **Remote
-  Connections**, **About** (name, version) and **Diagnostics** (backend connection
-  check). It opens on Appearance.
+  Connections**, **Favorites**, **Support Files**, **About** (name, version) and
+  **Diagnostics** (backend connection check). It opens on Appearance; the selected
+  section is held by the shell, so the catalog can open **Support Files** directly.
+
+The shell also counts changes of the support files; the browser receives the sum of
+the catalog and support file counters as its refresh key, so a change in Settings
+reloads the classifications, results and facets of the catalog.
 
 The shell keeps two counters, incremented when the MAME configuration changes and
 when an import replaces the catalog; the browser reloads its catalog status,
@@ -188,9 +198,32 @@ what happens when the active installation changes).
   filters (machines: parent/clone, BIOS, device, mechanical, runnable, declares
   ROMs, declares CHDs; software: parent/clone, declares ROMs, declares disks).
   Facet values are checkboxes with counts (disjunctive semantics from the
-  backend), a value search on large facets (debounced) and "Show more" up to 200
-  values. Selected values missing from the returned values stay listed, with "—"
-  as count. Active filters are shown as removable chips with "Clear all filters";
+  backend), a value search on large facets (debounced), "Show more" up to 200
+  values and, for long lists, "Browse all". Every value list scrolls on its own
+  (`.facet__values--scroll`, bounded height) instead of growing the panel; the
+  legend shows the number of selected values and "Clear". Selected values missing
+  from the returned values stay listed, with "—" as count. The shared pieces live in
+  `filters/`: `FacetValueList` (checkbox rows), `CategoryTree`, `FacetBrowserModal`
+  and the pure helpers of `facetValues.ts`.
+- **Classification filters** (machines only): Genre, Category, Series and Version
+  Added are facet definitions with a `classification` dimension; they are rendered
+  and requested only for the dimensions the catalog has
+  (`get_classification_status`), otherwise a note links to Settings → Support Files
+  and a projection that could not be updated is reported with Retry. Genre and Series
+  are lists searched by the backend like manufacturers. Category is a tree
+  (`presentation: "tree"`) built from the node paths of the facet (levels joined with
+  `/`, any depth), searched locally; selecting a node includes its descendants,
+  shown checked and disabled. Version Added (`presentation: "version"`) has From/To
+  selects in the MAME version order returned by the backend (`ranges` in the filters,
+  sent as `versionAddedRange`) and exact versions, newest first. Tree and version
+  facets are requested with every value (1,000 at most).
+- **Browse all** (`FacetBrowserModal`): the values of one facet for the current text
+  and other filters (one facet request, up to 1,000 values, searched by the backend
+  for lists and locally for trees), sorted alphabetically, with a search, the number
+  of selected values and "Clear selection". The selection is a draft: "Apply"
+  replaces the facet's values with `setFacetValues` (one state change), "Cancel",
+  Escape, the backdrop and the close button discard it. Searching never removes
+  selected values. Active filters are shown as removable chips with "Clear all filters";
   the Filters button shows their number. Declared ROMs/CHDs are what MAME lists,
   not files on disk.
 - **Layout.** Three areas: the Filters panel (left), the results (center) and the
@@ -241,6 +274,13 @@ what happens when the active installation changes).
   placeholder ("No snapshots"), only for that tile. When the category has no
   directory, no image is requested and a note points to Settings.
 - Pages hold at most 200 items, so no virtualization is used.
+- **Saved filters.** The View Options panel holds **Saved Filters** (see
+  [Saved filter presets](#saved-filter-presets--implemented)). Loading one dispatches
+  `applyCriteria`, which sets the catalog type, text, filters and first pages in one
+  reducer step (and Favorites only in the same event), so the controls, results,
+  counts and pages change together. Classification values that no machine of the
+  catalog has are checked with `find_missing_classification_values` and reported in a
+  banner above the results; they stay in the request and match nothing.
 - **Favorites.** Both renderers place `ResultBookmark` (`FavoriteBookmark`) in the
   top right corner of each item, as a sibling of the button that opens it (never
   nested), so a click on it never opens the detail. **Favorites only** is the
@@ -325,7 +365,8 @@ The Rust crate in `src-tauri/`.
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`,
   `installations.rs`, `catalog.rs`, `search.rs`, `detail.rs`, `launcher.rs`,
-  `media.rs`, `remote.rs`, `roms.rs`). Commands extract what they need from the Tauri runtime and delegate
+  `media.rs`, `remote.rs`, `roms.rs`, `lists.rs`, `support_files.rs`, `saved_filters.rs`).
+  Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
   long-running work (catalog import, ROM downloads) on a dedicated thread, so the UI never freezes.
@@ -352,6 +393,10 @@ The Rust crate in `src-tauri/`.
   (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
 - `roms/` plans and performs ROM Manager downloads (see
   [ROM Manager downloads](#rom-manager-downloads--implemented)).
+- `support_files/` parses MAME support files and keeps the global repository of
+  classifications (see [MAME support files](#mame-support-files--implemented)).
+- `saved_filters.rs` stores the saved filter presets (see
+  [Saved filter presets](#saved-filter-presets--implemented)).
 
 ### MAME integration — Implemented
 
@@ -1337,7 +1382,9 @@ search DTOs.
 - `MachineDetail`: identity, flags, source file, driver (status, emulation, cocktail,
   save states, artwork/unofficial/no sound/incomplete), emulation features, sound,
   input and controls, displays, chips, BIOS sets, ROMs, disks, device references,
-  media devices with extensions, software lists, RAM options and samples. Parent
+  media devices with extensions, software lists, RAM options, samples and
+  `classifications` (genres, category paths, series, version added from the catalog's
+  projection; empty without support files). Parent
   (`cloneof`) and ROM parent (`romof`) are `RecordLink`s with the target
   description, or `null` description when the target is not in the catalog; the
   same applies to device references. Each software list says whether it is
@@ -1443,11 +1490,21 @@ of the catalog only; no machine is classified as arcade, console or computer.
   parameter, matched with `m.name IN (SELECT value FROM json_each(?))` (software:
   `(s.list_name, s.name) IN (...)`). The restriction is an ordinary AND condition, so
   it applies before the count, the facets and the page.
+- Machines, from the support files (see
+  [MAME support files](#mame-support-files--implemented)): `genres`, `categories`
+  (category nodes: a node selects its descendants), `series`, `versionsAdded` and
+  `versionAddedRange` (`from`/`to`, inclusive, in MAME version order; an alternative
+  of `versionsAdded`). They read the catalog's projection, attached as `cls`, with
+  uncorrelated `m.name IN (SELECT machine_name FROM cls.memberships WHERE dimension =
+'genre' AND value IN (...))` subqueries. Values the projection does not have (a
+  removed source, another catalog) match nothing, so an unresolvable criterion never
+  widens the results. Range bounds must be MAME versions.
 
 #### Facets
 
 Requested facets return `(value, count)` pairs: machines by manufacturer, year,
-driver status, emulation status and software list; software by list, publisher,
+driver status, emulation status and software list, and genre, category, series
+and version added when the catalog has support files; software by list, publisher,
 year, support status and interface.
 
 - Counts use disjunctive semantics: each facet applies the search text and all
@@ -1456,9 +1513,13 @@ year, support status and interface.
   facets count only the matching results.
 - Machines referencing a list, and software with several parts on one interface,
   are counted once per value.
-- Years are listed chronologically; other facets by decreasing count, then value.
-  `null` values come last.
-- Each facet returns at most `limit` values (default 50, at most 200) with
+- Years are listed chronologically, versions added in MAME version order (by the
+  projection's sort key, never as text), category nodes in path order (parents
+  before children; each machine counts once per node, so a parent counts its
+  descendants), other facets by decreasing count, then value. `null` values come
+  last. A machine in two series counts in both.
+- Each facet returns at most `limit` values (default 50, at most 1,000, enough for
+  every category node and series of the support files) with
   `hasMore` when more exist, and accepts an optional `search` substring (ASCII
   case-insensitive) to find values of large facets (3,140 manufacturers in 0.280).
   Counts are computed by SQL `GROUP BY` queries; results are never loaded in memory
@@ -1552,6 +1613,8 @@ Configuration directory:
   [User lists](#user-lists-favorites--implemented)).
 - `media.json`: the media sources, shared by all installations (see
   [Media sources](#media-sources--implemented)).
+- `saved-filters.json`: the saved filter presets, shared by all installations (see
+  [Saved filter presets](#saved-filter-presets--implemented)).
 - `settings.json` and `launch.json`: files of the single-installation layout. They are
   only read by the migration and never written again, so they remain as a backup.
 
@@ -1559,6 +1622,10 @@ Local data directory:
 
 - `installations/<id>/catalog.sqlite`: the catalog of each installation (see
   [Catalog](#catalog--implemented-machines-and-software-lists)).
+- `installations/<id>/classifications.sqlite`: the projection of the support file
+  classifications for that catalog (derived data, rebuilt when needed).
+- `support-files.sqlite`: the global repository of imported support files (see
+  [MAME support files](#mame-support-files--implemented)).
 - `launch-logs/`: the output of MAME sessions (the 20 most recent are kept).
 
 All JSON files are written atomically (a temporary file in the same directory is
@@ -1716,6 +1783,243 @@ already preserved.
 | `preview_lists_import` | Chooses and checks a file; returns the summary to confirm. |
 | `apply_lists_import`   | Applies a previewed import in `merge` or `replace` mode.   |
 
+### MAME support files — Implemented
+
+Third-party _support files_ classify MAME machines; MAME itself does not. YMDB imports
+them manually into a global repository and projects the active classifications into
+each catalog, where the search uses them like any other filter.
+
+```text
+support file (.ini, chosen by the user, never modified)
+        │ parse, validate, preview, confirm
+        ▼
+Global repository (support-files.sqlite)   one source per format, active source and
+        │                                  revision per dimension
+        │ revision and catalog comparison, when a catalog is accessed
+        ▼
+Catalog projection (installations/<id>/classifications.sqlite)
+        │ attached read-only as `cls`, matched by machine short name
+        ▼
+Catalog search, facets and machine detail
+```
+
+#### Formats
+
+Analyzed on the files of MAME 0.288 (progettoSNAPS, `pS_SupportFiles_288`): UTF-8
+without BOM, LF line endings, a header comment such as
+`;; catver.ini 0.288 / 09-Jun-26 / MAME 0.288 ;;`, and the frontend sections
+`[FOLDER_SETTINGS]` (settings lines) and `[ROOT_FOLDER]` (empty).
+
+| File          | Structure                                                         | Dimensions              | 0.288                                         |
+| ------------- | ----------------------------------------------------------------- | ----------------------- | --------------------------------------------- |
+| `catver.ini`  | `[Category]` and `[VerAdded]` sections of `machine=value` lines   | Category, Version Added | 50,096 machines, 676 categories, 694 versions |
+| `genre.ini`   | one section per genre listing machines                            | Genre                   | 50,096 machines, 58 genres                    |
+| `catlist.ini` | one section per category (`Arcade: Shooter / Flying Vertical`)    | Category                | 50,096 machines, 695 categories               |
+| `version.ini` | one section per MAME version listing the machines added in it     | Version Added           | 50,096 machines, 694 versions                 |
+| `series.ini`  | one section per series; a machine may be in several (18 in 0.288) | Series                  | 12,399 machines, 720 series                   |
+
+Other files of the same packages (`mature.ini`, `genre_ows.ini`, `category.ini`, ...)
+are refused by name as unsupported.
+
+#### Parsers (`support_files/parser.rs`)
+
+- **Identification.** The header comment names the file (`GENRE.ini`, any case); a
+  header naming another file is refused (`unsupported`). Without a header the
+  structure decides when it can (`key=value` lines in `[Category]`/`[VerAdded]`:
+  catver; only version sections: version), and only then the file name; genre,
+  catlist and series files without a header or a telling name are refused
+  (`unidentified`) rather than guessed. A header that contradicts the structure (a
+  "genre.ini" with catver sections) is refused.
+- **Decoding.** UTF-8 with or without BOM; otherwise Windows-1252 with a warning.
+  `\n`, `\r\n` and `\r` line endings. Lines starting with `;` or `#` are comments;
+  blank lines are ignored; entries are trimmed.
+- **Model.** Every format becomes `ParsedSupportFile`: sorted, deduplicated
+  _memberships_ (machine → value, possibly several: Genre, Category, Series) and
+  _attributes_ (one value per machine: Version Added). `[VerAdded]` is read as an
+  attribute, never as a category; `catver.ini` sections other than `[Category]` and
+  `[VerAdded]` are ignored with a warning.
+- **Validation.** Machine names must be MAME short names (`[a-z0-9_]`, 1-64).
+  Duplicates are kept once, a second value of an attribute is ignored (the first one
+  wins), malformed lines are skipped, and machines listed in `[ROOT_FOLDER]` are not
+  classified; each case is a warning with a count and the first five examples.
+  Versions that cannot be ordered are kept and reported. A file without any entry is
+  refused. Files are limited to 64 MB. Machines missing from every catalog are not
+  errors: the parser does not know catalogs.
+- **Versions** (`support_files/version.rs`) are ordered by an integer key: major,
+  minor, then beta (`0.37b5`), release candidate (`0.33rc1`), release, letter
+  revision (`0.26a`, `0.69b`), update (`0.106u3`, `0.71u3p`), so `0.10` follows `0.9`.
+- **Hierarchy.** Category values are split into levels on `/` and `: ` (as found in
+  the data; no depth is assumed) and stored as node paths joined with `/`:
+  `Arcade: Shooter / Flying Vertical` gives `Arcade`, `Arcade / Shooter` and
+  `Arcade / Shooter / Flying Vertical`. Text without spaced separators
+  (`Game Console/Computer`) is one level. Other dimensions are flat.
+
+#### Global repository (`support_files/repository.rs`)
+
+`support-files.sqlite` in the local data directory (several MB of imported data that
+can be imported again; it does not roam). SQLite rather than JSON: about 230,000
+rows, set-based comparisons and transactions, and it is attached by the projections.
+
+- `sources` (one per format: file name, declared version, import date, machine count,
+  warnings), `source_dimensions` (machines and values per dimension), `memberships`,
+  `value_nodes` (node paths of every value, `leaf` for the value itself),
+  `attributes` (with the version sort key), `active_sources` and
+  `dimension_revisions`, plus a random `repository_id` created with the file.
+- **Import** stages the parsed rows in temporary tables (each kind bound as one JSON
+  array, read with `json_each`), compares them with the stored rows of the same
+  format and dimension (`EXCEPT` both ways), replaces the source and updates the
+  active sources and revisions, all in one immediate transaction. A parse failure
+  never reaches the repository; a database failure rolls everything back, so the
+  previous source stays available.
+- **Source precedence.** One source per dimension is active. The first source
+  imported for a dimension becomes active (shown in the import preview); afterwards
+  the active source changes only by an explicit choice in Settings. Removing the
+  active source leaves the dimension without source (`active_sources` references
+  `source_dimensions`, so this is always explicit); an alternative is never activated
+  implicitly, and inactive sources are kept. A reimport that no longer feeds a
+  dimension (a `catver.ini` without `[VerAdded]`) clears it the same way. Data of two
+  sources is never combined for one dimension.
+- **Revisions.** Each dimension has a revision, incremented only when its effective
+  content changes: activation, change or clearing of the active source, or a reimport
+  of the active source with different rows. Reimporting identical data (another file
+  name or date) changes no revision. The modification date of a file is never used.
+- Support files never touch `lists.json`: classifications and Favorites share the
+  idea of membership by short name, but not storage or lifecycle (imported and
+  replaced by sources, versus edited by the user).
+
+#### Catalog projections (`catalog/classification.rs`)
+
+Each catalog has `classifications.sqlite` next to `catalog.sqlite`. It is derived
+data (the catalog keeps only MAME data and is replaced by imports): `memberships`
+(dimension, node, machine, `direct`), with one row per ancestor node so that a parent
+selects its descendants by equality, `attributes` (dimension, machine, value, sort key)
+and `projection_state` (per dimension: repository id, revision, active source, catalog
+token, machine and value counts).
+
+- **Synchronization at access.** Machine searches, machine details, the
+  classification status and the missing-values check first call
+  `CatalogStore::sync_classifications` with a snapshot of the repository revisions
+  (kept in memory by `SupportFilesState` and refreshed by every change). Under the
+  catalog store lock it compares, per dimension, the snapshot and the catalog token
+  (`imported_at:machine_count` of `catalog_metadata`) with `projection_state`; when
+  nothing differs it returns at once (0.3 ms). Otherwise it rebuilds only the
+  differing dimensions.
+- **Catalog reimport.** A new machine import changes the catalog token, so every
+  dimension is rebuilt even though the repository did not change.
+- **Rebuild.** A separate connection opens the projection, attaches the catalog and
+  the repository read-only (`file:` URIs, percent-encoded) and runs, in one
+  transaction, `DELETE` and `INSERT ... SELECT` per dimension: memberships joined
+  with their nodes, restricted to `machine_name IN (SELECT name FROM
+catalog.machines)` (written `+m.machine_name` so that SQLite checks each row instead
+  of probing the primary key once per catalog machine and node, which took 37-120 s),
+  then the counts and the new state. Machines missing from the catalog stay in the
+  repository only. A dimension without source is emptied, so removed classifications
+  leave no orphan rows. The state is written in the same transaction as the data: a
+  failure (unreadable repository, full disk) keeps the previous projection and state,
+  is reported by `get_classification_status` (`syncError`) and is retried at the next
+  access; searches without classification filters are never blocked.
+- The catalog's read connection attaches the projection read-only as `cls` when it is
+  opened (creating an empty projection if needed); searches join it directly.
+  Removing an installation's catalog removes its projection.
+
+#### Interface
+
+- **Settings › Support Files** (`SupportFilesSettings`): import with the native file
+  picker (`preview_support_file_import`, then `apply_support_file_import` after the
+  summary: type, declared version, machines, values per dimension, whether each will
+  be active, warnings, and the source it replaces), the active source of each
+  dimension, the imported sources (file, version, date, machines, values, active or
+  not, warnings) with **Reimport…** (the same format only) and **Remove…** (confirmed;
+  it says which dimensions lose their source; the file on disk is not touched).
+- Catalog filters, Browse all, the Category tree and Version Added: see
+  [Catalog browser](#catalog-browser--implemented).
+- **Machine detail**: a **Classification** section in Overview; each value and each
+  category level dispatches `showClassification`, which returns to the results with
+  only that filter (text and other filters cleared, sort and view kept).
+- Software details show no machine classifications: support files describe machines,
+  and a software is not one machine.
+
+#### Commands
+
+| Command                              | Purpose                                                           |
+| ------------------------------------ | ----------------------------------------------------------------- |
+| `get_support_files`                  | Sources and active sources (`SupportFilesView`).                  |
+| `preview_support_file_import`        | Picks and checks a file (optionally of an expected format).       |
+| `apply_support_file_import`          | Stores a previewed file, atomically.                              |
+| `remove_support_file`                | Removes a source from the repository.                             |
+| `set_active_support_source`          | Sets or clears the active source of a dimension.                  |
+| `get_classification_status`          | Synchronizes a catalog and returns its dimensions and sync error. |
+| `find_missing_classification_values` | The values no machine of a catalog has.                           |
+
+#### Measured performance
+
+Release build, Windows, the support files of MAME 0.288 and copies of the 0.280
+(48,893 machines) and 0.252 (45,379) catalogs (`real_catalog_classifications`, an
+ignored test):
+
+| Operation                                           | Time             |
+| --------------------------------------------------- | ---------------- |
+| Parse `catver.ini` / `genre.ini` / `series.ini`     | 59 / 21 / 5 ms   |
+| Store `catver.ini` / `genre.ini` / `series.ini`     | 229 / 84 / 33 ms |
+| Reimport identical `catver.ini`                     | 416 ms           |
+| First projection of four dimensions (0.280 / 0.252) | 593 / 544 ms     |
+| Access without changes                              | 0.3 ms           |
+| Genre `Shooter` (3,412 results)                     | 2.3 ms           |
+| Category node `Shooter` with descendants            | 2.3 ms           |
+| Series `194X` (37 results)                          | 0.2 ms           |
+| Version Added `0.200`-`0.280` (9,872 results)       | 12.0 ms          |
+| Genre + category + series + text                    | 1.7 ms           |
+| Four classification facets, no filter               | 99.6 ms          |
+
+The facets of a dimension cost 5 ms (series) to 42 ms (version added) over the whole
+catalog; they are requested with the other facets only when filters or text change.
+
+#### Limitations
+
+- Only the five formats above; no download, update check or scheduler.
+- Category levels come from `/` and `: ` separators only; values are shown as
+  the files write them otherwise.
+- Version strings outside the MAME numbering are kept but cannot be ordered (no range).
+- Facet value search folds ASCII case only, like the other facets.
+
+### Saved filter presets — Implemented
+
+`saved_filters.rs` and `commands/saved_filters.rs` (backend), `features/saved-filters/`
+(frontend).
+
+- **Model.** `saved-filters.json` (configuration directory, written atomically) holds
+  `{ schemaVersion: 1, presets: [{ id, name, criteriaVersion, criteria, createdAt,
+updatedAt }] }`. Names are unique (ignoring case), 1-100 characters; at most 500
+  presets; criteria are a JSON object of at most 64 KB. The backend stores criteria
+  verbatim; a file of another schema version, or invalid, is reported by every command
+  and never replaced. Presets are global: they reference no installation, catalog row
+  or file.
+- **Criteria version 1** (`savedFilterCriteria.ts`): `{ scope, text, values, flags,
+ranges, favoritesOnly }`: the catalog type, the search text and the filters of that
+  type (facet values including classifications, single-choice filters, version
+  ranges) and Favorites only. Presentation (renderer, sizes, panels, theme), sort and
+  paging are not included. `encodeCriteria` normalizes them (sorted keys and values,
+  empty entries dropped) so that equal criteria compare equal.
+- **Loading** validates the criteria; a preset of another `criteriaVersion` is listed
+  but cannot be loaded and is kept unchanged. Filters this version does not know are
+  left out and named in a notice; nothing else is applied in their place. The criteria
+  are applied in one reducer step (see [Catalog browser](#catalog-browser--implemented)).
+- **Modified state.** The last loaded (or saved) preset is compared with the current
+  criteria; a difference shows **Modified** and **Update “name”**, which replaces the
+  preset's criteria. Presets are never overwritten implicitly.
+- **Unresolvable criteria.** Values missing from the active catalog (a series another
+  catalog has, a classification whose source was removed) stay applied and match
+  nothing, so the results never widen silently; a banner lists them, with the reason
+  when the dimension has no source.
+
+| Command               | Purpose                                        |
+| --------------------- | ---------------------------------------------- |
+| `get_saved_filters`   | The presets.                                   |
+| `create_saved_filter` | Adds a preset; returns its id and the presets. |
+| `update_saved_filter` | Replaces the criteria of a preset.             |
+| `rename_saved_filter` | Renames a preset.                              |
+| `delete_saved_filter` | Deletes a preset.                              |
+
 ### SQLite — Implemented (catalog database)
 
 - SQLite is embedded through `rusqlite` with the `bundled` feature, so every
@@ -1725,6 +2029,10 @@ already preserved.
   including FTS5 full-text indexes (see [Catalog search](#catalog-search--implemented)).
 - User data stays out of the catalog: Favorites are in `lists.json` (see
   [User lists](#user-lists-favorites--implemented)), never in a catalog database.
+- `support-files.sqlite` (global repository) and `installations/<id>/classifications.sqlite`
+  (projection of each catalog) have their own versioned migrations
+  (`support_files/repository.rs`, `catalog/classification.rs`); neither is part of
+  `catalog.sqlite`, which keeps only data derived from MAME.
 - Planned: a separate user database (profiles, cache
   metadata) that survives catalog re-imports.
 

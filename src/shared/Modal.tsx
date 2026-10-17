@@ -10,6 +10,8 @@ interface ModalProps {
   onClose: () => void;
   /** Accessible name of the close button of the header. */
   closeLabel?: string;
+  /** `narrow` for small dialogs, such as a selection list. */
+  size?: "default" | "narrow";
   children: ReactNode;
 }
 
@@ -19,7 +21,13 @@ interface ModalProps {
  * the control that opened it) when it closes. Only the content scrolls, so
  * the header and its close button stay reachable in small windows.
  */
-export function Modal({ title, onClose, closeLabel = "Close window", children }: ModalProps) {
+export function Modal({
+  title,
+  onClose,
+  closeLabel = "Close window",
+  size = "default",
+  children,
+}: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -79,7 +87,7 @@ export function Modal({ title, onClose, closeLabel = "Close window", children }:
     >
       <div
         ref={dialogRef}
-        className="modal__dialog"
+        className={size === "narrow" ? "modal__dialog modal__dialog--narrow" : "modal__dialog"}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

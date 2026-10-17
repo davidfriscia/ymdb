@@ -418,6 +418,7 @@ mod tests {
     use rusqlite::Connection;
 
     use super::*;
+    use crate::catalog::classification::CLASSIFICATIONS_FILE_NAME;
     use crate::catalog::store::CATALOG_FILE_NAME;
 
     const SAMPLE: &str = include_str!("testdata/listxml-sample.xml");
@@ -461,8 +462,11 @@ mod tests {
             .expect("read dir")
             .map(|entry| entry.expect("entry").file_name())
             .collect();
+        // The classification projection is created next to the catalog when it is read.
         assert!(
-            names.iter().all(|name| name == CATALOG_FILE_NAME),
+            names
+                .iter()
+                .all(|name| name == CATALOG_FILE_NAME || name == CLASSIFICATIONS_FILE_NAME),
             "unexpected files: {names:?}"
         );
     }

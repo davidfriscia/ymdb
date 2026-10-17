@@ -354,7 +354,7 @@ pub fn cancel_catalog_import(catalog: State<'_, CatalogState>) -> ImportStatus {
     catalog.import_status()
 }
 
-fn now_millis() -> u64 {
+pub(super) fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))

@@ -1,6 +1,7 @@
-import { useEffect, useState, type Dispatch } from "react";
+import { useEffect, useMemo, useState, type Dispatch } from "react";
 import { formatCount } from "../catalog/catalogMessages";
-import type { FacetResult } from "../search/searchApi";
+import type { FacetResult, VersionRange } from "../search/searchApi";
+import type { Dimension } from "../support-files/supportFilesApi";
 import {
   FACET_LIMIT_MAX,
   facetOptionsOf,
@@ -14,6 +15,21 @@ import {
   type FacetFilterDefinition,
   type Scope,
 } from "./filterDefinitions";
+import { CategoryTree } from "./filters/CategoryTree";
+import { FacetBrowserModal } from "./filters/FacetBrowserModal";
+import { buildCategoryTree, facetRows, matchesSearch } from "./filters/facetValues";
+import { FacetValueList } from "./filters/FacetValueList";
+
+/** The classifications of the browsed catalog. */
+export interface ClassificationsState {
+  /** Dimensions with an active support file source; `null` while loading. */
+  available: readonly Dimension[] | null;
+  /** The catalog's classifications could not be brought up to date. */
+  syncError: string | null;
+  /** The status could not be read. */
+  error: string | null;
+  onRetry: () => void;
+}
 
 interface FilterPanelProps {
   scope: Scope;
@@ -24,7 +40,14 @@ interface FilterPanelProps {
   onRetryFacets: () => void;
   dispatch: Dispatch<BrowserAction>;
   debounceMs: number;
+  classifications: ClassificationsState;
+  /** Values of one facet for the current search and filters, for "Browse all". */
+  loadFacetValues: (facet: string, search: string) => Promise<FacetResult<string>>;
+  onOpenSupportFiles: () => void;
 }
+
+/** Lists with more values than this get a value search and "Browse all". */
+const SEARCHABLE_FROM = 8;
 
 export function FilterPanel({
   scope,
@@ -34,7 +57,19 @@ export function FilterPanel({
   onRetryFacets,
   dispatch,
   debounceMs,
+  classifications,
+  loadFacetValues,
+  onOpenSupportFiles,
 }: FilterPanelProps) {
+  const [browsing, setBrowsing] = useState<FacetFilterDefinition | null>(null);
+  const available = classifications.available ?? [];
+  const definitions = FACET_FILTERS[scope].filter(
+    (definition) =>
+      definition.classification === undefined || available.includes(definition.classification),
+  );
+  const resultOf = (definition: FacetFilterDefinition) =>
+    facets?.find((facet) => facet.facet === definition.facet) ?? null;
+
   return (
     <aside className="filter-panel" aria-label="Filters">
       {facetsError && (
@@ -69,29 +104,154 @@ export function FilterPanel({
         </label>
       ))}
 
-      {FACET_FILTERS[scope].map((definition) => (
-        <FacetSection
-          key={`${scope}:${definition.facet}`}
-          definition={definition}
-          query={query}
-          result={facets?.find((facet) => facet.facet === definition.facet) ?? null}
-          dispatch={dispatch}
+      {scope === "machines" && (
+        <ClassificationNotice
+          classifications={classifications}
+          onOpenSupportFiles={onOpenSupportFiles}
+        />
+      )}
+
+      {definitions.map((definition) => {
+        const common = {
+          definition,
+          query,
+          result: resultOf(definition),
+          dispatch,
+          onBrowse: () => {
+            setBrowsing(definition);
+          },
+        };
+        const key = `${scope}:${definition.facet}`;
+        if (definition.presentation === "tree") return <CategorySection key={key} {...common} />;
+        if (definition.presentation === "version") return <VersionSection key={key} {...common} />;
+        return <FacetSection key={key} {...common} debounceMs={debounceMs} />;
+      })}
+
+      {browsing && (
+        <FacetBrowserModal
+          definition={browsing}
+          selected={query.filters.values[browsing.facet] ?? []}
+          load={(search) => loadFacetValues(browsing.facet, search)}
+          onApply={(values) => {
+            dispatch({ type: "setFacetValues", facet: browsing.facet, values });
+          }}
+          onClose={() => {
+            setBrowsing(null);
+          }}
           debounceMs={debounceMs}
         />
-      ))}
+      )}
     </aside>
   );
 }
 
-interface FacetSectionProps {
+/** Why classification filters are missing, with a way to add them. */
+function ClassificationNotice({
+  classifications,
+  onOpenSupportFiles,
+}: {
+  classifications: ClassificationsState;
+  onOpenSupportFiles: () => void;
+}) {
+  const { available, syncError, error, onRetry } = classifications;
+  if (error !== null || syncError !== null) {
+    return (
+      <div className="filter-notice" role="alert">
+        <p className="message message--warning">
+          {error !== null
+            ? `The classifications could not be read: ${error}`
+            : `The classifications of this catalog could not be updated: ${syncError ?? ""}. The previous ones are shown.`}
+        </p>
+        <button type="button" className="link-button" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (available === null || available.length > 0) return null;
+  return (
+    <div className="filter-notice">
+      <p className="message message--muted">
+        Import MAME support files (catver.ini, genre.ini, catlist.ini, version.ini, series.ini) to
+        filter machines by genre, category, series and version added.
+      </p>
+      <button type="button" className="link-button" onClick={onOpenSupportFiles}>
+        Open Support Files settings
+      </button>
+    </div>
+  );
+}
+
+interface SectionProps {
   definition: FacetFilterDefinition;
   query: ScopeQuery;
   result: FacetResult<string> | null;
   dispatch: Dispatch<BrowserAction>;
-  debounceMs: number;
+  onBrowse: () => void;
 }
 
-function FacetSection({ definition, query, result, dispatch, debounceMs }: FacetSectionProps) {
+/** Title with the number of selected values and Clear. */
+function FacetLegend({
+  id,
+  definition,
+  count,
+  dispatch,
+}: {
+  id: string;
+  definition: FacetFilterDefinition;
+  count: number;
+  dispatch: Dispatch<BrowserAction>;
+}) {
+  const { facet, label } = definition;
+  return (
+    <legend id={id} className="facet__title">
+      <span>
+        {label}
+        {count > 0 && (
+          <>
+            {" "}
+            <span className="facet__selected">({formatCount(count)})</span>
+          </>
+        )}
+      </span>
+      {count > 0 && (
+        <button
+          type="button"
+          className="link-button facet__clear"
+          aria-label={`Clear ${label} filter`}
+          onClick={() => {
+            dispatch({ type: "clearFacet", facet });
+          }}
+        >
+          Clear
+        </button>
+      )}
+    </legend>
+  );
+}
+
+function BrowseAllButton({ label, onBrowse }: { label: string; onBrowse: () => void }) {
+  return (
+    <button
+      type="button"
+      className="link-button"
+      aria-label={`Browse all ${label} values`}
+      onClick={onBrowse}
+    >
+      Browse all
+    </button>
+  );
+}
+
+/** A list facet: values searched by the backend, "Show more" and "Browse all". */
+function FacetSection({
+  definition,
+  query,
+  result,
+  dispatch,
+  onBrowse,
+  debounceMs,
+}: SectionProps & { debounceMs: number }) {
   const { facet, label } = definition;
   const options = facetOptionsOf(query, facet);
   const selected = query.filters.values[facet] ?? [];
@@ -108,32 +268,19 @@ function FacetSection({ definition, query, result, dispatch, debounceMs }: Facet
   }, [search, options.search, facet, dispatch, debounceMs]);
 
   const values = result?.values ?? [];
-  // Selected values can fall outside the returned values (limit or value search).
-  const missing = selected.filter((value) => !values.some((entry) => entry.value === value));
-  const rows = [
-    ...missing.map((value) => ({ value, count: null as number | null })),
-    ...values.filter((entry) => definition.nullable || entry.value !== null),
-  ];
-  const searchable = (result?.hasMore ?? false) || options.search !== "" || values.length > 8;
+  const rows = facetRows(definition, values, selected);
+  const searchable =
+    (result?.hasMore ?? false) || options.search !== "" || values.length > SEARCHABLE_FROM;
   const id = `facet-${facet}`;
 
   return (
     <fieldset className="facet" aria-labelledby={`${id}-title`}>
-      <legend id={`${id}-title`} className="facet__title">
-        {label}
-        {selected.length > 0 && (
-          <button
-            type="button"
-            className="link-button facet__clear"
-            aria-label={`Clear ${label} filter`}
-            onClick={() => {
-              dispatch({ type: "clearFacet", facet });
-            }}
-          >
-            Clear
-          </button>
-        )}
-      </legend>
+      <FacetLegend
+        id={`${id}-title`}
+        definition={definition}
+        count={selected.length}
+        dispatch={dispatch}
+      />
       {searchable && (
         <input
           type="search"
@@ -148,44 +295,166 @@ function FacetSection({ definition, query, result, dispatch, debounceMs }: Facet
       )}
       {result === null && <p className="facet__empty">Loading…</p>}
       {result !== null && rows.length === 0 && <p className="facet__empty">No values</p>}
-      <ul className="facet__values">
-        {rows.map(({ value, count }) => {
-          const text = formatFacetValue(definition, value);
-          return (
-            <li key={value ?? "\u0000"}>
-              <label className="facet__value">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(value)}
-                  onChange={() => {
-                    dispatch({ type: "toggleValue", facet, value });
-                  }}
-                />
-                <span
-                  className={value === null ? "facet__label facet__label--empty" : "facet__label"}
-                >
-                  {text}
-                </span>
-                <span className="facet__count">{count === null ? "—" : formatCount(count)}</span>
-              </label>
-            </li>
-          );
-        })}
-      </ul>
-      {result?.hasMore && options.limit < FACET_LIMIT_MAX && (
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => {
-            dispatch({ type: "showMoreFacetValues", facet });
+      <FacetValueList
+        definition={definition}
+        rows={rows}
+        selected={selected}
+        onToggle={(value) => {
+          dispatch({ type: "toggleValue", facet, value });
+        }}
+      />
+      <div className="facet__more">
+        {result?.hasMore && options.limit < FACET_LIMIT_MAX && (
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              dispatch({ type: "showMoreFacetValues", facet });
+            }}
+          >
+            Show more
+          </button>
+        )}
+        {searchable && <BrowseAllButton label={label} onBrowse={onBrowse} />}
+      </div>
+    </fieldset>
+  );
+}
+
+/** Category: a tree of the paths in the data, searched here. */
+function CategorySection({ definition, query, result, dispatch, onBrowse }: SectionProps) {
+  const { facet, label } = definition;
+  const selectedValues = query.filters.values[facet];
+  const selected = useMemo(() => selectedValues ?? [], [selectedValues]);
+  const [search, setSearch] = useState("");
+  const values = result?.values;
+  const roots = useMemo(() => buildCategoryTree(values ?? [], selected), [values, selected]);
+  const id = `facet-${facet}`;
+
+  return (
+    <fieldset className="facet" aria-labelledby={`${id}-title`}>
+      <FacetLegend
+        id={`${id}-title`}
+        definition={definition}
+        count={selected.length}
+        dispatch={dispatch}
+      />
+      <input
+        type="search"
+        className="input facet__search"
+        aria-label={`Search ${label} values`}
+        placeholder="Search categories"
+        value={search}
+        onChange={(event) => {
+          setSearch(event.target.value);
+        }}
+      />
+      {result === null ? (
+        <p className="facet__empty">Loading…</p>
+      ) : (
+        <CategoryTree
+          label={label}
+          roots={roots}
+          selected={selected}
+          onToggle={(path) => {
+            dispatch({ type: "toggleValue", facet, value: path });
           }}
-        >
-          Show more
-        </button>
+          search={search}
+        />
       )}
-      {result?.hasMore && options.limit >= FACET_LIMIT_MAX && (
-        <p className="facet__empty">Search to find more values.</p>
-      )}
+      <div className="facet__more">
+        <BrowseAllButton label={label} onBrowse={onBrowse} />
+      </div>
+    </fieldset>
+  );
+}
+
+/**
+ * Version Added: a range in MAME version order (the backend orders the
+ * values), and exact versions, newest first, searched here.
+ */
+function VersionSection({ definition, query, result, dispatch, onBrowse }: SectionProps) {
+  const { facet, label } = definition;
+  const selected = query.filters.values[facet] ?? [];
+  const range = query.filters.ranges[facet];
+  const [search, setSearch] = useState("");
+  const versions = (result?.values ?? []).flatMap((entry) =>
+    entry.value === null ? [] : [entry.value],
+  );
+  // Bounds of a saved range stay selectable even if this catalog lacks them.
+  const options = [
+    ...new Set([
+      ...versions,
+      ...[range?.from, range?.to].filter((v): v is string => v !== undefined),
+    ]),
+  ];
+  const rows = facetRows(definition, [...(result?.values ?? [])].reverse(), selected).filter(
+    (row) =>
+      selected.includes(row.value) ||
+      matchesSearch(formatFacetValue(definition, row.value), search),
+  );
+  const setBound = (bound: keyof VersionRange, value: string) => {
+    dispatch({
+      type: "setRange",
+      facet,
+      range: { ...range, [bound]: value === "" ? undefined : value },
+    });
+  };
+  const id = `facet-${facet}`;
+
+  return (
+    <fieldset className="facet" aria-labelledby={`${id}-title`}>
+      <FacetLegend
+        id={`${id}-title`}
+        definition={definition}
+        count={selected.length + (range ? 1 : 0)}
+        dispatch={dispatch}
+      />
+      <div className="facet-range">
+        {(["from", "to"] as const).map((bound) => (
+          <label key={bound} className="facet-range__bound">
+            <span>{bound === "from" ? "From" : "To"}</span>
+            <select
+              className="input"
+              aria-label={`${label} ${bound}`}
+              value={range?.[bound] ?? ""}
+              onChange={(event) => {
+                setBound(bound, event.target.value);
+              }}
+            >
+              <option value="">Any</option>
+              {options.map((version) => (
+                <option key={version} value={version}>
+                  {version}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      <input
+        type="search"
+        className="input facet__search"
+        aria-label={`Search ${label} values`}
+        placeholder="Search versions"
+        value={search}
+        onChange={(event) => {
+          setSearch(event.target.value);
+        }}
+      />
+      {result === null && <p className="facet__empty">Loading…</p>}
+      {result !== null && rows.length === 0 && <p className="facet__empty">No values</p>}
+      <FacetValueList
+        definition={definition}
+        rows={rows}
+        selected={selected}
+        onToggle={(value) => {
+          dispatch({ type: "toggleValue", facet, value });
+        }}
+      />
+      <div className="facet__more">
+        <BrowseAllButton label={label} onBrowse={onBrowse} />
+      </div>
     </fieldset>
   );
 }

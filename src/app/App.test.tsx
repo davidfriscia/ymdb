@@ -23,6 +23,9 @@ const EMPTY: Record<string, unknown> = {
   get_media_sources: mediaSourcesView(),
   get_remote_connections: { connections: [], loadError: null },
   get_list: favoritesList(),
+  get_support_files: { sources: [], dimensions: [] },
+  get_classification_status: { dimensions: [], syncError: null },
+  get_saved_filters: [],
 };
 
 function storedPreferences(): unknown {
@@ -91,6 +94,7 @@ describe("App", () => {
       "Media Sources",
       "Remote Connections",
       "Favorites",
+      "Support Files",
       "About",
       "Diagnostics",
     ]);

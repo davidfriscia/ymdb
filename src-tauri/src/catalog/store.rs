@@ -35,6 +35,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Serialize;
 
+use super::classification::{self, CLASSIFICATIONS_FILE_NAME, ProjectionTarget, SyncOutcome};
 use super::model::Machine;
 use super::schema::{self, MigrationError, SCHEMA_VERSION};
 use super::software_model::{Software, SoftwareListHeader};
@@ -272,6 +273,13 @@ impl CatalogStore {
         *cached = None;
         remove_if_exists(&self.catalog_path())?;
         remove_if_exists(&self.partial_path())?;
+        // Derived from the catalog and the global repository: rebuilt when needed.
+        remove_if_exists(&self.projection_path())?;
+        remove_if_exists(
+            &self
+                .dir
+                .join(format!("{CLASSIFICATIONS_FILE_NAME}-journal")),
+        )?;
         // Best effort: the directory may contain files YMDB did not create.
         let _ = fs::remove_dir(&self.dir);
         Ok(())
@@ -297,11 +305,27 @@ impl CatalogStore {
         &self,
         query: impl FnOnce(&Connection) -> Result<T, StoreError>,
     ) -> Result<Option<T>, StoreError> {
-        let path = self.catalog_path();
         let mut cached = self
             .file_lock
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let Some(connection) = self.reader(&mut cached)? else {
+            return Ok(None);
+        };
+        let result = query(connection);
+        if result.is_err() {
+            // Do not keep a connection in an unknown state.
+            *cached = None;
+        }
+        result.map(Some)
+    }
+
+    /// The cached read connection, opened when needed; `None` without a catalog.
+    fn reader<'a>(
+        &self,
+        cached: &'a mut Option<Connection>,
+    ) -> Result<Option<&'a Connection>, StoreError> {
+        let path = self.catalog_path();
         if !path.is_file() {
             *cached = None;
             return Ok(None);
@@ -313,15 +337,48 @@ impl CatalogStore {
         });
         if !current {
             *cached = None;
-            *cached = Some(open_reader(&path)?);
+            let connection = open_reader(&path)?;
+            // Without its projection the catalog stays browsable; the next
+            // classification sync creates the projection and reports errors.
+            let projection = self.projection_path();
+            if classification::open_writer(&projection).is_ok() {
+                let _ = classification::attach(&connection, &projection);
+            }
+            *cached = Some(connection);
         }
-        let connection = cached.as_ref().expect("connection was just opened");
-        let result = query(connection);
-        if result.is_err() {
-            // Do not keep a connection in an unknown state.
-            *cached = None;
+        Ok(cached.as_ref())
+    }
+
+    pub fn projection_path(&self) -> PathBuf {
+        self.dir.join(CLASSIFICATIONS_FILE_NAME)
+    }
+
+    /// Brings the classification projection of this catalog in line with
+    /// `target` (the global repository) and with the current catalog import.
+    /// Only the dimensions that differ are rebuilt, in one transaction; on
+    /// failure the previous projection is kept and the error returned.
+    pub fn sync_classifications(
+        &self,
+        target: &ProjectionTarget,
+    ) -> Result<SyncOutcome, StoreError> {
+        let mut cached = self
+            .file_lock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(reader) = self.reader(&mut cached)? else {
+            return Ok(SyncOutcome::NoCatalog);
+        };
+        let token = classification::catalog_token(reader)?;
+        let pending = classification::pending(reader, target, &token);
+        if pending.is_empty() {
+            return Ok(SyncOutcome::UpToDate);
         }
-        result.map(Some)
+        let projection = self.projection_path();
+        classification::rebuild(&projection, &self.catalog_path(), target, &token, &pending)?;
+        if !classification::is_attached(reader)? {
+            classification::attach(reader, &projection)?;
+        }
+        Ok(SyncOutcome::Synced(pending))
     }
 
     /// Starts building a new catalog in the partial file.
@@ -386,7 +443,10 @@ impl CatalogStore {
 
 /// Opens the current catalog read-only, upgrading an older schema first.
 fn open_reader(path: &Path) -> Result<Connection, StoreError> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    // URIs let the projection be attached read-only.
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_URI;
     let connection = Connection::open_with_flags(path, flags)?;
     let found = schema::schema_version(&connection)?;
     if found > SCHEMA_VERSION {

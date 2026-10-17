@@ -11,7 +11,9 @@ mod mame;
 mod media;
 mod remote;
 mod roms;
+mod saved_filters;
 mod settings;
+mod support_files;
 
 use std::env;
 use std::path::PathBuf;
@@ -25,6 +27,8 @@ use crate::commands::lists::ListsState;
 use crate::commands::media::MediaState;
 use crate::commands::remote::RemoteState;
 use crate::commands::roms::RomManagerState;
+use crate::commands::saved_filters::SavedFiltersState;
+use crate::commands::support_files::SupportFilesState;
 use crate::installations::AppLayout;
 use crate::media::config::MediaConfigStore;
 use crate::media::protocol::SCHEME;
@@ -61,6 +65,9 @@ pub fn run() {
             app.manage(ListsState::new(config_dir.as_deref()));
             app.manage(RemoteState::new(config_dir.as_deref()));
             app.manage(RomManagerState::default());
+            // Imported support files can be large: local data, not roaming.
+            app.manage(SupportFilesState::new(data_dir.as_deref()));
+            app.manage(SavedFiltersState::new(config_dir.as_deref()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -114,6 +121,18 @@ pub fn run() {
             commands::roms::start_download,
             commands::roms::get_download_status,
             commands::roms::cancel_download,
+            commands::support_files::get_support_files,
+            commands::support_files::preview_support_file_import,
+            commands::support_files::apply_support_file_import,
+            commands::support_files::remove_support_file,
+            commands::support_files::set_active_support_source,
+            commands::support_files::get_classification_status,
+            commands::support_files::find_missing_classification_values,
+            commands::saved_filters::get_saved_filters,
+            commands::saved_filters::create_saved_filter,
+            commands::saved_filters::update_saved_filter,
+            commands::saved_filters::rename_saved_filter,
+            commands::saved_filters::delete_saved_filter,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

@@ -130,6 +130,15 @@ export interface RamOptionDetail {
 }
 
 /** Mirrors `MachineDetail` in `detail/machine.rs`. */
+/** Mirrors `MachineClassifications` in `catalog/classification.rs`. */
+export interface MachineClassifications {
+  genres: string[];
+  /** Category paths, levels joined with ` / `. */
+  categories: string[];
+  series: string[];
+  versionAdded: string | null;
+}
+
 export interface MachineDetail {
   name: string;
   description: string;
@@ -159,6 +168,8 @@ export interface MachineDetail {
   softwareLists: MachineSoftwareList[];
   ramOptions: RamOptionDetail[];
   samples: string[];
+  /** From the active support file sources, not from MAME. */
+  classifications: MachineClassifications;
 }
 
 export interface SoftwareRomDetail {

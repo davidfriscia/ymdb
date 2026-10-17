@@ -13,6 +13,7 @@ use super::request::{
 use super::sql::{Conditions, count, facet_values, nulls_last, placeholders, text_values};
 use super::text::{self, TextQuery};
 use super::{FacetResult, ListMembers, SearchError, SearchResponse, check_members};
+use crate::support_files::version;
 
 /// Lightweight machine data for result lists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -107,7 +108,30 @@ fn validate_filters(filters: &MachineFilters) -> Result<(), SearchError> {
     validate_values("years", &filters.years)?;
     validate_values("driverStatuses", &filters.driver_statuses)?;
     validate_values("emulationStatuses", &filters.emulation_statuses)?;
-    validate_values("softwareLists", &filters.software_lists)
+    validate_values("softwareLists", &filters.software_lists)?;
+    validate_values("genres", &filters.genres)?;
+    validate_values("categories", &filters.categories)?;
+    validate_values("series", &filters.series)?;
+    validate_values("versionsAdded", &filters.versions_added)?;
+    if let Some(range) = &filters.version_added_range {
+        for bound in [&range.from, &range.to].into_iter().flatten() {
+            if version::sort_key(bound).is_none() {
+                return Err(SearchError::InvalidRequest(format!(
+                    "'{bound}' is not a MAME version"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Classification filters: projection table, dimension and selected values.
+fn membership_filters(filters: &MachineFilters) -> [(MachineFacet, &'static str, &[String]); 3] {
+    [
+        (MachineFacet::Genre, "genre", &filters.genres),
+        (MachineFacet::Category, "category", &filters.categories),
+        (MachineFacet::Series, "series", &filters.series),
+    ]
 }
 
 pub(super) fn from_clause(text: Option<&TextQuery>) -> &'static str {
@@ -184,6 +208,54 @@ pub(super) fn conditions(
             text_values(&filters.software_lists),
         );
     }
+    // Classifications live in the catalog's projection (`cls`), keyed by
+    // short name. Values missing from the projection match nothing, so a
+    // criterion that cannot be resolved never widens the results.
+    for (facet, dimension, values) in membership_filters(filters) {
+        if applies(facet) && !values.is_empty() {
+            conditions.push(
+                &format!(
+                    // Uncorrelated; category ancestors have their own rows,
+                    // so a parent node selects its descendants by equality.
+                    "m.name IN (SELECT c.machine_name FROM cls.memberships c
+                                WHERE c.dimension = '{dimension}' AND c.value IN ({}))",
+                    placeholders(values.len())
+                ),
+                text_values(values),
+            );
+        }
+    }
+    if applies(MachineFacet::VersionAdded) {
+        let mut alternatives = Vec::new();
+        let mut params = Vec::new();
+        if !filters.versions_added.is_empty() {
+            alternatives.push(format!(
+                "a.value IN ({})",
+                placeholders(filters.versions_added.len())
+            ));
+            params.extend(text_values(&filters.versions_added));
+        }
+        if let Some(range) = &filters.version_added_range
+            && (range.from.is_some() || range.to.is_some())
+        {
+            let key = |bound: &Option<String>, open: i64| {
+                bound.as_deref().and_then(version::sort_key).unwrap_or(open)
+            };
+            alternatives.push("a.sort_key BETWEEN ? AND ?".to_owned());
+            params.push(Value::Integer(key(&range.from, i64::MIN)));
+            params.push(Value::Integer(key(&range.to, i64::MAX)));
+        }
+        if !alternatives.is_empty() {
+            conditions.push(
+                &format!(
+                    "m.name IN (SELECT a.machine_name FROM cls.attributes a
+                                WHERE a.dimension = 'versionAdded' AND ({}))",
+                    alternatives.join(" OR ")
+                ),
+                params,
+            );
+        }
+    }
     conditions
 }
 
@@ -228,28 +300,50 @@ fn facet(
     query: &FacetQuery<MachineFacet>,
 ) -> Result<FacetResult<MachineFacet>, SearchError> {
     let mut conditions = conditions(filters, members, text, Some(query.facet));
-    let (column, join) = match query.facet {
-        MachineFacet::Manufacturer => ("m.manufacturer", ""),
-        MachineFacet::Year => ("m.year", ""),
-        MachineFacet::DriverStatus => ("m.driver_status", ""),
-        MachineFacet::EmulationStatus => ("m.driver_emulation", ""),
+    // A machine may reference a software list more than once (different
+    // tags); projection rows are unique per machine and value.
+    let (column, join, counted) = match query.facet {
+        MachineFacet::Manufacturer => ("m.manufacturer", "", "COUNT(*)"),
+        MachineFacet::Year => ("m.year", "", "COUNT(*)"),
+        MachineFacet::DriverStatus => ("m.driver_status", "", "COUNT(*)"),
+        MachineFacet::EmulationStatus => ("m.driver_emulation", "", "COUNT(*)"),
         MachineFacet::SoftwareList => (
             "l.list_name",
             " JOIN machine_software_lists l ON l.machine_name = m.name",
+            "COUNT(DISTINCT m.id)",
+        ),
+        MachineFacet::Genre => (
+            "c.value",
+            " JOIN cls.memberships c ON c.dimension = 'genre' AND c.machine_name = m.name",
+            "COUNT(*)",
+        ),
+        MachineFacet::Category => (
+            "c.value",
+            " JOIN cls.memberships c ON c.dimension = 'category' AND c.machine_name = m.name",
+            "COUNT(*)",
+        ),
+        MachineFacet::Series => (
+            "c.value",
+            " JOIN cls.memberships c ON c.dimension = 'series' AND c.machine_name = m.name",
+            "COUNT(*)",
+        ),
+        MachineFacet::VersionAdded => (
+            "a.value",
+            " JOIN cls.attributes a ON a.dimension = 'versionAdded' AND a.machine_name = m.name",
+            "COUNT(*)",
         ),
     };
     conditions.push_contains(column, query.search.as_deref());
-    // A machine may reference a list more than once (different tags).
-    let counted = if join.is_empty() {
-        "COUNT(*)"
-    } else {
-        "COUNT(DISTINCT m.id)"
-    };
-    // Years are listed chronologically, other facets by decreasing count.
-    let order = if query.facet == MachineFacet::Year {
-        nulls_last(column, false)
-    } else {
-        format!("2 DESC, {}", nulls_last(column, false))
+    // Years are listed chronologically, versions in MAME version order (not
+    // as text), category nodes in path order (parents before children), other
+    // facets by decreasing count.
+    let order = match query.facet {
+        MachineFacet::Year => nulls_last(column, false),
+        MachineFacet::VersionAdded => {
+            "MIN(a.sort_key) IS NULL, MIN(a.sort_key), a.value".to_owned()
+        }
+        MachineFacet::Category => "c.value".to_owned(),
+        _ => format!("2 DESC, {}", nulls_last(column, false)),
     };
     let sql = format!(
         "SELECT {column}, {counted} FROM {}{join}{} GROUP BY {column} ORDER BY {order} LIMIT ?",

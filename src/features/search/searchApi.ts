@@ -11,7 +11,7 @@ export interface FacetRequest<F> {
   facet: F;
   /** Case-insensitive substring that values must contain. */
   search?: string;
-  /** Maximum number of values (default 50, at most 200). */
+  /** Maximum number of values (default 50, at most 1000). */
   limit?: number;
 }
 
@@ -43,7 +43,21 @@ export interface SearchResponse<T, F> {
 
 export type MachineSort = "relevance" | "name" | "description" | "year" | "manufacturer";
 export type MachineFacet =
-  "manufacturer" | "year" | "driverStatus" | "emulationStatus" | "softwareList";
+  | "manufacturer"
+  | "year"
+  | "driverStatus"
+  | "emulationStatus"
+  | "softwareList"
+  | "genre"
+  | "category"
+  | "series"
+  | "versionAdded";
+
+/** Mirrors `VersionRange`: both bounds included, in MAME version order. */
+export interface VersionRange {
+  from?: string;
+  to?: string;
+}
 
 /** Mirrors `MachineFilters`; `null` in a value list selects entries without a value. */
 export interface MachineFilters {
@@ -61,6 +75,14 @@ export interface MachineFilters {
   hasRoms?: boolean;
   hasDisks?: boolean;
   softwareLists?: string[];
+  /** Classifications of the active support file sources. */
+  genres?: string[];
+  /** Category nodes; a node selects its descendants. */
+  categories?: string[];
+  series?: string[];
+  /** Versions added; alternatives of `versionAddedRange`. */
+  versionsAdded?: string[];
+  versionAddedRange?: VersionRange;
   /** Only machines of this user list (for example `favorites`). */
   list?: string;
 }

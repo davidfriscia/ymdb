@@ -107,7 +107,7 @@ describe("browser state", () => {
       hasRoms: true,
     });
     // Machine filters are kept separately.
-    expect(state.queries.machines.filters).toEqual({ values: {}, flags: {} });
+    expect(state.queries.machines.filters).toEqual({ values: {}, flags: {}, ranges: {} });
   });
 
   it("toggles and removes filters", () => {

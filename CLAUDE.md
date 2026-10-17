@@ -150,6 +150,29 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   parameter read with `json_each`). Changes are saved before being kept in memory; an
   invalid `lists.json` is reported, never replaced. Imports are previewed, then
   applied atomically.
+- `src-tauri/src/support_files/`: MAME support files (catver, genre, catlist,
+  version, series), imported only by explicit user action (preview, then apply);
+  never downloaded, never modified on disk. Each format has its own parser producing
+  memberships or attributes (`VerAdded` is an attribute, not a category); identify
+  formats by header and structure, never by file name alone. The global repository
+  (`support-files.sqlite`) keeps one source per format and one active source per
+  dimension: never combine sources for a dimension, never activate an alternative
+  implicitly, and increment a dimension's revision only when its effective content
+  changes. Support files never touch `lists.json`.
+- Classifications reach a catalog only through its projection
+  (`installations/<id>/classifications.sqlite`, `catalog/classification.rs`), never
+  through `catalog.sqlite`. Commands that read classifications (machine search,
+  machine detail, status) call `sync_catalog` first; projections are rebuilt in one
+  transaction, only for dimensions whose repository revision, source or catalog token
+  changed, with set-based `INSERT ... SELECT` over the attached repository and catalog
+  (keep the `+m.machine_name IN (...)` form: without it SQLite probes per machine). A
+  failed sync keeps the previous projection and must never block the catalog.
+  Classification values missing from a projection match nothing.
+- `saved-filters.json` (`saved_filters.rs`): presets with versioned criteria owned by
+  the browser (`features/saved-filters/savedFilterCriteria.ts`), stored verbatim.
+  A new kind of filter needs a new criteria version and a conversion; presets of an
+  unknown version are kept, never rewritten. Presets never include presentation
+  settings and are never updated implicitly.
 - Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
   unbounded one-to-many relations (clones, software of a list, machines of a list)
   in them: return a count and list them through the paginated search.
@@ -195,6 +218,12 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   section of Settings. Sections stay mounted once shown (`useVisited`), so a change of
   selection never discards unsaved forms; selecting never changes the active
   installation.
+- Filters with many values use the shared pieces of `features/browser/filters/`
+  (`FacetValueList`, `CategoryTree`, `FacetBrowserModal`): bounded lists that scroll
+  on their own, a value search and "Browse all", whose selection is a draft applied
+  with one `setFacetValues`. Classification facets are shown and requested only for
+  the dimensions of the catalog's classification status. Saved filters are applied
+  with one `applyCriteria` action.
 - Asynchronous loads in components go through `src/shared/useLoader.ts` (stale
   responses ignored, memoized inputs).
 - See `ARCHITECTURE.md` for planned components; update it when a component moves

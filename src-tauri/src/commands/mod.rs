@@ -15,7 +15,9 @@ pub mod mame;
 pub mod media;
 pub mod remote;
 pub mod roms;
+pub mod saved_filters;
 pub mod search;
+pub mod support_files;
 
 use serde::Serialize;
 

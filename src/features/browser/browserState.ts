@@ -11,8 +11,17 @@ import type {
   SortDirection,
   SupportStatus,
   CloneFilter,
+  VersionRange,
 } from "../search/searchApi";
-import { FACET_FILTERS, FLAG_FILTERS, formatFacetValue, type Scope } from "./filterDefinitions";
+import type { Dimension } from "../support-files/supportFilesApi";
+import {
+  FACET_FILTERS,
+  FLAG_FILTERS,
+  formatFacetValue,
+  isCompleteFacet,
+  type FacetFilterDefinition,
+  type Scope,
+} from "./filterDefinitions";
 
 /**
  * State of the catalog browser. It only describes the query and the
@@ -24,12 +33,16 @@ export const PAGE_SIZES = [25, 50, 100, 200] as const;
 export const DEFAULT_PAGE_SIZE = 50;
 export const FACET_LIMIT_STEP = 50;
 export const FACET_LIMIT_MAX = 200;
+/** Values requested for tree and version facets and for "Browse all". */
+export const COMPLETE_FACET_LIMIT = 1000;
 
 export interface ScopeFilters {
   /** Selected values per facet; values of one facet are alternatives. */
   values: Partial<Record<string, (string | null)[]>>;
   /** Selected option per flag filter; missing means "any". */
   flags: Partial<Record<string, string>>;
+  /** Version ranges per facet (Version Added); alternatives of its values. */
+  ranges: Partial<Record<string, VersionRange>>;
 }
 
 export interface FacetOptions {
@@ -74,10 +87,14 @@ export interface BrowserState {
    * kept, but values missing from the new catalog match nothing.
    */
   filtersKept: boolean;
+  /** The saved filter loaded last, compared with the current filters. */
+  presetId: string | null;
 }
 
+export const emptyFilters = (): ScopeFilters => ({ values: {}, flags: {}, ranges: {} });
+
 const emptyQuery = (): ScopeQuery => ({
-  filters: { values: {}, flags: {} },
+  filters: emptyFilters(),
   sort: null,
   direction: "ascending",
   page: 0,
@@ -92,7 +109,16 @@ export const initialBrowserState: BrowserState = {
   queries: { machines: emptyQuery(), software: emptyQuery() },
   stack: [],
   filtersKept: false,
+  presetId: null,
 };
+
+/** The search and filters of a saved filter, applied at once. */
+export interface BrowserCriteria {
+  scope: Scope;
+  text: string;
+  filters: ScopeFilters;
+  favoritesOnly: boolean;
+}
 
 export type BrowserAction =
   | { type: "setScope"; scope: Scope }
@@ -101,6 +127,11 @@ export type BrowserAction =
   | { type: "toggleValue"; facet: string; value: string | null }
   | { type: "setFlag"; flag: string; value: string | null }
   | { type: "clearFacet"; facet: string }
+  | { type: "setFacetValues"; facet: string; values: (string | null)[] }
+  | { type: "setRange"; facet: string; range: VersionRange | null }
+  | { type: "applyCriteria"; criteria: BrowserCriteria; presetId: string | null }
+  | { type: "setPreset"; presetId: string | null }
+  | { type: "showClassification"; facet: string; value: string }
   | { type: "clearFilters" }
   | { type: "setSort"; sort: MachineSort | SoftwareSort | null }
   | { type: "setDirection"; direction: SortDirection }
@@ -175,12 +206,74 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
       return updateFilters(state, (filters) => ({
         ...filters,
         values: without(filters.values, action.facet),
+        ranges: without(filters.ranges, action.facet),
       }));
+    case "setFacetValues":
+      // Applies a whole selection at once (the "Browse all" window).
+      return updateFilters(state, (filters) => ({
+        ...filters,
+        values:
+          action.values.length === 0
+            ? without(filters.values, action.facet)
+            : { ...filters.values, [action.facet]: [...new Set(action.values)] },
+      }));
+    case "setRange":
+      return updateFilters(state, (filters) => {
+        const ranges = without(filters.ranges, action.facet);
+        const range = action.range && compact(action.range);
+        return {
+          ...filters,
+          ranges:
+            range && (range.from !== undefined || range.to !== undefined)
+              ? { ...ranges, [action.facet]: range }
+              : ranges,
+        };
+      });
     case "clearFilters":
       return {
-        ...updateFilters(state, () => ({ values: {}, flags: {} })),
+        ...updateFilters(state, emptyFilters),
         filtersKept: false,
       };
+    case "applyCriteria": {
+      // One state change: the controls, results, counts and pages all
+      // follow the preset together, from the first page.
+      const { criteria } = action;
+      const queries = {
+        machines: { ...state.queries.machines, page: 0 },
+        software: { ...state.queries.software, page: 0 },
+      };
+      queries[criteria.scope] = {
+        ...queries[criteria.scope],
+        filters: criteria.filters,
+        facetOptions: {},
+      };
+      return {
+        ...state,
+        scope: criteria.scope,
+        text: criteria.text,
+        appliedText: criteria.text,
+        queries,
+        stack: [],
+        filtersKept: false,
+        presetId: action.presetId,
+      };
+    }
+    case "setPreset":
+      return { ...state, presetId: action.presetId };
+    case "showClassification":
+      // From a detail page: the machines of one classification value. The
+      // sort, page size and view are kept; the text and other filters are not,
+      // so that every machine of the value is shown.
+      return browserReducer(state, {
+        type: "applyCriteria",
+        criteria: {
+          scope: "machines",
+          text: "",
+          filters: { ...emptyFilters(), values: { [action.facet]: [action.value] } },
+          favoritesOnly: false,
+        },
+        presetId: null,
+      });
     case "setSort":
       return updateQuery(state, (query) => ({ ...query, sort: action.sort, page: 0 }));
     case "setDirection":
@@ -281,7 +374,15 @@ export function countActiveFilters(filters: ScopeFilters): number {
     (count, selected) => count + (selected?.length ?? 0),
     0,
   );
-  return values + Object.keys(filters.flags).length;
+  return values + Object.keys(filters.flags).length + Object.keys(filters.ranges).length;
+}
+
+/** "0.100 – 0.200", "from 0.100" or "up to 0.200". */
+export function formatRange(range: VersionRange): string {
+  if (range.from !== undefined && range.to !== undefined) {
+    return range.from === range.to ? range.from : `${range.from} – ${range.to}`;
+  }
+  return range.from !== undefined ? `from ${range.from}` : `up to ${range.to ?? ""}`;
 }
 
 export function activeFilters(scope: Scope, filters: ScopeFilters): ActiveFilter[] {
@@ -293,6 +394,14 @@ export function activeFilters(scope: Scope, filters: ScopeFilters): ActiveFilter
         key: `${definition.facet}:${value ?? "\u0000"}`,
         label: `${definition.label}: ${valueLabel}`,
         remove: { type: "toggleValue", facet: definition.facet, value },
+      });
+    }
+    const range = filters.ranges[definition.facet];
+    if (range) {
+      active.push({
+        key: `range:${definition.facet}`,
+        label: `${definition.label}: ${formatRange(range)}`,
+        remove: { type: "setRange", facet: definition.facet, range: null },
       });
     }
   }
@@ -362,10 +471,13 @@ function compact<T extends object>(value: T): T {
 }
 
 function facetRequests<F extends string>(
-  facets: readonly F[],
+  definitions: readonly FacetFilterDefinition[],
   query: Pick<ScopeQuery, "facetOptions">,
 ): FacetRequest<F>[] {
-  return facets.map((facet) => {
+  return definitions.map((definition) => {
+    const facet = definition.facet as F;
+    // Trees and version ranges need every value; they are searched locally.
+    if (isCompleteFacet(definition)) return { facet, limit: COMPLETE_FACET_LIMIT };
     const options = facetOptionsOf(query, facet);
     return compact({
       facet,
@@ -386,6 +498,11 @@ export function machineFilters(filters: ScopeFilters, list?: string): MachineFil
     driverStatuses: selected(filters, "driverStatus"),
     emulationStatuses: selected(filters, "emulationStatus"),
     softwareLists: present(filters, "softwareList"),
+    genres: present(filters, "genre"),
+    categories: present(filters, "category"),
+    series: present(filters, "series"),
+    versionsAdded: present(filters, "versionAdded"),
+    versionAddedRange: filters.ranges.versionAdded,
     clones: filters.flags.clones as CloneFilter | undefined,
     bios: bool(filters.flags.bios),
     device: bool(filters.flags.device),
@@ -452,14 +569,20 @@ export function buildResultsRequest(
   };
 }
 
-/** The request for the facets: same text and filters, a single item. */
+/**
+ * The request for the facets: same text and filters, a single item.
+ * Classification facets are requested only for the dimensions the catalog has.
+ */
 export function buildFacetRequest(
   scope: Scope,
   text: string,
   filters: ScopeFilters,
   facetOptions: ScopeQuery["facetOptions"],
   list?: string,
+  classifications: readonly Dimension[] = [],
 ): BrowserRequest {
+  const shown = (definition: FacetFilterDefinition) =>
+    definition.classification === undefined || classifications.includes(definition.classification);
   const query = { facetOptions };
   const common = compact({ text: textOf(text), pageSize: 1 });
   if (scope === "machines") {
@@ -468,10 +591,7 @@ export function buildFacetRequest(
       request: {
         ...common,
         filters: machineFilters(filters, list),
-        facets: facetRequests(
-          FACET_FILTERS.machines.map((definition) => definition.facet as MachineFacet),
-          query,
-        ),
+        facets: facetRequests<MachineFacet>(FACET_FILTERS.machines.filter(shown), query),
       },
     };
   }
@@ -480,10 +600,7 @@ export function buildFacetRequest(
     request: {
       ...common,
       filters: softwareFilters(filters, list),
-      facets: facetRequests(
-        FACET_FILTERS.software.map((definition) => definition.facet as SoftwareFacet),
-        query,
-      ),
+      facets: facetRequests<SoftwareFacet>(FACET_FILTERS.software.filter(shown), query),
     },
   };
 }
@@ -503,4 +620,42 @@ export function pageWindow(page: number, pageCount: number, radius = 2): (number
     result.push(value);
   });
   return result;
+}
+
+/**
+ * The request for the values of one facet, for the "Browse all" window: the
+ * same text and filters as the panel, up to {@link COMPLETE_FACET_LIMIT} values.
+ */
+export function buildFacetValuesRequest(
+  scope: Scope,
+  text: string,
+  filters: ScopeFilters,
+  facet: string,
+  search: string,
+  list?: string,
+): BrowserRequest {
+  const common = compact({ text: textOf(text), pageSize: 1 });
+  const request = compact({
+    facet,
+    search: search.trim() === "" ? undefined : search.trim(),
+    limit: COMPLETE_FACET_LIMIT,
+  });
+  if (scope === "machines") {
+    return {
+      scope,
+      request: {
+        ...common,
+        filters: machineFilters(filters, list),
+        facets: [request as FacetRequest<MachineFacet>],
+      },
+    };
+  }
+  return {
+    scope,
+    request: {
+      ...common,
+      filters: softwareFilters(filters, list),
+      facets: [request as FacetRequest<SoftwareFacet>],
+    },
+  };
 }

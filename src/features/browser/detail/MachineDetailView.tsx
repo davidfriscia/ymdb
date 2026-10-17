@@ -19,6 +19,7 @@ import {
 import { formatClock, formatSize, joinPresent, yesNo } from "./format";
 import { RelatedList } from "./RelatedList";
 import { MachineLaunchPanel } from "../../launcher/MachineLaunchPanel";
+import { CATEGORY_SEPARATOR } from "../../support-files/supportFilesApi";
 
 interface MachineDetailViewProps {
   name: string;
@@ -26,6 +27,8 @@ interface MachineDetailViewProps {
   refreshKey: number;
   onTab: (tab: string) => void;
   onOpen: (target: DetailTarget) => void;
+  /** Shows the catalog filtered by a classification value (facet id, value). */
+  onShowClassification: (facet: string, value: string) => void;
   navigation: DetailNavigation;
 }
 
@@ -35,6 +38,7 @@ export function MachineDetailView({
   refreshKey,
   onTab,
   onOpen,
+  onShowClassification,
   navigation,
 }: MachineDetailViewProps) {
   const installationId = useInstallationScope();
@@ -103,6 +107,7 @@ export function MachineDetailView({
           refreshKey={refreshKey}
           onOpen={onOpen}
           onOpenMachine={openMachine}
+          onShowClassification={onShowClassification}
         />
       )}
     </DetailFrame>
@@ -128,11 +133,13 @@ function OverviewTab({
   refreshKey,
   onOpen,
   onOpenMachine,
+  onShowClassification,
 }: {
   machine: MachineDetail;
   refreshKey: number;
   onOpen: (target: DetailTarget) => void;
   onOpenMachine: (name: string) => void;
+  onShowClassification: (facet: string, value: string) => void;
 }) {
   const driver = machine.driver;
   const flags = driver
@@ -164,6 +171,8 @@ function OverviewTab({
           ]}
         />
       </Section>
+
+      <ClassificationSection machine={machine} onShow={onShowClassification} />
 
       <Section title="Relations">
         <Fields
@@ -499,5 +508,88 @@ function SoftwareListsTab({
         }))}
       />
     </>
+  );
+}
+
+/**
+ * Genre, category, series and version added from the active support files.
+ * They are not MAME data, so they are a section of their own; each value (and
+ * each level of a category) shows the catalog filtered by it.
+ */
+function ClassificationSection({
+  machine,
+  onShow,
+}: {
+  machine: MachineDetail;
+  onShow: (facet: string, value: string) => void;
+}) {
+  const { genres, categories, series, versionAdded } = machine.classifications;
+  if (
+    genres.length === 0 &&
+    categories.length === 0 &&
+    series.length === 0 &&
+    versionAdded === null
+  ) {
+    return null;
+  }
+  const link = (facet: string, value: string, label: string, text = value) => (
+    <button
+      key={`${facet}:${value}`}
+      type="button"
+      className="link-button classification__link"
+      title={`Show the machines of ${label} ${value}`}
+      aria-label={`Show the machines of ${label} ${value}`}
+      onClick={() => {
+        onShow(facet, value);
+      }}
+    >
+      {text}
+    </button>
+  );
+  const list = (facet: string, label: string, values: string[]) =>
+    values.length > 0 ? (
+      <span className="classification__values">
+        {values.map((value) => link(facet, value, label))}
+      </span>
+    ) : null;
+  return (
+    <Section title="Classification">
+      <Fields
+        label="Classification"
+        fields={[
+          ["Genre", list("genre", "genre", genres)],
+          [
+            "Category",
+            categories.length > 0 ? (
+              <span className="classification__values">
+                {categories.map((path) => {
+                  const levels = path.split(CATEGORY_SEPARATOR);
+                  return (
+                    <span key={path} className="classification__path">
+                      {levels.map((level, index) => {
+                        const node = levels.slice(0, index + 1).join(CATEGORY_SEPARATOR);
+                        return (
+                          <span key={node}>
+                            {index > 0 && (
+                              <span className="classification__separator" aria-hidden="true">
+                                ›
+                              </span>
+                            )}
+                            {link("category", node, "category", level)}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  );
+                })}
+              </span>
+            ) : null,
+          ],
+          ["Series", list("series", "series", series)],
+          ["Version added", versionAdded ? link("versionAdded", versionAdded, "version") : null],
+        ]}
+      />
+      <p className="message message--muted">From the MAME support files imported in Settings.</p>
+    </Section>
   );
 }

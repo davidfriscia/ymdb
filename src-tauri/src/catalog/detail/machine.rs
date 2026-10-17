@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use super::{RecordLink, to_u64};
+use crate::catalog::classification::{MachineClassifications, machine_classifications};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +41,9 @@ pub struct MachineDetail {
     pub software_lists: Vec<MachineSoftwareList>,
     pub ram_options: Vec<RamOptionDetail>,
     pub samples: Vec<String>,
+    /// From the active support file sources, not from MAME (see
+    /// `catalog::classification`); empty without them.
+    pub classifications: MachineClassifications,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -264,6 +268,7 @@ pub fn machine_detail(
                 software_lists: Vec::new(),
                 ram_options: Vec::new(),
                 samples: Vec::new(),
+                classifications: MachineClassifications::default(),
             })
         })
         .optional()?;
@@ -271,6 +276,7 @@ pub fn machine_detail(
         return Ok(None);
     };
 
+    detail.classifications = machine_classifications(connection, name)?;
     detail.features = rows(
         connection,
         "SELECT feature_type, status, overall FROM machine_features

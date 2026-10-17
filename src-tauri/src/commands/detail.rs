@@ -7,6 +7,7 @@
 use tauri::State;
 
 use super::installations::InstallationsState;
+use super::support_files::{SupportFilesState, sync_catalog};
 use super::{CommandError, run_blocking};
 use crate::catalog::detail::machine::{MachineDetail, machine_detail};
 use crate::catalog::detail::software::{
@@ -19,9 +20,16 @@ pub async fn get_machine_detail(
     installation_id: String,
     name: String,
     installations: State<'_, InstallationsState>,
+    support: State<'_, SupportFilesState>,
 ) -> Result<Option<MachineDetail>, CommandError> {
     let store = installations.resolve(&installation_id)?.catalog;
-    run_blocking(move || read(&store, |connection| machine_detail(connection, &name))).await?
+    let target = support.target();
+    run_blocking(move || {
+        // The classifications shown match those the search filters on.
+        let _ = sync_catalog(&store, target);
+        read(&store, |connection| machine_detail(connection, &name))
+    })
+    .await?
 }
 
 #[tauri::command]

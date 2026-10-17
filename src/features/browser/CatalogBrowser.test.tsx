@@ -33,6 +33,7 @@ import { InstallationsProvider } from "../installations/InstallationsProvider";
 import type { InstallationSummary } from "../installations/installationsApi";
 import { useInstallations } from "../installations/installationsContext";
 import { FavoritesProvider } from "../lists/FavoritesProvider";
+import { NO_CLASSIFICATIONS } from "../../test/supportFileFixtures";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -136,6 +137,8 @@ function commands(
     get_media_sources: () => mediaSourcesView({ snap: ["C:/Artwork ✓/snap"] }),
     list_media: () => [],
     get_list: () => favoritesList([]),
+    get_classification_status: () => NO_CLASSIFICATIONS,
+    get_saved_filters: () => [],
     ...overrides,
   });
 }
@@ -202,11 +205,13 @@ function renderBrowser(props: Partial<ComponentProps<typeof CatalogBrowser>> = {
   const user = userEvent.setup();
   const onPreferencesChange = vi.fn();
   const onOpenMame = vi.fn();
+  const onOpenSupportFiles = vi.fn();
   const base: ComponentProps<typeof CatalogBrowser> = {
     refreshKey: 0,
     preferences: PREFERENCES,
     onPreferencesChange,
     onOpenMame,
+    onOpenSupportFiles,
     debounceMs: 20,
     ...props,
   };
@@ -214,7 +219,7 @@ function renderBrowser(props: Partial<ComponentProps<typeof CatalogBrowser>> = {
   const rerender = (next: Partial<ComponentProps<typeof CatalogBrowser>>) => {
     view.rerender(withLauncher(<CatalogBrowser {...base} {...next} />));
   };
-  return { user, onPreferencesChange, onOpenMame, rerender };
+  return { user, onPreferencesChange, onOpenMame, onOpenSupportFiles, rerender };
 }
 
 const results = () => within(screen.getByRole("list", { name: "Results" }));
@@ -1487,6 +1492,7 @@ describe("CatalogBrowser", () => {
               setPreferences((current) => ({ ...current, ...change }));
             }}
             onOpenMame={() => undefined}
+            onOpenSupportFiles={() => undefined}
             debounceMs={20}
           />
         );
