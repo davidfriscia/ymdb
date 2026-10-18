@@ -105,6 +105,10 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Search SQL (`catalog/search/`): concatenate only SQL fragments written in the code
   and selected through enums; bind every request value as a `?` parameter. Never pass
   user text to FTS5 syntax: go through `search::text::parse`.
+- With search text, queries that join `machines_fts`, `machines` and a classification
+  table start from the FTS5 index with `CROSS JOIN` (see `facet_query` in
+  `search/machines.rs`); otherwise SQLite may evaluate the MATCH once per projection
+  row. Keep the plan test when changing these queries.
 - FTS5 tables are external-content indexes rebuilt by imports before commit; any new
   code that writes indexed tables must rebuild them too.
 - Measure search changes with the `search_benchmark` ignored test on a real catalog

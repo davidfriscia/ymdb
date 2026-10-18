@@ -653,6 +653,112 @@ fn facets_count_classifications_disjunctively() {
     assert!(series.contains(&("Street Fighter II".to_owned(), 2)));
 }
 
+/// Facet counts computed without the facet SQL: the machines matching the
+/// text and every other filter, grouped by their projection rows.
+fn expected_facet(
+    store: &CatalogStore,
+    request: &MachineSearchRequest,
+    facet: MachineFacet,
+) -> Vec<(String, u64)> {
+    let mut filters = request.filters.clone();
+    let (table, dimension) = match facet {
+        MachineFacet::Genre => {
+            filters.genres.clear();
+            ("memberships", "genre")
+        }
+        MachineFacet::Category => {
+            filters.categories.clear();
+            ("memberships", "category")
+        }
+        MachineFacet::Series => {
+            filters.series.clear();
+            ("memberships", "series")
+        }
+        _ => {
+            filters.versions_added.clear();
+            filters.version_added_range = None;
+            ("attributes", "versionAdded")
+        }
+    };
+    let matching = search(
+        store,
+        &MachineSearchRequest {
+            text: request.text.clone(),
+            filters,
+            page_size: Some(200),
+            ..MachineSearchRequest::default()
+        },
+    )
+    .expect("search");
+    let names: Vec<&str> = names(&matching);
+    let rows: Vec<(String, String)> = read(store, |connection| {
+        connection
+            .prepare(&format!(
+                "SELECT value, machine_name FROM cls.{table} WHERE dimension = ?1"
+            ))?
+            .query_map([dimension], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
+    });
+    let mut counts = std::collections::BTreeMap::<String, u64>::new();
+    for (value, machine) in rows {
+        if names.contains(&machine.as_str()) {
+            *counts.entry(value).or_default() += 1;
+        }
+    }
+    counts.into_iter().collect()
+}
+
+#[test]
+fn classification_facets_with_text_count_the_matching_machines() {
+    let (_fixture, store) = classified();
+    let filter_sets = [
+        MachineFilters::default(),
+        MachineFilters {
+            genres: strings(&["Maze", "Fighter"]),
+            ..MachineFilters::default()
+        },
+        MachineFilters {
+            categories: strings(&["Fighter"]),
+            series: strings(&["Street Fighter"]),
+            ..MachineFilters::default()
+        },
+        MachineFilters {
+            version_added_range: Some(VersionRange {
+                from: Some("0.10".to_owned()),
+                to: None,
+            }),
+            manufacturers: vec![Some("Capcom".to_owned()), None],
+            ..MachineFilters::default()
+        },
+    ];
+    let mut counted = 0;
+    for text in ["pac", "s", "street fighter", "zzzzunlikely"] {
+        for filters in &filter_sets {
+            let request = MachineSearchRequest {
+                text: Some(text.to_owned()),
+                ..facets(filters.clone())
+            };
+            let response = search(&store, &request).expect("search");
+            for kind in [
+                MachineFacet::Genre,
+                MachineFacet::Category,
+                MachineFacet::Series,
+                MachineFacet::VersionAdded,
+            ] {
+                let mut actual = facet(&response, kind);
+                actual.sort();
+                counted += actual.len();
+                assert_eq!(
+                    actual,
+                    expected_facet(&store, &request, kind),
+                    "{kind:?}, text '{text}', {filters:?}"
+                );
+            }
+        }
+    }
+    assert!(counted > 20, "the cases count classified machines");
+}
+
 #[test]
 fn facet_value_search_and_limits_apply_to_classifications() {
     let (_fixture, store) = classified();

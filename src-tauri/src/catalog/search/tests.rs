@@ -2,17 +2,19 @@
 
 use std::sync::atomic::AtomicBool;
 
-use rusqlite::Connection;
+use rusqlite::types::Value;
+use rusqlite::{Connection, params_from_iter};
 use tempfile::TempDir;
 
-use super::machines::{MachineSearchResponse, search_machines};
+use super::machines::{MachineSearchResponse, facet_query, search_machines};
 use super::request::{
     CloneFilter, FacetRequest, MachineFacet, MachineFilters, MachineSearchRequest, MachineSort,
     SoftwareFacet, SoftwareFilters, SoftwareSearchRequest, SoftwareSort, SortDirection,
-    SupportStatus,
+    SupportStatus, validate_facets,
 };
 use super::software::{SoftwareSearchResponse, search_software};
-use super::{FacetResult, FacetValue, SearchError};
+use super::{FacetResult, FacetValue, SearchError, text as search_text};
+use crate::catalog::classification;
 use crate::catalog::import::{ImportProgress, import_from_reader, import_software_from_reader};
 use crate::catalog::store::{CatalogSource, CatalogStore};
 
@@ -629,6 +631,136 @@ fn deserializes_requests_and_rejects_unknown_fields() {
     assert!(
         serde_json::from_value::<MachineSearchRequest>(serde_json::json!({ "sql": "x" })).is_err()
     );
+}
+
+// Query plans
+
+/// The full catalog with a small classification projection written
+/// directly (projection builds are tested in `classification`), read
+/// through a new store so that the projection is attached.
+fn classified_catalog() -> (Catalog, CatalogStore) {
+    let catalog = Catalog::full();
+    let projection =
+        classification::open_writer(&catalog.store.projection_path()).expect("projection");
+    projection
+        .execute_batch(
+            "INSERT INTO memberships VALUES
+                 ('genre', 'Maze', 'pacman', 1), ('genre', 'Maze', 'puckman', 1),
+                 ('category', 'Maze', 'pacman', 0), ('category', 'Maze / Collect', 'pacman', 1),
+                 ('series', 'Pac-Man', 'pacman', 1), ('series', 'Pac-Man', 'mspacman', 1);
+             INSERT INTO attributes VALUES
+                 ('versionAdded', 'pacman', '0.1', 1), ('versionAdded', 'sf2', '0.2', 2);",
+        )
+        .expect("projection rows");
+    drop(projection);
+    let store = CatalogStore::in_dir(
+        catalog
+            .store
+            .catalog_path()
+            .parent()
+            .expect("catalog directory"),
+    );
+    (catalog, store)
+}
+
+/// The top-level loops of a query plan, outermost first (subqueries of
+/// filters are left out).
+fn plan_loops(connection: &Connection, sql: &str, params: &[Value]) -> Vec<String> {
+    let mut statement = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .expect("explain");
+    statement
+        .query_map(params_from_iter(params), |row| {
+            Ok((row.get::<_, i64>(1)?, row.get::<_, String>(3)?))
+        })
+        .expect("plan")
+        .map(|row| row.expect("plan row"))
+        .filter(|(parent, detail)| {
+            *parent == 0 && (detail.starts_with("SCAN") || detail.starts_with("SEARCH"))
+        })
+        .map(|(_, detail)| detail)
+        .collect()
+}
+
+/// With search text, SQLite preferred to scan a dimension's projection rows
+/// and evaluate the full-text MATCH once per row (seconds on a full catalog).
+/// Classification facets must start from the full-text index, then look up
+/// machines by rowid and projection rows by machine name.
+#[test]
+fn classification_facets_with_text_start_from_the_full_text_index() {
+    let (_catalog, store) = classified_catalog();
+    let filter_sets = [
+        MachineFilters::default(),
+        MachineFilters {
+            genres: vec!["Maze".to_owned()],
+            series: vec!["Pac-Man".to_owned()],
+            manufacturers: vec![some("Namco")],
+            ..MachineFilters::default()
+        },
+    ];
+    let parsed = search_text::parse(Some("pac")).expect("text");
+    store
+        .with_reader(|connection| {
+            for facet in [
+                MachineFacet::Genre,
+                MachineFacet::Category,
+                MachineFacet::Series,
+                MachineFacet::VersionAdded,
+            ] {
+                let table = if facet == MachineFacet::VersionAdded {
+                    "SEARCH a "
+                } else {
+                    "SEARCH c "
+                };
+                for filters in &filter_sets {
+                    let query = validate_facets(&[FacetRequest {
+                        facet,
+                        search: None,
+                        limit: Some(1000),
+                    }])
+                    .expect("facet")
+                    .remove(0);
+                    let (sql, params) = facet_query(filters, None, parsed.as_ref(), &query);
+                    let loops = plan_loops(connection, &sql, &params);
+                    let context = format!("{facet:?} {filters:?}: {loops:#?}");
+                    assert_eq!(loops.len(), 3, "{context}");
+                    // The MATCH runs once, without a per-row rowid constraint.
+                    assert!(
+                        loops[0].starts_with("SCAN machines_fts VIRTUAL TABLE")
+                            && !loops[0].contains(":="),
+                        "{context}"
+                    );
+                    assert!(
+                        loops[1].starts_with("SEARCH m USING INTEGER PRIMARY KEY"),
+                        "{context}"
+                    );
+                    assert!(
+                        loops[2].starts_with(table) && loops[2].contains("machine_name=?"),
+                        "{context}"
+                    );
+                }
+            }
+            Ok(())
+        })
+        .expect("store")
+        .expect("catalog");
+
+    // The search still sees the projection.
+    let response = store
+        .with_reader(|connection| {
+            Ok(search_machines(
+                connection,
+                &MachineSearchRequest {
+                    facets: vec![facet(MachineFacet::Genre)],
+                    ..text("pac")
+                },
+                None,
+            ))
+        })
+        .expect("store")
+        .expect("catalog")
+        .expect("search");
+    assert_eq!(facet_values(&response.facets[0]), [(Some("Maze"), 1)]);
 }
 
 // Index consistency and imports

@@ -134,6 +134,10 @@ fn membership_filters(filters: &MachineFilters) -> [(MachineFacet, &'static str,
     ]
 }
 
+/// The text search `FROM` with a fixed join order: full-text matches first,
+/// then their machines (see `facet_query`).
+const FTS_FIRST_FROM: &str = "machines_fts CROSS JOIN machines m ON m.id = machines_fts.rowid";
+
 pub(super) fn from_clause(text: Option<&TextQuery>) -> &'static str {
     if text.is_some() {
         "machines m JOIN machines_fts ON machines_fts.rowid = m.id"
@@ -292,44 +296,61 @@ pub(super) fn order_by(
     (order, Vec::new())
 }
 
-fn facet(
+pub(super) fn facet(
     connection: &Connection,
     filters: &MachineFilters,
     members: Option<&ListMembers>,
     text: Option<&TextQuery>,
     query: &FacetQuery<MachineFacet>,
 ) -> Result<FacetResult<MachineFacet>, SearchError> {
+    let (sql, params) = facet_query(filters, members, text, query);
+    let (values, has_more) = facet_values(connection, &sql, &params, query.limit)?;
+    Ok(FacetResult {
+        facet: query.facet,
+        values,
+        has_more,
+    })
+}
+
+/// SQL and parameters counting the values of one facet; they fetch one row
+/// more than the limit.
+pub(super) fn facet_query(
+    filters: &MachineFilters,
+    members: Option<&ListMembers>,
+    text: Option<&TextQuery>,
+    query: &FacetQuery<MachineFacet>,
+) -> (String, Vec<Value>) {
     let mut conditions = conditions(filters, members, text, Some(query.facet));
     // A machine may reference a software list more than once (different
     // tags); projection rows are unique per machine and value.
     let (column, join, counted) = match query.facet {
-        MachineFacet::Manufacturer => ("m.manufacturer", "", "COUNT(*)"),
-        MachineFacet::Year => ("m.year", "", "COUNT(*)"),
-        MachineFacet::DriverStatus => ("m.driver_status", "", "COUNT(*)"),
-        MachineFacet::EmulationStatus => ("m.driver_emulation", "", "COUNT(*)"),
+        MachineFacet::Manufacturer => ("m.manufacturer", None, "COUNT(*)"),
+        MachineFacet::Year => ("m.year", None, "COUNT(*)"),
+        MachineFacet::DriverStatus => ("m.driver_status", None, "COUNT(*)"),
+        MachineFacet::EmulationStatus => ("m.driver_emulation", None, "COUNT(*)"),
         MachineFacet::SoftwareList => (
             "l.list_name",
-            " JOIN machine_software_lists l ON l.machine_name = m.name",
+            Some("machine_software_lists l ON l.machine_name = m.name"),
             "COUNT(DISTINCT m.id)",
         ),
         MachineFacet::Genre => (
             "c.value",
-            " JOIN cls.memberships c ON c.dimension = 'genre' AND c.machine_name = m.name",
+            Some("cls.memberships c ON c.dimension = 'genre' AND c.machine_name = m.name"),
             "COUNT(*)",
         ),
         MachineFacet::Category => (
             "c.value",
-            " JOIN cls.memberships c ON c.dimension = 'category' AND c.machine_name = m.name",
+            Some("cls.memberships c ON c.dimension = 'category' AND c.machine_name = m.name"),
             "COUNT(*)",
         ),
         MachineFacet::Series => (
             "c.value",
-            " JOIN cls.memberships c ON c.dimension = 'series' AND c.machine_name = m.name",
+            Some("cls.memberships c ON c.dimension = 'series' AND c.machine_name = m.name"),
             "COUNT(*)",
         ),
         MachineFacet::VersionAdded => (
             "a.value",
-            " JOIN cls.attributes a ON a.dimension = 'versionAdded' AND a.machine_name = m.name",
+            Some("cls.attributes a ON a.dimension = 'versionAdded' AND a.machine_name = m.name"),
             "COUNT(*)",
         ),
     };
@@ -345,17 +366,29 @@ fn facet(
         MachineFacet::Category => "c.value".to_owned(),
         _ => format!("2 DESC, {}", nulls_last(column, false)),
     };
+    // With search text, classification facets start from the full-text
+    // index: otherwise SQLite may scan every projection row of the dimension
+    // (already in value order, which saves the GROUP BY sort) and evaluate the
+    // MATCH once per row, which takes seconds on a full catalog. SQLite never
+    // reorders the tables of a CROSS JOIN, so the plan stays: FTS5 matches,
+    // machines by rowid, projection rows by (dimension, machine_name).
+    let classified = matches!(
+        query.facet,
+        MachineFacet::Genre
+            | MachineFacet::Category
+            | MachineFacet::Series
+            | MachineFacet::VersionAdded
+    );
+    let (from, join) = match (join, text) {
+        (Some(join), Some(_)) if classified => (FTS_FIRST_FROM, format!(" CROSS JOIN {join}")),
+        (Some(join), _) => (from_clause(text), format!(" JOIN {join}")),
+        (None, _) => (from_clause(text), String::new()),
+    };
     let sql = format!(
-        "SELECT {column}, {counted} FROM {}{join}{} GROUP BY {column} ORDER BY {order} LIMIT ?",
-        from_clause(text),
+        "SELECT {column}, {counted} FROM {from}{join}{} GROUP BY {column} ORDER BY {order} LIMIT ?",
         conditions.where_clause()
     );
     let mut params = conditions.params().to_vec();
     params.push(Value::Integer(i64::from(query.limit) + 1));
-    let (values, has_more) = facet_values(connection, &sql, &params, query.limit)?;
-    Ok(FacetResult {
-        facet: query.facet,
-        values,
-        has_more,
-    })
+    (sql, params)
 }

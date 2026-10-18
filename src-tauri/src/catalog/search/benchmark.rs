@@ -21,6 +21,8 @@ use super::request::{
 };
 use super::{ListMembers, machines, software, text};
 
+mod classification_facets;
+
 const RUNS: usize = 15;
 
 enum Request {

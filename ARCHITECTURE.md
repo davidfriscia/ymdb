@@ -1420,7 +1420,13 @@ searched separately; there is no combined search.
 - `machines.rs`, `software.rs`: count, page, facets and result mapping to
   lightweight DTOs (`MachineSummary`, `SoftwareSummary`) without relations.
 - `benchmark.rs`: an ignored test measuring representative queries on a real
-  catalog and printing their `EXPLAIN QUERY PLAN`.
+  catalog and printing their `EXPLAIN QUERY PLAN`. `benchmark/classification_facets.rs`
+  adds ignored tests on a catalog with its classification projection attached as
+  `cls`: the time of each stage of a machine search (results, count, each facet, the
+  browser's complete facet request) for a set of texts with the plans of the
+  classification facets and `sqlite_version()`, a snapshot of results and facets to
+  compare two versions of the queries, and progressive typing through the store
+  lock.
 
 The functions take a read-only connection. `CatalogStore::with_reader` keeps one
 cached read-only connection under the store's file lock (so its page cache survives
@@ -1524,6 +1530,20 @@ year, support status and interface.
   case-insensitive) to find values of large facets (3,140 manufacturers in 0.280).
   Counts are computed by SQL `GROUP BY` queries; results are never loaded in memory
   to be counted.
+- With search text, the classification facets (genre, category, series, version
+  added) are written FTS-first: `machines_fts CROSS JOIN machines m ON m.id =
+machines_fts.rowid CROSS JOIN cls.memberships c ON ...`. SQLite never reorders the
+  tables of a `CROSS JOIN`, so the MATCH runs once and the matches are joined to
+  machines by rowid and to the projection by `(dimension, machine_name)`. With an
+  ordinary `JOIN`, SQLite 3.53 started from the dimension's memberships (already in
+  value order, which saves the `GROUP BY` sort) and evaluated the MATCH once per
+  membership (`machines_fts VIRTUAL TABLE INDEX 0:=M4`): 1.7 s for a text without
+  results, 5.4 s for `gal` and 132 s for `g` for the browser's facet request on the
+  0.280 catalog, against 0.7 ms, 2.9 ms and 95 ms FTS-first. Facets without text and
+  the other facets keep the ordinary joins. The test
+  `classification_facets_with_text_start_from_the_full_text_index` checks the
+  properties of the plan (FTS5 scan outermost without a rowid constraint, machines
+  by primary key, projection by machine name).
 
 #### Pagination and sorting
 
@@ -1973,6 +1993,20 @@ ignored test):
 
 The facets of a dimension cost 5 ms (series) to 42 ms (version added) over the whole
 catalog; they are requested with the other facets only when filters or text change.
+
+The browser's complete facet request (nine facets) with search text, measured with
+`classification_facet_benchmark` (median, warm connection) after the FTS-first
+facet queries (see [Facets](#facets)):
+
+| Text           | Results | Facet request |
+| -------------- | ------- | ------------- |
+| No text        | 48,893  | 156 ms        |
+| `s`            | 28,328  | 221 ms        |
+| `g`            | 8,933   | 95 ms         |
+| `ga`           | 3,476   | 28 ms         |
+| `gal`          | 298     | 2.9 ms        |
+| `galaga`       | 24      | 1.0 ms        |
+| `zzzzunlikely` | 0       | 0.7 ms        |
 
 #### Limitations
 
