@@ -16,6 +16,11 @@ import { Disclosure } from "./Disclosure";
 import { LaunchStatus } from "./LaunchStatus";
 import { useInstallationScope } from "../installations/installationsContext";
 import { RomDownloadSection } from "../roms/RomDownloadSection";
+import { ConfigureControlsDialog } from "../controllers/ConfigureControlsDialog";
+import { ControlsPreferences } from "../controllers/ControlsPreferences";
+import { ControlsSelect, SaveControlsPreference } from "../controllers/ControlsSelect";
+import { describeSource } from "../controllers/controlsMessages";
+import { preferenceScopes, useControls } from "../controllers/useControls";
 
 interface LaunchBarProps {
   /** Short information about the title, at the start of the bar. */
@@ -60,7 +65,15 @@ interface LaunchControlsProps {
 export function LaunchControls({ target, request, summary, children }: LaunchControlsProps) {
   const installationId = useInstallationScope();
   const launcher = useLauncher();
-  const { sessions, start, stop, showCommandPreview, setShowCommandPreview } = launcher;
+  const {
+    sessions,
+    start,
+    stop,
+    showCommandPreview,
+    setShowCommandPreview,
+    controlsVersion,
+    controlsChanged,
+  } = launcher;
   // The configuration of another installation is never used, even briefly
   // while switching.
   const view = launcher.view?.installationId === installationId ? launcher.view : null;
@@ -72,6 +85,21 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The temporary controller profile of the launches from this page; never saved.
+  const [controlsProfileId, setControlsProfileId] = useState<string | null>(null);
+  const [controlsNotice, setControlsNotice] = useState<string | null>(null);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
+
+  const controls = useControls(installationId, target);
+  const controllers = controls.view.latest;
+  const resolution =
+    controls.resolution.state.status === "ready" ? controls.resolution.state.value : null;
+  const scopes = useMemo(() => preferenceScopes(target), [target]);
+  // A controller profile deleted in the meantime falls back to the saved one.
+  const temporaryProfile =
+    controllers?.profiles.find((profile) => profile.id === controlsProfileId) ?? null;
+  const temporaryProfileId = temporaryProfile?.id ?? null;
 
   const profiles = view?.config.profiles ?? [];
   // A profile deleted in the meantime falls back to the default profile.
@@ -84,9 +112,10 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
             ...request,
             installationId,
             ...(selectedProfile ? { profileId: selectedProfile } : {}),
+            ...(temporaryProfileId ? { controls: { profileId: temporaryProfileId } } : {}),
           }
         : null,
-    [request, installationId, selectedProfile],
+    [request, installationId, selectedProfile, temporaryProfileId],
   );
   const session = latestSession(sessions, target, installationId);
   const running = session?.state.state === "running";
@@ -124,6 +153,46 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
   }
   if (error) messages.push({ text: error, tone: "error" });
 
+  const configureUnavailable = !fullRequest
+    ? "Choose what to launch first"
+    : running
+      ? "MAME is already running"
+      : !view
+        ? "The launch options are not loaded"
+        : !temporaryProfile && !resolution
+          ? "The controls are not resolved yet"
+          : null;
+  const software = target.software !== null;
+  const subject = target.software
+    ? `${target.software.list}:${target.software.name} on ${target.machine}`
+    : target.machine;
+
+  const details =
+    children || temporaryProfile || controlsNotice ? (
+      <>
+        {children}
+        {temporaryProfile && (
+          <SaveControlsPreference
+            key={temporaryProfile.id}
+            profile={temporaryProfile}
+            scopes={scopes}
+            onSaved={(scope) => {
+              setControlsProfileId(null);
+              setControlsNotice(
+                `${temporaryProfile.name} is saved as the controller profile of: ${scope.label}.`,
+              );
+              controlsChanged();
+            }}
+          />
+        )}
+        {controlsNotice && (
+          <p className="message message--success" role="status">
+            {controlsNotice}
+          </p>
+        )}
+      </>
+    ) : undefined;
+
   const playLabel = starting ? "Starting…" : running ? "Running" : "Play";
   const playTitle = starting
     ? "Starting MAME…"
@@ -137,7 +206,7 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
     <>
       <LaunchBar
         summary={summary}
-        details={children}
+        details={details}
         actions={
           <>
             <RomDownloadSection request={fullRequest} target={target} />
@@ -157,8 +226,8 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                 <PlayIcon size={20} />
               )}
             </button>
-            <label className="launch-bar__profile" title="Launch profile">
-              <span className="visually-hidden">Profile</span>
+            <label className="launch-bar__profile" title="Launch profile: the launch options">
+              <span className="launch-bar__label">Launch profile</span>
               <select
                 className="input"
                 value={selectedProfile ?? ""}
@@ -177,6 +246,18 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                   ))}
               </select>
             </label>
+            <ControlsSelect
+              profiles={controllers?.profiles ?? []}
+              resolution={resolution}
+              software={software}
+              value={temporaryProfileId}
+              disabled={!controllers}
+              unavailable={controls.view.state.status === "error" && !controllers}
+              onChange={(next) => {
+                setControlsProfileId(next);
+                setControlsNotice(null);
+              }}
+            />
           </>
         }
       />
@@ -222,6 +303,16 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                 <button
                   type="button"
                   className="button button--secondary button--small"
+                  aria-expanded={controlsOpen}
+                  onClick={() => {
+                    setControlsOpen(!controlsOpen);
+                  }}
+                >
+                  Controls for {overrideLabel}
+                </button>
+                <button
+                  type="button"
+                  className="button button--secondary button--small"
                   aria-pressed={showCommandPreview}
                   onClick={() => {
                     setShowCommandPreview(!showCommandPreview);
@@ -245,9 +336,39 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                 />
               )}
 
+              {controlsOpen &&
+                (controllers ? (
+                  <ControlsPreferences
+                    view={controllers}
+                    resolution={controls.resolution.state}
+                    scopes={scopes}
+                    software={software}
+                    temporary={temporaryProfileId}
+                    onChanged={controlsChanged}
+                    onConfigure={() => {
+                      setConfiguring(true);
+                    }}
+                    configureUnavailable={configureUnavailable}
+                  />
+                ) : controls.view.state.status === "error" ? (
+                  <p className="message message--error" role="alert">
+                    The controller profiles could not be loaded:{" "}
+                    {describeError(controls.view.state.error)}
+                  </p>
+                ) : (
+                  <p className="message message--muted" role="status">
+                    Loading the controller profiles…
+                  </p>
+                ))}
+
               {showCommandPreview &&
                 (fullRequest ? (
-                  <CommandPreview request={fullRequest} configVersion={launcher.configVersion} />
+                  <CommandPreview
+                    request={fullRequest}
+                    // Both only grow, so their sum changes with either.
+                    configVersion={launcher.configVersion + controlsVersion}
+                    software={software}
+                  />
                 ) : (
                   <p className="message message--muted">
                     Choose what to launch to see the command line.
@@ -257,6 +378,34 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
           )}
         </div>
       </section>
+
+      {configuring && configureUnavailable === null && (
+        <ConfigureControlsDialog
+          subject={subject}
+          profileName={temporaryProfile?.name ?? resolution?.profileName ?? ""}
+          profileSource={
+            temporaryProfile
+              ? describeSource("request", software)
+              : resolution
+                ? describeSource(resolution.profileSource, software)
+                : ""
+          }
+          managed={
+            temporaryProfile
+              ? temporaryProfile.managed
+              : resolution !== null && resolution.cfgDirectory !== null
+          }
+          cfgDirectory={temporaryProfile ? null : (resolution?.cfgDirectory ?? null)}
+          onStart={async () => {
+            if (!fullRequest) return;
+            setError(null);
+            await start(fullRequest);
+          }}
+          onClose={() => {
+            setConfiguring(false);
+          }}
+        />
+      )}
     </>
   );
 }

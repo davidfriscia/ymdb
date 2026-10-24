@@ -337,3 +337,179 @@ fn controller_profiles_end_to_end() {
     assert_eq!(snapshot(&native_cfg), native_after_first);
     assert_eq!(snapshot(&real_dir), real_before);
 }
+
+/// Changes `P1_BUTTON1` like MAME's Input Assignments menus would: the general
+/// assignment (`general`) and the one of the running machine (`system`),
+/// then exits normally so that MAME saves them. With `None`, only prints the
+/// effective sequences.
+fn menu_script(change: Option<(&str, &str)>) -> String {
+    let change = change.map_or_else(String::new, |(general, system)| {
+        format!(
+            r#"ioport:set_type_seq(t, p, "standard", input:seq_from_tokens("{general}"))
+field:set_input_seq("standard", input:seq_from_tokens("{system}"))
+"#
+        )
+    });
+    format!(
+        r#"
+local ioport = manager.machine.ioport
+local input = manager.machine.input
+local t, p = ioport:token_to_input_type("P1_BUTTON1")
+local field
+for _, port in pairs(ioport.ports) do
+    for _, candidate in pairs(port.fields) do
+        if candidate.type == t and candidate.player == p then field = candidate end
+    end
+end
+{change}print("PROBE general=" .. input:seq_to_tokens(ioport:type_seq(t, p)))
+print("PROBE system=" .. input:seq_to_tokens(field:input_seq("standard")))
+manager.machine:exit()
+"#
+    )
+}
+
+/// The effective general and machine sequences printed by [`menu_script`].
+fn probes(log: &str) -> (String, String) {
+    let find = |prefix: &str| {
+        log.lines()
+            .find_map(|line| line.trim().strip_prefix(prefix).map(str::to_owned))
+            .unwrap_or_else(|| panic!("no {prefix} in:\n{log}"))
+    };
+    (find("PROBE general="), find("PROBE system="))
+}
+
+/// The workflow of the Controllers settings and of Configure Controls in
+/// MAME, through the commands' state (as the UI uses it) and a real MAME:
+/// input changes made in MAME persist per controller profile, a temporary
+/// selection never changes the saved preferences, and removing a baseline
+/// file keeps what MAME saved.
+///
+/// The changes are made by a Lua script calling the same `ioport` functions
+/// as MAME's menus, then MAME exits normally and saves them itself; pressing
+/// keys in MAME's menus by hand remains a manual check.
+#[test]
+#[ignore = "requires a MAME executable in YMDB_E2E_MAME"]
+#[allow(clippy::too_many_lines)]
+fn controller_profile_changes_made_in_mame_persist_per_profile() {
+    use crate::commands::controllers::{ControllerFile, ControllersState};
+    use crate::controllers::model::{AssignmentUpdate, FieldUpdate};
+
+    let real = PathBuf::from(std::env::var("YMDB_E2E_MAME").expect("YMDB_E2E_MAME must be set"));
+    let real_dir = real.parent().expect("MAME directory").to_path_buf();
+    let real_before = snapshot(&real_dir);
+    let work = tempfile::tempdir().expect("temp dir");
+
+    let mame_dir = work.path().join("MAME ✓");
+    fs::create_dir_all(&mame_dir).expect("dir");
+    let executable = mame_dir.join(real.file_name().expect("file name"));
+    if fs::hard_link(&real, &executable).is_err() {
+        fs::copy(&real, &executable).expect("copy MAME");
+    }
+    let script = mame_dir.join("probe.lua");
+    fs::write(
+        mame_dir.join("mame.ini"),
+        format!(
+            "rompath {}\nvideo none\nsound none\nskip_gameinfo 1\nautoboot_script probe.lua\n",
+            real_dir.join("roms").display(),
+        ),
+    )
+    .expect("mame.ini");
+    let store = CatalogStore::in_dir(&work.path().join("catalog"));
+    let cancel = Arc::new(AtomicBool::new(false));
+    import_catalog(&executable, &store, &cancel, &ImportProgress::default()).expect("machines");
+
+    // 1. Profiles created as Settings → Controllers does.
+    let config_dir = work.path().join("config ✓");
+    let state = ControllersState::new(Some(&config_dir));
+    let arcade = state.create_profile("Arcade", None).expect("arcade");
+    let pad = state
+        .create_profile(
+            "Pad",
+            Some(&ControllerFile {
+                content: controller_file("KEYCODE_V").into_bytes(),
+                file_name: Some("pad.cfg".to_owned()),
+            }),
+        )
+        .expect("pad");
+    // 2. Arcade becomes the preference of the machine.
+    let turfmast = AssignmentTarget {
+        level: AssignmentLevel::Machine,
+        key: Some("turfmast".to_owned()),
+    };
+    state
+        .update(|config| {
+            Ok(config.update_assignment(
+                &turfmast,
+                AssignmentUpdate {
+                    profile_id: FieldUpdate::Set {
+                        value: arcade.clone(),
+                    },
+                    players: FieldUpdate::Keep,
+                },
+            )?)
+        })
+        .expect("machine preference");
+    let bench = Bench {
+        executable,
+        store,
+        controllers: ControllersStore::in_dir(&config_dir),
+        sessions: SessionManager::new(Some(work.path().join("logs"))),
+    };
+    let paths = bench.controllers.paths().clone();
+    let run = |change: Option<(&str, &str)>, temporary: Option<&str>| {
+        fs::write(&script, menu_script(change)).expect("script");
+        let (config, _) = state.snapshot().expect("snapshot");
+        let (prepared, log) = bench.run(&config, &request("turfmast", temporary));
+        (prepared, probes(&log))
+    };
+    let saved = || state.snapshot().expect("snapshot").0;
+    let preferences = saved();
+
+    // 3-5. Launch, change a button in MAME, exit normally.
+    let (prepared, _) = run(Some(("KEYCODE_Q", "KEYCODE_Z")), None);
+    assert_eq!(prepared.plan.controls.profile_id, arcade);
+    let arcade_cfg = paths.context_dir(INSTALLATION_ID, &arcade);
+    assert!(
+        fs::read_to_string(arcade_cfg.join("turfmast.cfg"))
+            .expect("turfmast.cfg")
+            .contains("KEYCODE_Z")
+    );
+    // 6-7. Launch again with the same profile: the changes are there.
+    let (_, effective) = run(None, None);
+    assert_eq!(effective, ("KEYCODE_Q".to_owned(), "KEYCODE_Z".to_owned()));
+
+    // 8-9. A second profile, chosen temporarily: its own baseline and
+    // directory; then change its configuration.
+    let (prepared, effective) = run(None, Some(&pad));
+    assert_eq!(prepared.plan.controls.profile_id, pad);
+    assert_eq!(effective, ("KEYCODE_V".to_owned(), "KEYCODE_V".to_owned()));
+    run(Some(("KEYCODE_W", "KEYCODE_E")), Some(&pad));
+    // The temporary selection saved nothing.
+    assert_eq!(saved(), preferences);
+
+    // 10-11. Back to the first profile: its configuration is unchanged.
+    let (_, effective) = run(None, None);
+    assert_eq!(effective, ("KEYCODE_Q".to_owned(), "KEYCODE_Z".to_owned()));
+    let (_, effective) = run(None, Some(&pad));
+    assert_eq!(effective, ("KEYCODE_W".to_owned(), "KEYCODE_E".to_owned()));
+
+    // Removing Pad's baseline keeps what MAME saved in its directory.
+    let pad_cfg = paths.context_dir(INSTALLATION_ID, &pad);
+    let pad_saved = snapshot(&pad_cfg);
+    state.remove_base(&pad).expect("remove base");
+    assert!(!paths.base_file(&pad).exists());
+    assert_eq!(snapshot(&pad_cfg), pad_saved);
+    let (prepared, effective) = run(None, Some(&pad));
+    assert!(
+        !prepared
+            .plan
+            .command_line()
+            .contains(&"-ctrlrpath".to_owned())
+    );
+    assert_eq!(effective, ("KEYCODE_W".to_owned(), "KEYCODE_E".to_owned()));
+
+    // MAME's own configuration directory was never used, and nothing of the
+    // real installation changed.
+    assert!(!mame_dir.join("cfg").exists());
+    assert_eq!(snapshot(&real_dir), real_before);
+}

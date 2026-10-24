@@ -12,6 +12,7 @@ import "./features/remote/remote.css";
 import "./features/roms/roms.css";
 import "./features/lists/lists.css";
 import "./features/support-files/supportFiles.css";
+import "./features/controllers/controllers.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

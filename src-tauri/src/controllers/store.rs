@@ -121,4 +121,30 @@ impl ControllersStore {
         let _ = fs::remove_file(self.paths.base_file(profile_id));
         let _ = fs::remove_dir(self.paths.profile_dir(profile_id));
     }
+
+    /// First step of the removal of a profile's `base.cfg`: moves it aside,
+    /// next to it, so that it can be restored if the removal cannot be saved.
+    /// Returns the moved file, or `None` when the profile has no `base.cfg`.
+    pub fn set_base_aside(&self, profile_id: &str) -> io::Result<Option<PathBuf>> {
+        let base = self.paths.base_file(profile_id);
+        let aside = base.with_extension("cfg.removed");
+        match fs::rename(&base, &aside) {
+            Ok(()) => Ok(Some(aside)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Puts back a `base.cfg` moved by [`Self::set_base_aside`].
+    pub fn restore_base(&self, profile_id: &str, aside: &Path) -> io::Result<()> {
+        fs::rename(aside, self.paths.base_file(profile_id))
+    }
+
+    /// Deletes a `base.cfg` moved by [`Self::set_base_aside`] once its
+    /// removal is saved, and the profile's directory if nothing else is in
+    /// it. Best effort: a leftover file is never read.
+    pub fn delete_base_aside(&self, profile_id: &str, aside: &Path) {
+        let _ = fs::remove_file(aside);
+        let _ = fs::remove_dir(self.paths.profile_dir(profile_id));
+    }
 }

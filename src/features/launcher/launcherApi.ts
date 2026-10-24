@@ -192,6 +192,8 @@ export interface SessionInfo {
   title: string;
   commandLine: string[];
   controls: PlanControls;
+  /** The warnings of the plan the session was started with. */
+  warnings: string[];
   startedAt: number;
   state: SessionState;
 }

@@ -20,6 +20,13 @@ export interface LauncherContextValue {
   reloadConfig: () => void;
   /** Incremented whenever a configuration is saved. */
   configVersion: number;
+  /**
+   * Incremented whenever controller profiles, controllers or their saved
+   * assignments change, so that resolutions and previews reload.
+   */
+  controlsVersion: number;
+  /** Reports a saved change of the controllers configuration. */
+  controlsChanged: () => void;
   /** Saves the whole configuration of an installation; rejects with the backend error. */
   saveConfig: (installationId: string, config: LaunchConfig) => Promise<LaunchConfigView>;
   /** Sessions of this run, from every installation, most recent first. */

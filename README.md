@@ -648,16 +648,45 @@ uses custom local directories, YMDB extends `-rompath`/`-samplepath` after these
 ### Controller profiles
 
 MAME keeps configuring inputs in its own menus and saving them; YMDB never edits
-MAME's `cfg` files. A **controller profile** gives those settings their own place:
-with a profile, MAME reads and saves its configuration (`default.cfg`,
-`<machine>.cfg`, including DIP switches) in a directory of YMDB for that profile and
-installation, optionally starting from a MAME controller file imported into the
-profile (`-ctrlr`). The built-in **MAME configuration** profile, the default, passes
-nothing and keeps MAME's own configuration, exactly as before. Profiles, controllers
-and their assignments (default, machine, software, machine + software) are stored in
-`controllers.json`. In this version they are managed by the backend only (the
-command preview shows the profile used); the settings interface and the binding of
-controllers to physical devices (`mapdevice`) come later.
+MAME's `cfg` files and has no button editor. Three things have similar names:
+
+- a **launch profile** is a set of launch options (see above);
+- a **controller profile** is an input configuration: with it, MAME reads and saves
+  its configuration (`default.cfg`, `<machine>.cfg`) in a directory of YMDB for that
+  profile and MAME installation, optionally starting from a MAME controller
+  configuration file (`.cfg`, used as the baseline: `-ctrlr`);
+- a **controller** is the logical identity of one of your devices (name, kind, MAME
+  device class, optional device ID and provider).
+
+The built-in **MAME configuration** controller profile, the initial default, passes
+nothing to MAME and keeps MAME's own configuration, exactly as before.
+
+**Settings → Controllers** manages controller profiles (create, empty or from a
+controller file; rename; import, replace or remove the baseline file; delete when no
+saved assignment uses it), controllers, the default controller profile and the
+saved assignments of machines and software.
+
+On a detail page, the **Controls** selector of the launch bar shows the controller
+profile that applies and where it comes from (for example "Arcade Six Buttons —
+specific to this machine"). Choosing another profile applies to the launches from
+that page only; **Save as preference** saves it for the machine, the software or the
+software on the selected machine. **Advanced → Controls** shows each saved level with
+**Reset to inherited**. Precedence, from the weakest: default, machine, software,
+software on a given machine, then the temporary selection.
+
+To assign buttons, use **Advanced → Controls → Configure Controls in MAME**: YMDB
+starts the machine or software with the controller profile, and you open MAME's menu
+(normally **Tab**) → **Input Settings** → **Input Assignments (this system)** for the
+current machine, or **Input Assignments (general)** for every machine. MAME saves the
+changes when you exit it normally; stopping MAME from YMDB discards them. The next
+launch with the same profile finds them; other profiles are not affected.
+
+Current limits: controllers are not bound to physical devices yet (no device
+detection or `mapdevice`), so player assignments are stored preferences only. MAME's
+configuration files also hold DIP switches, slot, mixer and video settings, so these
+are per controller profile and MAME installation too: a new profile starts from
+MAME's defaults. Two sessions using the same profile get a warning, since the last
+one to exit keeps its general settings.
 
 ## Testing and quality checks
 
@@ -765,9 +794,10 @@ Implemented:
   command line preview, global options, launch profiles, machine and software
   options per installation, and session monitoring across installations (see
   [Launching MAME](#launching-mame)).
-- Controller profiles (backend): controllers, controller profiles with an isolated MAME
+- Controller profiles: controllers, controller profiles with an isolated MAME
   configuration directory per installation and an optional imported controller file,
-  assignments by machine and software, and their use by the launcher (see
+  assignments by machine and software with inheritance, a temporary Controls
+  selection at launch and a guided configuration in MAME's own menus (see
   [Controller profiles](#controller-profiles)).
 - Remote repositories: global remote connections (SFTP with private keys, passphrases
   and host key verification), connection test and remote browsing, and per-installation
@@ -783,8 +813,8 @@ Implemented:
 - Continuous integration on Windows, macOS and Linux.
 
 Not implemented yet: everything else, including ROM auditing (verifying the content of
-archives), an HTTPS provider, the controller settings interface, input device
-detection and binding, and artwork download. See
+archives), an HTTPS provider, input device detection and binding (`mapdevice`), and
+artwork download. See
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.

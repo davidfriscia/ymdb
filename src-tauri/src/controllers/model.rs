@@ -21,6 +21,7 @@ const MAX_ID_LENGTH: usize = 40;
 const MAX_NAME_LENGTH: usize = 60;
 const MAX_DEVICE_ID_LENGTH: usize = 512;
 const MAX_PROVIDER_LENGTH: usize = 32;
+const MAX_FILE_NAME_LENGTH: usize = 255;
 
 /// What a controller is, for display only: MAME does not use it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +90,9 @@ pub struct ControllerProfile {
     /// Whether the profile has an imported `base.cfg`.
     #[serde(default)]
     pub has_base: bool,
+    /// Name of the file `base.cfg` was imported from, for display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_file_name: Option<String>,
 }
 
 impl ControllerProfile {
@@ -98,6 +102,7 @@ impl ControllerProfile {
             kind: ProfileKind::System,
             name: None,
             has_base: false,
+            base_file_name: None,
         }
     }
 
@@ -126,7 +131,7 @@ impl ControllerProfile {
                         self.id
                     ));
                 }
-                if self.has_base {
+                if self.has_base || self.base_file_name.is_some() {
                     return Err(format!(
                         "the system profile '{}' cannot have a base file",
                         self.id
@@ -139,6 +144,17 @@ impl ControllerProfile {
                     return Err(format!("the profile id '{}' is reserved", self.id));
                 }
                 validate_name(&format!("the profile '{}'", self.id), self.name.as_deref())?;
+                if let Some(file_name) = &self.base_file_name
+                    && (!self.has_base
+                        || file_name.trim().is_empty()
+                        || file_name.chars().count() > MAX_FILE_NAME_LENGTH
+                        || file_name.chars().any(char::is_control))
+                {
+                    return Err(format!(
+                        "invalid base file name for the profile '{}'",
+                        self.id
+                    ));
+                }
             }
         }
         Ok(())
@@ -169,6 +185,45 @@ impl Assignment {
     pub fn is_empty(&self) -> bool {
         self.profile_id.is_none() && self.players.is_none()
     }
+}
+
+/// A change of one field of an assignment.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum FieldUpdate<T> {
+    /// The field keeps its stored value.
+    #[default]
+    Keep,
+    Set {
+        value: T,
+    },
+    /// The field is removed, so it is inherited from the weaker levels again.
+    Inherit,
+}
+
+impl<T> FieldUpdate<T> {
+    fn apply(self, field: &mut Option<T>) {
+        match self {
+            Self::Keep => {}
+            Self::Set { value } => *field = Some(value),
+            Self::Inherit => *field = None,
+        }
+    }
+}
+
+/// Changes to some fields of an assignment; the fields left out are kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssignmentUpdate {
+    #[serde(default)]
+    pub profile_id: FieldUpdate<String>,
+    #[serde(default)]
+    pub players: FieldUpdate<Vec<String>>,
 }
 
 /// The levels an assignment can be stored at, from the weakest.
@@ -558,6 +613,7 @@ impl ControllersConfig {
             kind: ProfileKind::User,
             name: Some(name.trim().to_owned()),
             has_base,
+            base_file_name: None,
         };
         profile.validate().map_err(ControllersError::Invalid)?;
         if self.profiles.len() >= MAX_PROFILES {
@@ -578,9 +634,19 @@ impl ControllersConfig {
         Ok(())
     }
 
-    /// Records that a user profile has (or no longer has) a `base.cfg`.
-    pub fn set_profile_base(&mut self, id: &str, has_base: bool) -> Result<(), ControllersError> {
-        self.user_profile_mut(id)?.has_base = has_base;
+    /// Records the `base.cfg` of a user profile: `Some` with the name of the
+    /// file it was imported from (if known), or `None` without a base.
+    pub fn set_profile_base_file(
+        &mut self,
+        id: &str,
+        base: Option<Option<String>>,
+    ) -> Result<(), ControllersError> {
+        let profile = self.user_profile_mut(id)?;
+        let mut changed = profile.clone();
+        changed.has_base = base.is_some();
+        changed.base_file_name = base.flatten();
+        changed.validate().map_err(ControllersError::Invalid)?;
+        *profile = changed;
         Ok(())
     }
 
@@ -625,6 +691,20 @@ impl ControllersConfig {
             AssignmentLevel::Default => default_assignment(),
             _ => Assignment::default(),
         };
+        self.set_assignment(target, assignment)
+    }
+
+    /// Changes some fields of the assignment of a target and keeps the
+    /// others; a keyed assignment left empty is removed.
+    pub fn update_assignment(
+        &mut self,
+        target: &AssignmentTarget,
+        update: AssignmentUpdate,
+    ) -> Result<(), ControllersError> {
+        target.validate().map_err(ControllersError::Invalid)?;
+        let mut assignment = self.assignment(target).cloned().unwrap_or_default();
+        update.profile_id.apply(&mut assignment.profile_id);
+        update.players.apply(&mut assignment.players);
         self.set_assignment(target, assignment)
     }
 

@@ -19,8 +19,8 @@ use tauri_plugin_dialog::DialogExt;
 use super::installations::InstallationsState;
 use super::{CommandError, run_blocking};
 use crate::controllers::model::{
-    Assignment, AssignmentLevel, AssignmentTarget, Assignments, Controller, ControllerInput,
-    ControllerProfile, ControllersConfig, ControllersError, ProfileKind,
+    Assignment, AssignmentLevel, AssignmentTarget, AssignmentUpdate, Assignments, Controller,
+    ControllerInput, ControllerProfile, ControllersConfig, ControllersError, ProfileKind,
 };
 use crate::controllers::resolve::{self, LevelAssignment, ResolvedControls};
 use crate::controllers::store::ControllersStore;
@@ -107,14 +107,19 @@ impl ControllersState {
     /// its `base.cfg`. The file is written before the profile is saved, and
     /// removed if the profile cannot be saved, so `controllers.json` never
     /// declares a missing `base.cfg`.
-    pub fn create_profile(&self, name: &str, base: Option<&[u8]>) -> Result<String, CommandError> {
+    pub fn create_profile(
+        &self,
+        name: &str,
+        base: Option<&ControllerFile>,
+    ) -> Result<String, CommandError> {
         let store = self.store()?;
         let mut guard = self.loaded()?;
         let mut next = guard.as_ref().ok_or_else(not_loaded)?.clone();
-        let id = next.create_profile(name, base.is_some(), |id| store.paths().is_used(id))?;
-        if let Some(content) = base {
+        let id = next.create_profile(name, false, |id| store.paths().is_used(id))?;
+        if let Some(file) = base {
+            next.set_profile_base_file(&id, Some(file.file_name.clone()))?;
             store
-                .write_base(&id, content)
+                .write_base(&id, &file.content)
                 .map_err(|error| CommandError::Settings {
                     message: format!("failed to copy the controller file: {error}"),
                 })?;
@@ -129,15 +134,15 @@ impl ControllersState {
         Ok(id)
     }
 
-    /// Replaces the `base.cfg` of a user profile with `content` (a validated
+    /// Replaces the `base.cfg` of a user profile with `file` (a validated
     /// controller file).
-    pub fn import_base(&self, profile_id: &str, content: &[u8]) -> Result<(), CommandError> {
+    pub fn import_base(&self, profile_id: &str, file: &ControllerFile) -> Result<(), CommandError> {
         let store = self.store()?;
         let mut guard = self.loaded()?;
         let mut next = guard.as_ref().ok_or_else(not_loaded)?.clone();
-        next.set_profile_base(profile_id, true)?;
+        next.set_profile_base_file(profile_id, Some(file.file_name.clone()))?;
         store
-            .write_base(profile_id, content)
+            .write_base(profile_id, &file.content)
             .map_err(|error| CommandError::Settings {
                 message: format!("failed to copy the controller file: {error}"),
             })?;
@@ -146,6 +151,54 @@ impl ControllersState {
         *guard = Some(next);
         Ok(())
     }
+
+    /// Removes the `base.cfg` of a user profile. The profile, its MAME
+    /// configuration directories and every other file are kept. The file is
+    /// moved aside first and deleted only once the change is saved; if it
+    /// cannot be saved, the file is put back.
+    pub fn remove_base(&self, profile_id: &str) -> Result<(), CommandError> {
+        let store = self.store()?;
+        let mut guard = self.loaded()?;
+        let mut next = guard.as_ref().ok_or_else(not_loaded)?.clone();
+        let has_base = next
+            .profile(profile_id)
+            .is_some_and(|profile| profile.has_base);
+        next.set_profile_base_file(profile_id, None)?;
+        if !has_base {
+            return Err(CommandError::InvalidRequest {
+                message: format!("the controller profile '{profile_id}' has no base file"),
+            });
+        }
+        let aside = store
+            .set_base_aside(profile_id)
+            .map_err(|error| CommandError::Settings {
+                message: format!("failed to remove the controller file: {error}"),
+            })?;
+        if let Err(error) = store.save(&next) {
+            let mut message = error.to_string();
+            if let Some(aside) = &aside
+                && let Err(restore) = store.restore_base(profile_id, aside)
+            {
+                message.push_str(&format!(
+                    "; the controller file could not be put back ({restore}): import it again"
+                ));
+            }
+            return Err(CommandError::Settings { message });
+        }
+        if let Some(aside) = &aside {
+            store.delete_base_aside(profile_id, aside);
+        }
+        *guard = Some(next);
+        Ok(())
+    }
+}
+
+/// A controller configuration file chosen by the user and validated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllerFile {
+    pub content: Vec<u8>,
+    /// The name of the chosen file, without its directory.
+    pub file_name: Option<String>,
 }
 
 fn not_loaded() -> CommandError {
@@ -178,6 +231,8 @@ pub struct ControllerProfileView {
     pub kind: ProfileKind,
     pub name: String,
     pub has_base: bool,
+    /// Name of the file the `base.cfg` was imported from, when known.
+    pub base_file_name: Option<String>,
     /// Whether launches with this profile use a configuration directory of
     /// YMDB (`false` for the `mame` profile).
     pub managed: bool,
@@ -190,6 +245,7 @@ impl From<&ControllerProfile> for ControllerProfileView {
             kind: profile.kind,
             name: profile.display_name().to_owned(),
             has_base: profile.has_base,
+            base_file_name: profile.base_file_name.clone(),
             managed: profile.is_managed(),
         }
     }
@@ -339,14 +395,14 @@ pub async fn create_controller_profile(
     run_blocking(move || {
         let base = if import_base {
             match pick_controller_file(&app)? {
-                Some(content) => Some(content),
+                Some(file) => Some(file),
                 None => return Ok(None),
             }
         } else {
             None
         };
         let state = app.state::<ControllersState>();
-        state.create_profile(&name, base.as_deref())?;
+        state.create_profile(&name, base.as_ref())?;
         state.read(controllers_view).map(Some)
     })
     .await?
@@ -402,11 +458,27 @@ pub async fn import_controller_profile_base(
                     message: format!("'{profile_id}' is not a user controller profile"),
                 })
         })??;
-        let Some(content) = pick_controller_file(&app)? else {
+        let Some(file) = pick_controller_file(&app)? else {
             return Ok(None);
         };
-        state.import_base(&profile_id, &content)?;
+        state.import_base(&profile_id, &file)?;
         state.read(controllers_view).map(Some)
+    })
+    .await?
+}
+
+/// Removes the `base.cfg` of a user profile. The profile and the MAME
+/// configuration saved in its directories are kept; MAME files are never
+/// touched.
+#[tauri::command]
+pub async fn remove_controller_profile_base(
+    profile_id: String,
+    app: AppHandle,
+) -> Result<ControllersView, CommandError> {
+    run_blocking(move || {
+        let state = app.state::<ControllersState>();
+        state.remove_base(&profile_id)?;
+        state.read(controllers_view)
     })
     .await?
 }
@@ -423,6 +495,24 @@ pub async fn set_controller_assignment(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.set_assignment(&target, assignment)?))?;
+        state.read(controllers_view)
+    })
+    .await?
+}
+
+/// Changes some fields of the assignment of the default, a machine, a
+/// software or a machine running a software, keeping the others: a field
+/// set to `inherit` is inherited again while the others stay. A machine or
+/// software assignment left empty is removed.
+#[tauri::command]
+pub async fn update_controller_assignment(
+    target: AssignmentTarget,
+    update: AssignmentUpdate,
+    app: AppHandle,
+) -> Result<ControllersView, CommandError> {
+    run_blocking(move || {
+        let state = app.state::<ControllersState>();
+        state.update(|config| Ok(config.update_assignment(&target, update)?))?;
         state.read(controllers_view)
     })
     .await?
@@ -472,7 +562,7 @@ pub async fn resolve_controls(
 }
 
 /// Lets the user choose a controller configuration file and checks it.
-fn pick_controller_file(app: &AppHandle) -> Result<Option<Vec<u8>>, CommandError> {
+fn pick_controller_file(app: &AppHandle) -> Result<Option<ControllerFile>, CommandError> {
     let selection = app
         .dialog()
         .file()
@@ -487,9 +577,14 @@ fn pick_controller_file(app: &AppHandle) -> Result<Option<Vec<u8>>, CommandError
         .map_err(|error| CommandError::Internal {
             message: format!("unsupported file selection: {error}"),
         })?;
-    base_file::read(&path)
-        .map(Some)
-        .map_err(|message| CommandError::InvalidFile { message })
+    let content =
+        base_file::read(&path).map_err(|message| CommandError::InvalidFile { message })?;
+    Ok(Some(ControllerFile {
+        content,
+        file_name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned()),
+    }))
 }
 
 #[cfg(test)]

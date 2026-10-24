@@ -93,6 +93,7 @@ describe("App", () => {
       "Appearance",
       "Media Sources",
       "Remote Connections",
+      "Controllers",
       "Favorites",
       "Support Files",
       "About",

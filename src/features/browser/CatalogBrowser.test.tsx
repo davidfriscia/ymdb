@@ -981,7 +981,7 @@ describe("CatalogBrowser", () => {
         within(launch).getByRole("button", { name: "Prepare Download" }),
         within(launch).getByRole("button", { name: "Download & Play" }),
         within(launch).getByRole("button", { name: "Play" }),
-        within(launch).getByRole("combobox", { name: "Profile" }),
+        within(launch).getByRole("combobox", { name: "Launch profile" }),
       ];
       controls.slice(1).forEach((control, index) => {
         expect(

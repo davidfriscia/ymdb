@@ -137,8 +137,17 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   < request); launch profiles are unrelated. `prepare`/preview create nothing: the
   directory is created by `controls::materialize` right before MAME starts.
   Referenced profiles and controllers are not deleted; profile files are never
-  deleted automatically. Controllers produce no MAME option until `mapdevice`
-  support: never present player assignments as physical bindings.
+  deleted automatically (removing a `base.cfg` moves it aside, saves
+  `controllers.json`, then deletes it, or puts it back on failure). Controllers
+  produce no MAME option until `mapdevice` support: never present player assignments
+  as physical bindings.
+- The controllers interface (`features/controllers/`) never resolves precedence: it
+  shows `resolve_controls` and the plan. Preferences are changed with
+  `update_controller_assignment` (per-field `keep`/`set`/`inherit`), so changing one
+  field never drops the other. The Controls selection of the launch bar is temporary
+  (`LaunchRequest.controls`) and saved only by an explicit "Save as preference".
+  Saved changes increment the launcher's `controlsVersion`. Sessions carry the
+  warnings of the plan they started with; never show preview warnings as a session's.
 - `src-tauri/src/remote/`: remote repositories. The ROM manager talks to repositories
   only through `provider::RemoteRepository`; a new protocol is a new `ProviderConfig`
   and `Repository` variant (never a reinterpretation of existing connections), and

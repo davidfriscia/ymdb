@@ -42,6 +42,8 @@ export interface ControllerProfile {
   kind: ProfileKind;
   name: string;
   hasBase: boolean;
+  /** Name of the file the base was imported from, when known. */
+  baseFileName: string | null;
   /** Whether launches use a configuration directory of YMDB (`false` for `mame`). */
   managed: boolean;
 }
@@ -168,4 +170,32 @@ export function resolveControls(
   software?: { list: string; name: string },
 ): Promise<ControlsResolution> {
   return invokeCommand("resolve_controls", { installationId, machine, software: software ?? null });
+}
+
+/** Mirrors `FieldUpdate` in `controllers/model.rs`: the change of one field. */
+export type FieldUpdate<T> = { kind: "keep" } | { kind: "set"; value: T } | { kind: "inherit" };
+
+/** Mirrors `AssignmentUpdate`: each field left out keeps its stored value. */
+export interface AssignmentUpdate {
+  profileId?: FieldUpdate<string>;
+  players?: FieldUpdate<string[]>;
+}
+
+/**
+ * Changes some fields of a saved assignment and keeps the others; a machine
+ * or software assignment left empty is removed.
+ */
+export function updateControllerAssignment(
+  target: AssignmentTarget,
+  update: AssignmentUpdate,
+): Promise<ControllersView> {
+  return invokeCommand("update_controller_assignment", { target, update });
+}
+
+/**
+ * Removes the profile's `base.cfg`. The profile and the configuration MAME
+ * saved in its directories are kept.
+ */
+export function removeControllerProfileBase(profileId: string): Promise<ControllersView> {
+  return invokeCommand("remove_controller_profile_base", { profileId });
 }

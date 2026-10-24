@@ -44,6 +44,12 @@ export function LaunchStatus({ messages, session, onStop }: LaunchStatusProps) {
             </Disclosure>
             <SessionSummary key={session.id} session={session} onStop={onStop} />
           </div>
+          {/* The warnings of the plan that this session runs, not of the current selection. */}
+          {session.warnings.map((warning) => (
+            <p key={warning} className="message message--warning">
+              {warning}
+            </p>
+          ))}
           <div id={bodyId} className="launch-section__body" hidden={!expanded}>
             <SessionDetails session={session} />
           </div>
@@ -101,8 +107,8 @@ function SessionSummary({
           {confirming && (
             <div className="session-status__confirm">
               <p className="message message--warning">
-                Stop MAME now? The emulation is terminated immediately: unsaved progress and NVRAM
-                changes of this session are lost.
+                Stop MAME now? The emulation is terminated immediately: unsaved progress, NVRAM
+                changes and input assignments changed in MAME during this session are lost.
               </p>
               <div className="actions">
                 <button
@@ -156,6 +162,10 @@ function SessionDetails({ session }: { session: SessionInfo }) {
         <div className="details-list__row">
           <dt>Installation</dt>
           <dd>{session.installationLabel}</dd>
+        </div>
+        <div className="details-list__row">
+          <dt>Controller profile</dt>
+          <dd>{session.controls.profileName}</dd>
         </div>
         <div className="details-list__row">
           <dt>Started</dt>

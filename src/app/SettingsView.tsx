@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { HealthCheck } from "../features/health-check/HealthCheck";
 import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
 import { RemoteConnectionsSettings } from "../features/remote/RemoteConnectionsSettings";
+import { ControllersSettings } from "../features/controllers/ControllersSettings";
 import { FavoritesSettings } from "../features/lists/FavoritesSettings";
 import { SupportFilesSettings } from "../features/support-files/SupportFilesSettings";
 import { TwoPaneLayout, TwoPaneNavItem } from "../shared/TwoPaneLayout";
@@ -12,6 +13,7 @@ export type SettingsSection =
   | "appearance"
   | "mediaSources"
   | "remoteConnections"
+  | "controllers"
   | "favorites"
   | "supportFiles"
   | "about"
@@ -21,6 +23,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "mediaSources", label: "Media Sources" },
   { id: "remoteConnections", label: "Remote Connections" },
+  { id: "controllers", label: "Controllers" },
   { id: "favorites", label: "Favorites" },
   { id: "supportFiles", label: "Support Files" },
   { id: "about", label: "About" },
@@ -60,6 +63,8 @@ export function SettingsView({
         return <MediaSourcesSettings />;
       case "remoteConnections":
         return <RemoteConnectionsSettings />;
+      case "controllers":
+        return <ControllersSettings />;
       case "favorites":
         return <FavoritesSettings />;
       case "supportFiles":

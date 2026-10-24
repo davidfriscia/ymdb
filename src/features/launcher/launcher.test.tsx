@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { launchConfig, launchConfigView, planControls, session } from "../../test/launcherFixtures";
+import { controllersBackend } from "../../test/controllerFixtures";
 import { installationsView, NEW_ID, OLD_ID } from "../../test/installationFixtures";
 import { InstallationsProvider } from "../installations/InstallationsProvider";
 import { InstallationScope, useInstallations } from "../installations/installationsContext";
@@ -69,14 +70,17 @@ function launcherBackend(
   options: {
     config?: LaunchConfig;
     info?: SoftwareLaunchInfo | null;
+    controllers?: ReturnType<typeof controllersBackend>;
     overrides?: Partial<Record<string, Handler>>;
   } = {},
 ) {
   // Every installation has its own configuration.
   const configs = new Map<string, LaunchConfig>([[NEW_ID, options.config ?? launchConfig()]]);
   const configOf = (id: string) => configs.get(id) ?? launchConfig();
+  const controllers = options.controllers ?? controllersBackend();
   let sessions: SessionInfo[] = [];
   backend({
+    ...controllers.handlers,
     get_launch_config: (args) => {
       const id = args.installationId as string;
       return launchConfigView(configOf(id), id);
@@ -320,7 +324,9 @@ describe("launcher", () => {
       const status = await screen.findByRole("status", { name: "Session" });
 
       await user.click(within(status).getByRole("button", { name: "Stop" }));
-      expect(within(status).getByText(/unsaved progress and NVRAM/)).toBeInTheDocument();
+      expect(
+        within(status).getByText(/unsaved progress, NVRAM changes and input assignments/),
+      ).toBeInTheDocument();
       await user.click(within(status).getByRole("button", { name: "Keep running" }));
       expect(calls("stop_launch_session")).toHaveLength(0);
 
@@ -375,7 +381,7 @@ describe("launcher", () => {
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />);
       await findPlay();
 
-      await user.selectOptions(screen.getByLabelText("Profile"), "Quiet");
+      await user.selectOptions(screen.getByLabelText("Launch profile"), "Quiet");
       await user.click(screen.getByRole("button", { name: "Play" }));
 
       expect(lastRequest("start_launch")).toEqual({
@@ -448,7 +454,9 @@ describe("launcher", () => {
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
       await openAdvanced(user);
       const preview = await screen.findByLabelText("Command line");
-      expect(within(preview).getByText("Fighting")).toBeInTheDocument();
+      expect(
+        within(preview).getByText("Fighting — inherited from the default"),
+      ).toBeInTheDocument();
       expect(within(preview).getByText(cfgDirectory)).toBeInTheDocument();
       const args = within(within(preview).getByRole("list", { name: "Arguments" }));
       expect(args.getAllByText("Controller profile")).toHaveLength(2);
@@ -480,7 +488,7 @@ describe("launcher", () => {
       const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
       await findPlay();
       // The main actions are always visible; the advanced ones are collapsed.
-      expect(screen.getByLabelText("Profile")).toBeVisible();
+      expect(screen.getByLabelText("Launch profile")).toBeVisible();
       expect(screen.getByRole("button", { name: "Prepare Download" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Download & Play" })).toBeVisible();
       const advanced = screen.getByRole("button", { name: /^Advanced/ });
@@ -771,7 +779,7 @@ describe("launcher", () => {
       expect(play).toHaveTextContent("");
       expect(play.querySelector("svg")).not.toBeNull();
       expect(play).toHaveAttribute("title", "Play: start MAME with the selected profile");
-      const profile = screen.getByRole("combobox", { name: "Profile" });
+      const profile = screen.getByRole("combobox", { name: "Launch profile" });
       expect(play.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       // Nothing was launched: no status panel.
       expect(screen.queryByRole("region", { name: "Launch status" })).not.toBeInTheDocument();

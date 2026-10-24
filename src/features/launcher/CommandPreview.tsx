@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { describeError } from "../../shared/ipc";
 import { useLoader } from "../../shared/useLoader";
+import { describeSource } from "../controllers/controlsMessages";
 import {
   previewLaunch,
   type LaunchRequest,
@@ -20,12 +21,14 @@ const SOURCE_LABELS: Record<OptionSource, string> = {
 interface CommandPreviewProps {
   /** Must be memoized: a new object loads a new preview. */
   request: LaunchRequest;
-  /** Incremented when the launch configuration is saved. */
+  /** Incremented when the launch or controllers configuration is saved. */
   configVersion: number;
+  /** Whether a software is launched, for the origin of the controls. */
+  software?: boolean;
 }
 
 /** The exact command line a launch runs, built by the backend. */
-export function CommandPreview({ request, configVersion }: CommandPreviewProps) {
+export function CommandPreview({ request, configVersion, software = false }: CommandPreviewProps) {
   const load = useCallback(() => previewLaunch(request), [request]);
   // Saved options change the command line: reload the preview.
   const { state } = useLoader(load, configVersion);
@@ -58,12 +61,20 @@ export function CommandPreview({ request, configVersion }: CommandPreviewProps) 
         </div>
         <div className="details-list__row">
           <dt>Controller profile</dt>
-          <dd>{plan.controls.profileName}</dd>
+          <dd>
+            {plan.controls.profileName} — {describeSource(plan.controls.profileSource, software)}
+          </dd>
         </div>
         {plan.controls.cfgDirectory !== null && (
           <div className="details-list__row">
             <dt>MAME configuration</dt>
             <dd className="code">{plan.controls.cfgDirectory}</dd>
+          </div>
+        )}
+        {plan.controls.baseFile !== null && (
+          <div className="details-list__row">
+            <dt>Controller file</dt>
+            <dd className="code">{plan.controls.baseFile}</dd>
           </div>
         )}
       </dl>

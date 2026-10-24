@@ -1,0 +1,116 @@
+/* Controller management. Colors come from the semantic theme tokens only. */
+
+/* Settings → Controllers */
+
+.controllers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.controllers-list__item {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+}
+
+.controllers-references {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}
+
+.controllers-settings__heading {
+  margin: 16px 0 8px;
+  font-size: 0.9375rem;
+}
+
+.controllers-settings__search {
+  width: 100%;
+  max-width: 360px;
+  margin-bottom: 8px;
+}
+
+.controllers-assignments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.controllers-assignments__item {
+  overflow-wrap: anywhere;
+}
+
+/* Launch bar and Advanced → Controls */
+
+.launch-bar__label {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+/* Room for the origin of the controller profile; the tooltip shows it whole. */
+.launch-bar__controls .input {
+  max-width: 320px;
+}
+
+.controls-save .message {
+  margin: 0;
+}
+
+.controls-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.controls-panel__heading {
+  margin: 8px 0 0;
+  font-size: 0.9375rem;
+}
+
+.controls-panel__level {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.controls-panel__level-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.controls-panel__level .input {
+  max-width: 260px;
+}
+
+/* Configure Controls in MAME */
+
+.controls-steps {
+  margin: 8px 0;
+  padding-left: 22px;
+  line-height: 1.5;
+}
+
+.controls-steps kbd {
+  padding: 0 4px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: var(--color-surface-elevated);
+  font-family: inherit;
+}

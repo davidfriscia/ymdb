@@ -81,6 +81,7 @@ export function session(
     title: `${machine} description`,
     commandLine: [machine],
     controls: planControls(),
+    warnings: [],
     startedAt: Date.UTC(2026, 9, 10, 20, 30),
     state,
   };

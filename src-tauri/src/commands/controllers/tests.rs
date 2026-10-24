@@ -16,6 +16,13 @@ const BASE: &[u8] = br#"<?xml version="1.0"?>
 "#;
 const INSTALLATION: &str = "0123456789abcdef0123456789abcdef";
 
+fn file(content: &[u8]) -> ControllerFile {
+    ControllerFile {
+        content: content.to_vec(),
+        file_name: Some("xarcade.cfg".to_owned()),
+    }
+}
+
 #[test]
 fn creates_profiles_with_a_base_file_atomically() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -30,7 +37,7 @@ fn creates_profiles_with_a_base_file_atomically() {
     assert!(fs::read_dir(dir.path()).expect("read").next().is_none());
 
     let id = state
-        .create_profile("Six Buttons", Some(BASE))
+        .create_profile("Six Buttons", Some(&file(BASE)))
         .expect("create");
     assert_eq!(fs::read(paths.base_file(&id)).expect("base"), BASE);
     assert!(
@@ -43,7 +50,7 @@ fn creates_profiles_with_a_base_file_atomically() {
     let blocker = dir.path().join(format!("{CONTROLLERS_FILE_NAME}.tmp"));
     fs::create_dir(&blocker).expect("dir");
     assert!(matches!(
-        state.create_profile("Gamepad", Some(BASE)),
+        state.create_profile("Gamepad", Some(&file(BASE))),
         Err(CommandError::Settings { .. })
     ));
     assert!(!paths.profile_dir("gamepad").exists());
@@ -63,7 +70,7 @@ fn creates_profiles_with_a_base_file_atomically() {
         .expect("utf-8")
         .replace("KEYCODE_X", "KEYCODE_V")
         .into_bytes();
-    state.import_base(&plain, &other).expect("import");
+    state.import_base(&plain, &file(&other)).expect("import");
     assert_eq!(fs::read(paths.base_file(&plain)).expect("base"), other);
     assert!(
         state
@@ -71,7 +78,7 @@ fn creates_profiles_with_a_base_file_atomically() {
             .expect("read")
     );
     assert!(matches!(
-        state.import_base(MAME_PROFILE, BASE),
+        state.import_base(MAME_PROFILE, &file(BASE)),
         Err(CommandError::InvalidRequest { .. })
     ));
     assert!(!paths.profile_dir(MAME_PROFILE).exists());
@@ -81,6 +88,107 @@ fn creates_profiles_with_a_base_file_atomically() {
     assert_eq!(
         reloaded.read(controllers_view).expect("read"),
         state.read(controllers_view).expect("read")
+    );
+}
+
+#[test]
+fn removes_a_base_file_and_keeps_everything_else() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = ControllersState::new(Some(dir.path()));
+    let paths = ControllerPaths::new(dir.path());
+    let id = state
+        .create_profile("Six Buttons", Some(&file(BASE)))
+        .expect("create");
+    assert_eq!(
+        state
+            .read(controllers_view)
+            .expect("read")
+            .profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .and_then(|profile| profile.base_file_name.clone())
+            .as_deref(),
+        Some("xarcade.cfg")
+    );
+    // What MAME saved in the profile's directory, and a file the user put
+    // next to the base file: neither belongs to the removal.
+    let context = paths.context_dir(INSTALLATION, &id);
+    fs::create_dir_all(&context).expect("context");
+    fs::write(context.join("default.cfg"), "saved by MAME").expect("default.cfg");
+    let notes = paths.profile_dir(&id).join("notes.txt");
+    fs::write(&notes, "mine").expect("notes");
+
+    // A failed save puts the file back and changes nothing.
+    let blocker = dir.path().join(format!("{CONTROLLERS_FILE_NAME}.tmp"));
+    fs::create_dir(&blocker).expect("dir");
+    let before = state.read(controllers_view).expect("read");
+    let saved_before = fs::read(dir.path().join(CONTROLLERS_FILE_NAME)).expect("json");
+    assert!(matches!(
+        state.remove_base(&id),
+        Err(CommandError::Settings { .. })
+    ));
+    assert_eq!(fs::read(paths.base_file(&id)).expect("base"), BASE);
+    assert_eq!(state.read(controllers_view).expect("read"), before);
+    assert_eq!(
+        fs::read(dir.path().join(CONTROLLERS_FILE_NAME)).expect("json"),
+        saved_before
+    );
+    fs::remove_dir(&blocker).expect("remove");
+
+    state.remove_base(&id).expect("remove base");
+    let profile = state
+        .read(|config| config.profile(&id).cloned())
+        .expect("read")
+        .expect("the profile is kept");
+    assert!(!profile.has_base && profile.base_file_name.is_none());
+    assert!(!paths.base_file(&id).exists());
+    assert_eq!(fs::read_to_string(&notes).expect("notes"), "mine");
+    assert_eq!(
+        fs::read_to_string(context.join("default.cfg")).expect("default.cfg"),
+        "saved by MAME"
+    );
+    let names: Vec<_> = walk(dir.path())
+        .iter()
+        .filter_map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .collect();
+    assert!(
+        !names.iter().any(|name| name.starts_with("base.cfg")),
+        "{names:?}"
+    );
+    // The change is saved.
+    let reloaded = ControllersState::new(Some(dir.path()));
+    assert_eq!(
+        reloaded.read(controllers_view).expect("read"),
+        state.read(controllers_view).expect("read")
+    );
+
+    // Nothing to remove, the system profile, an unknown profile.
+    assert!(matches!(
+        state.remove_base(&id),
+        Err(CommandError::InvalidRequest { .. })
+    ));
+    assert!(matches!(
+        state.remove_base(MAME_PROFILE),
+        Err(CommandError::InvalidRequest { .. })
+    ));
+    assert!(matches!(
+        state.remove_base("missing"),
+        Err(CommandError::NotFound { .. })
+    ));
+
+    // A base file deleted outside YMDB: the declaration is still removed.
+    let other = state
+        .create_profile("Gamepad", Some(&file(BASE)))
+        .expect("create");
+    fs::remove_file(paths.base_file(&other)).expect("delete");
+    state.remove_base(&other).expect("remove base");
+    assert!(
+        state
+            .read(|config| !config.profile(&other).expect("profile").has_base)
+            .expect("read")
     );
 }
 

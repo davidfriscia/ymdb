@@ -41,6 +41,7 @@ export function LauncherProvider({
   const loaded = useLoader(load);
   const [saved, setSaved] = useState<LaunchConfigView | null>(null);
   const [configVersion, setConfigVersion] = useState(0);
+  const [controlsVersion, setControlsVersion] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionsVersion, setSessionsVersion] = useState(0);
   const running = sessions.some((session) => session.state.state === "running");
@@ -84,6 +85,9 @@ export function LauncherProvider({
       setSessionsVersion((version) => version + 1);
     }
   }, []);
+  const controlsChanged = useCallback(() => {
+    setControlsVersion((version) => version + 1);
+  }, []);
   const refreshSessions = useCallback(() => {
     setSessionsVersion((version) => version + 1);
   }, []);
@@ -111,6 +115,8 @@ export function LauncherProvider({
       error,
       reloadConfig,
       configVersion,
+      controlsVersion,
+      controlsChanged,
       saveConfig,
       sessions,
       start,
@@ -124,6 +130,8 @@ export function LauncherProvider({
       error,
       reloadConfig,
       configVersion,
+      controlsVersion,
+      controlsChanged,
       saveConfig,
       sessions,
       start,

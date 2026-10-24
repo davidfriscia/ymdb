@@ -158,8 +158,9 @@ pub async fn preview_launch(
     )
 }
 
-/// Starts MAME and returns the new session. The configuration directory of
-/// the controller profile is created first, if needed.
+/// Starts MAME and returns the new session, with the warnings of the plan it
+/// runs. The configuration directory of the controller profile is created
+/// first, if needed.
 #[tauri::command]
 pub async fn start_launch(
     request: LaunchRequest,
@@ -175,9 +176,24 @@ pub async fn start_launch(
         .map_err(|error| CommandError::LaunchFailed {
             message: format!("the controller profile cannot be prepared: {error}"),
         })?;
+    start_session(&launcher, prepared, label)
+}
+
+/// Starts a prepared launch; the session keeps the plan's warnings.
+fn start_session(
+    launcher: &LauncherState,
+    prepared: PreparedLaunch,
+    label: String,
+) -> Result<SessionInfo, CommandError> {
     launcher
         .sessions
-        .start(prepared.target, prepared.title, label, &prepared.plan)
+        .start_with_warnings(
+            prepared.target,
+            prepared.title,
+            label,
+            &prepared.plan,
+            prepared.warnings,
+        )
         .map_err(session_error)
 }
 
@@ -285,14 +301,12 @@ pub(super) fn launch_blocking(
     let resolved = installations.resolve(&request.installation_id)?;
     let settings = launch_settings(launcher, controllers, &resolved)?;
     let label = resolved.installation.label();
-    let prepared = prepare_resolved(&resolved, &settings, request)?;
+    let mut prepared = prepare_resolved(&resolved, &settings, request)?;
+    warn_shared_profile(launcher, &mut prepared);
     controls::materialize(&prepared.plan.controls).map_err(|error| CommandError::LaunchFailed {
         message: format!("the controller profile cannot be prepared: {error}"),
     })?;
-    launcher
-        .sessions
-        .start(prepared.target, prepared.title, label, &prepared.plan)
-        .map_err(session_error)
+    start_session(launcher, prepared, label)
 }
 
 pub(super) fn prepare_resolved(

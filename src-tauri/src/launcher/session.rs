@@ -79,6 +79,9 @@ pub struct SessionInfo {
     pub command_line: Vec<String>,
     /// The controller profile and controllers the session was started with.
     pub controls: PlanControls,
+    /// The warnings of the plan the session was started with (for example a
+    /// controller profile directory used by another running session).
+    pub warnings: Vec<String>,
     /// Milliseconds since the Unix epoch.
     pub started_at: u64,
     pub state: SessionState,
@@ -123,14 +126,28 @@ impl SessionManager {
         }
     }
 
-    /// Starts MAME for `plan` and begins monitoring it. The same target may
-    /// run once per installation at a time.
+    /// Starts a plan that has no warning.
+    #[cfg(test)]
     pub fn start(
         &self,
         target: LaunchTarget,
         title: String,
         installation_label: String,
         plan: &LaunchPlan,
+    ) -> Result<SessionInfo, SessionError> {
+        self.start_with_warnings(target, title, installation_label, plan, Vec::new())
+    }
+
+    /// Starts MAME for `plan` and begins monitoring it; `warnings` are the
+    /// plan's warnings, kept with the session. The same target may run once
+    /// per installation at a time.
+    pub fn start_with_warnings(
+        &self,
+        target: LaunchTarget,
+        title: String,
+        installation_label: String,
+        plan: &LaunchPlan,
+        warnings: Vec<String>,
     ) -> Result<SessionInfo, SessionError> {
         let mut sessions = self.lock();
         if let Some(running) = sessions.iter().find(|session| {
@@ -159,6 +176,7 @@ impl SessionManager {
             title,
             command_line: plan.command_line(),
             controls: plan.controls.clone(),
+            warnings,
             started_at,
             state: SessionState::Running,
         };
@@ -638,6 +656,40 @@ mod tests {
         assert!(manager.running_with_profile(FIRST, "fighting").is_empty());
         manager.stop(native.id).expect("stop");
         wait_until_finished(&manager, native.id);
+    }
+
+    #[test]
+    fn sessions_keep_the_warnings_of_their_plan() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manager = manager(dir.path());
+        let warning = "Another running MAME session uses the controller profile 'Fighting'.";
+        let started = manager
+            .start_with_warnings(
+                target("sf2"),
+                "Street Fighter II".to_owned(),
+                "MAME".to_owned(),
+                &exiting(dir.path(), 0),
+                vec![warning.to_owned()],
+            )
+            .expect("start");
+        assert_eq!(started.warnings, [warning]);
+        let finished = wait_until_finished(&manager, started.id);
+        assert_eq!(finished.warnings, [warning]);
+        let json = serde_json::to_value(&finished).expect("serialize");
+        assert_eq!(json["warnings"], serde_json::json!([warning]));
+        // Without warnings, the field is an empty list.
+        let plain = manager
+            .start(
+                target("pacman"),
+                "Pac-Man".to_owned(),
+                "MAME".to_owned(),
+                &exiting(dir.path(), 0),
+            )
+            .expect("start");
+        assert_eq!(
+            serde_json::to_value(wait_until_finished(&manager, plain.id)).expect("json")["warnings"],
+            serde_json::json!([])
+        );
     }
 
     #[test]

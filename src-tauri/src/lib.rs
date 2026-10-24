@@ -144,7 +144,9 @@ pub fn run() {
             commands::controllers::rename_controller_profile,
             commands::controllers::delete_controller_profile,
             commands::controllers::import_controller_profile_base,
+            commands::controllers::remove_controller_profile_base,
             commands::controllers::set_controller_assignment,
+            commands::controllers::update_controller_assignment,
             commands::controllers::reset_controller_assignment,
             commands::controllers::resolve_controls,
         ])

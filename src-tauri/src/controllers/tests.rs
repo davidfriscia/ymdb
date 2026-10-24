@@ -5,8 +5,9 @@ use std::fs;
 
 use super::ControllerPaths;
 use super::model::{
-    Assignment, AssignmentLevel, AssignmentTarget, ControllerInput, ControllerKind,
-    ControllersConfig, ControllersError, DeviceClass, MAME_PROFILE, ProfileKind,
+    Assignment, AssignmentLevel, AssignmentTarget, AssignmentUpdate, ControllerInput,
+    ControllerKind, ControllersConfig, ControllersError, DeviceClass, FieldUpdate, MAME_PROFILE,
+    ProfileKind,
 };
 use super::resolve::{ControlsSource, levels, resolve};
 use super::store::{CONTROLLERS_FILE_NAME, ControllersStore, ControllersStoreError};
@@ -304,7 +305,9 @@ fn profile_crud_protects_the_system_profile() {
 
     for change in [
         config.clone().rename_profile(MAME_PROFILE, "Mine"),
-        config.clone().set_profile_base(MAME_PROFILE, true),
+        config
+            .clone()
+            .set_profile_base_file(MAME_PROFILE, Some(None)),
         config.clone().delete_profile(MAME_PROFILE),
     ] {
         assert!(
@@ -444,6 +447,143 @@ fn assignment_crud_validates_targets_and_references() {
         config.assignment(&default),
         Some(&assignment(Some(MAME_PROFILE), None))
     );
+}
+
+#[test]
+fn updates_change_one_field_and_keep_the_other() {
+    let mut config = config();
+    let machine = target(AssignmentLevel::Machine, Some("sf2"));
+    let p1 = ["arcade-stick-p1"];
+    config
+        .set_assignment(&machine, assignment(None, Some(&p1)))
+        .expect("players");
+
+    // Setting the profile keeps the players.
+    let set_profile: AssignmentUpdate = serde_json::from_value(
+        serde_json::json!({ "profileId": { "kind": "set", "value": "gamepad" } }),
+    )
+    .expect("deserialize");
+    assert_eq!(set_profile.players, FieldUpdate::Keep);
+    config
+        .update_assignment(&machine, set_profile)
+        .expect("update");
+    assert_eq!(
+        config.assignment(&machine),
+        Some(&assignment(Some("gamepad"), Some(&p1)))
+    );
+
+    // Inheriting the profile again keeps the assignment with its players.
+    let inherit_profile = AssignmentUpdate {
+        profile_id: FieldUpdate::Inherit,
+        players: FieldUpdate::Keep,
+    };
+    config
+        .update_assignment(&machine, inherit_profile.clone())
+        .expect("inherit");
+    assert_eq!(
+        config.assignment(&machine),
+        Some(&assignment(None, Some(&p1)))
+    );
+
+    // Once no field is left, the level is removed.
+    config
+        .update_assignment(
+            &machine,
+            AssignmentUpdate {
+                profile_id: FieldUpdate::Keep,
+                players: FieldUpdate::Inherit,
+            },
+        )
+        .expect("inherit players");
+    assert_eq!(config.assignment(&machine), None);
+
+    // A new level, the default (never removed), and invalid changes.
+    let software = target(AssignmentLevel::MachineSoftware, Some("nes/nes:smb"));
+    config
+        .update_assignment(
+            &software,
+            AssignmentUpdate {
+                profile_id: FieldUpdate::Set {
+                    value: "six-buttons".to_owned(),
+                },
+                players: FieldUpdate::Keep,
+            },
+        )
+        .expect("create");
+    assert_eq!(
+        config.assignment(&software),
+        Some(&assignment(Some("six-buttons"), None))
+    );
+    let default = target(AssignmentLevel::Default, None);
+    config
+        .update_assignment(&default, inherit_profile)
+        .expect("default");
+    assert_eq!(config.assignment(&default), Some(&Assignment::default()));
+    let before = config.clone();
+    for (target, update) in [
+        (
+            machine.clone(),
+            AssignmentUpdate {
+                profile_id: FieldUpdate::Set {
+                    value: "missing".to_owned(),
+                },
+                players: FieldUpdate::Keep,
+            },
+        ),
+        (
+            target(AssignmentLevel::Machine, Some("../sf2")),
+            AssignmentUpdate::default(),
+        ),
+    ] {
+        assert!(matches!(
+            config.update_assignment(&target, update),
+            Err(ControllersError::Invalid(_))
+        ));
+    }
+    assert_eq!(config, before);
+    assert!(
+        serde_json::from_value::<AssignmentUpdate>(
+            serde_json::json!({ "profileId": { "kind": "clear" } })
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn records_the_name_of_the_imported_base_file() {
+    let mut config = config();
+    config
+        .set_profile_base_file("gamepad", Some(Some("xarcade.cfg".to_owned())))
+        .expect("base");
+    let profile = config.profile("gamepad").expect("profile");
+    assert!(profile.has_base);
+    assert_eq!(profile.base_file_name.as_deref(), Some("xarcade.cfg"));
+    let json = serde_json::to_value(profile).expect("serialize");
+    assert_eq!(json["baseFileName"], "xarcade.cfg");
+
+    // Removing the base forgets the name; profiles without a name still load.
+    config
+        .set_profile_base_file("gamepad", None)
+        .expect("remove");
+    let profile = config.profile("gamepad").expect("profile");
+    assert!(!profile.has_base && profile.base_file_name.is_none());
+    assert!(
+        config
+            .profile("six-buttons")
+            .is_some_and(|profile| profile.has_base && profile.base_file_name.is_none())
+    );
+    for name in ["", "a\nb"] {
+        assert!(matches!(
+            config
+                .clone()
+                .set_profile_base_file("gamepad", Some(Some(name.to_owned()))),
+            Err(ControllersError::Invalid(_))
+        ));
+    }
+    let mut invalid = config.clone();
+    invalid.profiles[1].base_file_name = Some("orphan.cfg".to_owned());
+    invalid.profiles[1].has_base = false;
+    assert!(invalid.validate().is_err());
 }
 
 #[test]
