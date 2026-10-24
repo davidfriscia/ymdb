@@ -7,8 +7,10 @@
 //! - [`resolve`]: catalog lookups (machine, software, candidate machines).
 //! - [`command`]: the structured command line used for preview and execution.
 //! - [`search_paths`]: search paths extended with the ROM manager destinations.
-//! - [`controls`]: options of the controller profile of a launch.
+//! - [`controls`]: options of the controller profile and player mappings of
+//!   a launch.
 //! - [`session`]: started MAME processes.
+//! - [`mapping_check`]: which player mappings a session's MAME applied.
 //!
 //! [`prepare`] is the single path from a launch request to a command line,
 //! used by both the preview and the launch.
@@ -16,6 +18,7 @@
 pub mod command;
 pub mod config;
 pub mod controls;
+pub mod mapping_check;
 pub mod options;
 pub mod resolve;
 pub mod search_paths;
@@ -236,6 +239,7 @@ pub fn prepare(
         &mut warnings,
         controls,
         &request.installation_id,
+        executable.parent().unwrap_or(Path::new("")),
         &machine.name,
         software,
         request.controls.as_ref(),

@@ -18,12 +18,16 @@ use serde::Serialize;
 
 use super::command::LaunchPlan;
 use super::controls::PlanControls;
+use super::mapping_check::{self, MappingVerification};
 use crate::mame::process::{self, ProcessError};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Finished sessions kept in memory, and log files kept on disk.
 const HISTORY: usize = 20;
 const LOG_TAIL_BYTES: u64 = 4096;
+/// The part of a log read to verify player mappings: MAME reports its input
+/// devices and controller file within its first lines.
+const LOG_HEAD_BYTES: u64 = 1024 * 1024;
 
 /// What a session runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -79,6 +83,9 @@ pub struct SessionInfo {
     pub command_line: Vec<String>,
     /// The controller profile and controllers the session was started with.
     pub controls: PlanControls,
+    /// Which player mappings MAME applied, from its output; `None` when the
+    /// plan maps no device.
+    pub mapping: Option<MappingVerification>,
     /// The warnings of the plan the session was started with (for example a
     /// controller profile directory used by another running session).
     pub warnings: Vec<String>,
@@ -176,6 +183,11 @@ impl SessionManager {
             title,
             command_line: plan.command_line(),
             controls: plan.controls.clone(),
+            mapping: plan
+                .controls
+                .controller_file
+                .is_some()
+                .then(|| MappingVerification::pending(&plan.controls.mappings)),
             warnings,
             started_at,
             state: SessionState::Running,
@@ -241,6 +253,7 @@ impl SessionManager {
         // The process may have exited in the meantime; the monitor records it.
         let _ = session.child.kill();
         if let Ok(Some(_)) = session.child.try_wait() {
+            update_mapping(session, true);
             session.info.state = SessionState::Stopped {
                 finished_at: now_millis(),
             };
@@ -267,12 +280,14 @@ impl SessionManager {
                     return;
                 }
                 match session.child.try_wait() {
-                    Ok(None) => {}
+                    Ok(None) => update_mapping(session, false),
                     Ok(Some(status)) => {
+                        update_mapping(session, true);
                         session.info.state = finished_state(session, status.code());
                         return;
                     }
                     Err(error) => {
+                        update_mapping(session, true);
                         session.info.state = SessionState::Exited {
                             exit_code: None,
                             success: false,
@@ -286,6 +301,43 @@ impl SessionManager {
             }
         });
     }
+}
+
+/// Updates the verification of a session's player mappings from its log
+/// until it is complete; `exited` tells that MAME has stopped.
+fn update_mapping(session: &mut Session, exited: bool) {
+    let (Some(verification), Some(file)) = (
+        &session.info.mapping,
+        &session.info.controls.controller_file,
+    ) else {
+        return;
+    };
+    if verification.complete {
+        return;
+    }
+    let (output, exited) = match session.log.as_deref() {
+        Some(path) => (log_head(path), exited),
+        // Without a log, the output can never tell.
+        None => (String::new(), true),
+    };
+    session.info.mapping = Some(mapping_check::verify(
+        &output,
+        &format!("{}.cfg", file.name),
+        &session.info.controls.mappings,
+        exited,
+    ));
+}
+
+/// The beginning of a log file, where MAME reports its input devices.
+fn log_head(path: &Path) -> String {
+    let Ok(file) = File::open(path) else {
+        return String::new();
+    };
+    let mut bytes = Vec::new();
+    if file.take(LOG_HEAD_BYTES).read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn finished_state(session: &Session, exit_code: Option<i32>) -> SessionState {
@@ -690,6 +742,82 @@ mod tests {
             serde_json::to_value(wait_until_finished(&manager, plain.id)).expect("json")["warnings"],
             serde_json::json!([])
         );
+    }
+
+    #[test]
+    fn sessions_verify_their_player_mappings_from_the_output() {
+        use crate::controllers::devices::JoystickProvider;
+        use crate::controllers::model::ControllerBinding;
+        use crate::launcher::controls::{PlanMapping, PlannedControllerFile};
+        use crate::launcher::mapping_check::MappingStatus;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manager = manager(dir.path());
+        let lines = [
+            "Input: Adding joystick #1: Pad (device id: pad-a)",
+            "Input: Adding joystick #2: Pad (device id: pad-b)",
+            "Attempting to parse: ymdb-test.cfg",
+            "Input: Remapped joystick #1: Pad (device id: pad-b)",
+            "Attempting to parse: default.cfg",
+        ];
+        let mut plan = if cfg!(windows) {
+            let script = lines
+                .iter()
+                .map(|line| format!("echo {line}"))
+                .collect::<Vec<_>>()
+                .join(" & ");
+            plan("cmd", &["/C", script.as_str()], dir.path())
+        } else {
+            let script = lines
+                .iter()
+                .map(|line| format!("echo '{line}'"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            plan("sh", &["-c", script.as_str()], dir.path())
+        };
+        let mapping = |player: u32, id: &str| PlanMapping {
+            player,
+            controller_id: id.to_owned(),
+            controller_name: id.to_owned(),
+            provider: JoystickProvider::Winhybrid,
+            device_id: id.to_owned(),
+            binding: ControllerBinding::PortOrder,
+        };
+        plan.controls.mappings = vec![mapping(1, "pad-b"), mapping(2, "pad-c")];
+        plan.controls.controller_file = Some(PlannedControllerFile {
+            name: "ymdb-test".to_owned(),
+            path: dir.path().join("ymdb-test.cfg"),
+            hash: "test".to_owned(),
+            content: String::new(),
+            baseline: None,
+        });
+        let started = manager
+            .start(target("pong"), "Pong".to_owned(), "MAME".to_owned(), &plan)
+            .expect("start");
+        let pending = started.mapping.expect("verification");
+        assert!(!pending.complete);
+        let finished = wait_until_finished(&manager, started.id);
+        let verification = finished.mapping.expect("verification");
+        assert!(verification.complete);
+        assert_eq!(
+            verification
+                .players
+                .iter()
+                .map(|player| player.status)
+                .collect::<Vec<_>>(),
+            [MappingStatus::VerifiedPortOrder, MappingStatus::Missing]
+        );
+        // Plans without mappings have no verification.
+        let plain = manager
+            .start(
+                target("galaga"),
+                "Galaga".to_owned(),
+                "MAME".to_owned(),
+                &exiting(dir.path(), 0),
+            )
+            .expect("start");
+        assert_eq!(plain.mapping, None);
+        wait_until_finished(&manager, plain.id);
     }
 
     #[test]

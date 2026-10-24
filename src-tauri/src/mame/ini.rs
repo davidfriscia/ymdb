@@ -63,27 +63,141 @@ pub fn read_search_paths(mame_dir: &Path) -> NativeSearchPaths {
 /// spaces may be quoted. The last occurrence wins, as in MAME.
 fn parse(content: &str) -> NativeSearchPaths {
     let mut paths = NativeSearchPaths::default();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('<') {
-            continue;
-        }
-        let Some((name, value)) = line.split_once(char::is_whitespace) else {
-            continue;
-        };
+    for (name, value) in entries(content) {
         let target = match name {
             "rompath" => &mut paths.rompath,
             "samplepath" => &mut paths.samplepath,
             _ => continue,
         };
+        *target = split_path_list(value);
+    }
+    paths
+}
+
+/// The `<name> <value>` lines of an INI file, values unquoted. Lines without
+/// a value (an empty option) are left out.
+fn entries(content: &str) -> impl Iterator<Item = (&str, &str)> {
+    content.lines().filter_map(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('<') {
+            return None;
+        }
+        let (name, value) = line.split_once(char::is_whitespace)?;
         let value = value.trim();
         let value = value
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
             .unwrap_or(value);
-        *target = split_path_list(value);
+        Some((name, value))
+    })
+}
+
+/// MAME's default `ctrlrpath`, relative to its working directory.
+pub const DEFAULT_CTRLRPATH: &str = "ctrlr";
+/// INI files scanned at most for input settings, per directory.
+const MAX_INI_FILES: usize = 10_000;
+
+/// MAME's own controller file and joystick provider settings, which a
+/// launch that maps devices must take into account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeInputSettings {
+    /// The `mame.ini` read, if one was found.
+    pub ini_file: Option<PathBuf>,
+    /// The `ctrlr` of `mame.ini`; `None` when empty or not set.
+    pub ctrlr: Option<String>,
+    /// The `ctrlrpath` of `mame.ini`, else MAME's default.
+    pub ctrlrpath: Vec<String>,
+    /// The `joystickprovider` of `mame.ini`, if set.
+    pub joystickprovider: Option<String>,
+    /// Other INI files of MAME's inipath that set a `ctrlr`. MAME applies
+    /// them by machine, parent, source file, screen type... after `mame.ini`.
+    pub other_ctrlr: Vec<PathBuf>,
+}
+
+impl Default for NativeInputSettings {
+    fn default() -> Self {
+        Self {
+            ini_file: None,
+            ctrlr: None,
+            ctrlrpath: vec![DEFAULT_CTRLRPATH.to_owned()],
+            joystickprovider: None,
+            other_ctrlr: Vec::new(),
+        }
     }
-    paths
+}
+
+/// Reads the input settings of the MAME installation in `mame_dir`: those of
+/// the first `mame.ini` of MAME's inipath, and the other INI files of the
+/// inipath (and their `source` subdirectories) that set a controller file.
+pub fn read_input_settings(mame_dir: &Path) -> NativeInputSettings {
+    let mut settings = NativeInputSettings::default();
+    for dir in platform::ini_search_dirs(mame_dir) {
+        for file in ini_files(&dir)
+            .into_iter()
+            .chain(ini_files(&dir.join("source")))
+        {
+            let is_mame_ini = file
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("mame.ini"));
+            if is_mame_ini && file.parent() != Some(dir.as_path()) {
+                continue;
+            }
+            // MAME reads only the first `mame.ini` of its inipath.
+            if is_mame_ini && settings.ini_file.is_some() {
+                continue;
+            }
+            let Some(content) = read_small(&file) else {
+                continue;
+            };
+            if is_mame_ini {
+                for (name, value) in entries(&content) {
+                    match name {
+                        "ctrlr" => settings.ctrlr = Some(value.to_owned()),
+                        "ctrlrpath" => settings.ctrlrpath = split_path_list(value),
+                        "joystickprovider" => {
+                            settings.joystickprovider = Some(value.to_owned());
+                        }
+                        _ => {}
+                    }
+                }
+                settings.ctrlr = settings.ctrlr.filter(|ctrlr| !ctrlr.is_empty());
+                settings.ini_file = Some(file);
+            } else if entries(&content).any(|(name, value)| name == "ctrlr" && !value.is_empty()) {
+                settings.other_ctrlr.push(file);
+            }
+        }
+    }
+    settings.other_ctrlr.sort();
+    settings
+}
+
+/// The `.ini` files directly in `dir`, sorted.
+fn ini_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .take(MAX_INI_FILES)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("ini"))
+                && path.is_file()
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+fn read_small(file: &Path) -> Option<String> {
+    let metadata = fs::metadata(file).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_INI_SIZE {
+        return None;
+    }
+    fs::read(file)
+        .ok()
+        .map(|content| String::from_utf8_lossy(&content).into_owned())
 }
 
 /// Splits a `;`-separated search path, dropping empty entries.
@@ -152,6 +266,56 @@ mod tests {
             // `.` comes before `ini` in MAME's inipath.
             assert_eq!(paths.rompath, ["roms", "bios"]);
             assert_eq!(paths.samplepath, [DEFAULT_SAMPLEPATH]);
+        }
+    }
+
+    #[test]
+    fn reads_input_settings_of_mame_ini_and_other_ini_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mame_dir = dir.path().join("MAME ✓");
+        let ini_dir = mame_dir.join("ini");
+        fs::create_dir_all(ini_dir.join("source")).expect("dirs");
+        let settings = read_input_settings(&mame_dir);
+        // A home `.mame` directory could exist on Unix test machines.
+        if settings.ini_file.is_none() {
+            assert_eq!(settings.ctrlr, None);
+            assert_eq!(settings.ctrlrpath, [DEFAULT_CTRLRPATH]);
+        }
+
+        fs::write(
+            mame_dir.join("mame.ini"),
+            "ctrlrpath  \"ctrlr;D:\\My Controllers\"\nctrlr  xarcade\njoystickprovider dinput\n",
+        )
+        .expect("write");
+        // Only the first mame.ini of the inipath is read.
+        fs::write(ini_dir.join("mame.ini"), "ctrlr ignored\n").expect("write");
+        fs::write(ini_dir.join("vertical.ini"), "ctrlr\nrotate 1\n").expect("write");
+        fs::write(ini_dir.join("sf2.ini"), "ctrlr fighting\n").expect("write");
+        fs::write(
+            ini_dir.join("source").join("cps1.ini"),
+            "# x\nctrlr hotrod\n",
+        )
+        .expect("write");
+        let settings = read_input_settings(&mame_dir);
+        if settings.ini_file.as_deref() == Some(&mame_dir.join("mame.ini")) {
+            assert_eq!(settings.ctrlr.as_deref(), Some("xarcade"));
+            assert_eq!(settings.ctrlrpath, ["ctrlr", "D:\\My Controllers"]);
+            assert_eq!(settings.joystickprovider.as_deref(), Some("dinput"));
+        }
+        // An empty ctrlr does not count.
+        assert_eq!(
+            settings.other_ctrlr,
+            [
+                ini_dir.join("sf2.ini"),
+                ini_dir.join("source").join("cps1.ini")
+            ]
+        );
+
+        // An empty ctrlr in mame.ini is no controller file.
+        fs::write(mame_dir.join("mame.ini"), "ctrlr \"\"\nctrlr\n").expect("write");
+        let settings = read_input_settings(&mame_dir);
+        if settings.ini_file.as_deref() == Some(&mame_dir.join("mame.ini")) {
+            assert_eq!(settings.ctrlr, None);
         }
     }
 

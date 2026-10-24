@@ -1,7 +1,8 @@
 import { useId, useState } from "react";
 import { describeError } from "../../shared/ipc";
+import { MAPPING_STATUS_LABELS, PORT_ORDER_WARNING } from "../controllers/controlsMessages";
 import { Disclosure } from "./Disclosure";
-import type { SessionInfo } from "./launcherApi";
+import type { MappingStatus, MappingVerification, SessionInfo } from "./launcherApi";
 
 const timeFormat = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit" });
 
@@ -50,6 +51,7 @@ export function LaunchStatus({ messages, session, onStop }: LaunchStatusProps) {
               {warning}
             </p>
           ))}
+          {session.mapping && <MappingStatusList mapping={session.mapping} />}
           <div id={bodyId} className="launch-section__body" hidden={!expanded}>
             <SessionDetails session={session} />
           </div>
@@ -149,6 +151,48 @@ function SessionSummary({
         </p>
       )}
       {error && <p className="message message--error">{error}</p>}
+    </div>
+  );
+}
+
+const STATUS_TONES: Record<MappingStatus, string> = {
+  pending: "badge",
+  verified: "badge badge--success",
+  verifiedPortOrder: "badge badge--success",
+  missing: "badge badge--error",
+  notApplied: "badge badge--error",
+  unknown: "badge",
+};
+
+/**
+ * Which player mappings MAME applied, from its own output. Nothing is shown
+ * as connected or applied without that evidence.
+ */
+function MappingStatusList({ mapping }: { mapping: MappingVerification }) {
+  return (
+    <div className="session-mapping" role="group" aria-label="Player mappings">
+      <p className="message message--muted">
+        {mapping.complete
+          ? "Player mappings, as reported by MAME:"
+          : "Checking the player mappings in MAME's output…"}
+      </p>
+      <ul className="session-mapping__list">
+        {mapping.players.map((player) => (
+          <li key={player.player}>
+            Player {player.player}: <strong>{player.controllerName}</strong>{" "}
+            <span className={STATUS_TONES[player.status]}>
+              {MAPPING_STATUS_LABELS[player.status]}
+            </span>
+            {player.deviceName !== null && player.status !== "missing" && (
+              <span className="message--muted"> ({player.deviceName})</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {mapping.message !== null && <p className="message message--warning">{mapping.message}</p>}
+      {mapping.players.some((player) => player.status === "verifiedPortOrder") && (
+        <p className="message message--muted">{PORT_ORDER_WARNING}</p>
+      )}
     </div>
   );
 }

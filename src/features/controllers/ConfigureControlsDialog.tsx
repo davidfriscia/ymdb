@@ -12,6 +12,8 @@ interface ConfigureControlsDialogProps {
   managed: boolean;
   /** The profile's MAME configuration directory, when known. */
   cfgDirectory: string | null;
+  /** The players of the launch in words, when known. */
+  players: string | null;
   /** Starts the same launch as Play; rejects with the backend error. */
   onStart: () => Promise<void>;
   onClose: () => void;
@@ -28,6 +30,7 @@ export function ConfigureControlsDialog({
   profileSource,
   managed,
   cfgDirectory,
+  players,
   onStart,
   onClose,
 }: ConfigureControlsDialogProps) {
@@ -51,6 +54,12 @@ export function ConfigureControlsDialog({
       <p className="message">
         Controller profile: <strong>{profileName}</strong> ({profileSource}).
       </p>
+      {players !== null && (
+        <p className="message">
+          Players: <strong>{players}</strong>. MAME starts with these controllers mapped to their
+          players, so the assignments you make apply to the devices you will play with.
+        </p>
+      )}
       <ol className="controls-steps">
         <li>
           YMDB starts {subject} with this controller profile, exactly as Play does (software, media

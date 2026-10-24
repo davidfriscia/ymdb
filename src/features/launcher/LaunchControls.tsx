@@ -18,8 +18,13 @@ import { useInstallationScope } from "../installations/installationsContext";
 import { RomDownloadSection } from "../roms/RomDownloadSection";
 import { ConfigureControlsDialog } from "../controllers/ConfigureControlsDialog";
 import { ControlsPreferences } from "../controllers/ControlsPreferences";
-import { ControlsSelect, SaveControlsPreference } from "../controllers/ControlsSelect";
-import { describeSource } from "../controllers/controlsMessages";
+import {
+  ControlsSelect,
+  SaveControlsPreference,
+  TemporaryPlayers,
+} from "../controllers/ControlsSelect";
+import type { Players } from "../controllers/controllersApi";
+import { describePlayers, describeSource, trimPlayers } from "../controllers/controlsMessages";
 import { preferenceScopes, useControls } from "../controllers/useControls";
 
 interface LaunchBarProps {
@@ -87,6 +92,9 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
   const [error, setError] = useState<string | null>(null);
   // The temporary controller profile of the launches from this page; never saved.
   const [controlsProfileId, setControlsProfileId] = useState<string | null>(null);
+  // The temporary players of the launches from this page; never saved.
+  const [controlsPlayers, setControlsPlayers] = useState<Players | null>(null);
+  const [playersOpen, setPlayersOpen] = useState(false);
   const [controlsNotice, setControlsNotice] = useState<string | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [configuring, setConfiguring] = useState(false);
@@ -100,23 +108,36 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
   const temporaryProfile =
     controllers?.profiles.find((profile) => profile.id === controlsProfileId) ?? null;
   const temporaryProfileId = temporaryProfile?.id ?? null;
+  // Controllers deleted in the meantime leave their player without controller.
+  const temporaryPlayers = useMemo<Players | null>(
+    () =>
+      controlsPlayers === null || !controllers
+        ? controlsPlayers
+        : trimPlayers(
+            controlsPlayers.map((id) =>
+              id !== null && controllers.controllers.some((entry) => entry.id === id) ? id : null,
+            ),
+          ),
+    [controlsPlayers, controllers],
+  );
 
   const profiles = view?.config.profiles ?? [];
   // A profile deleted in the meantime falls back to the default profile.
   const selectedProfile =
     profileId !== null && profiles.some((profile) => profile.id === profileId) ? profileId : null;
-  const fullRequest = useMemo<LaunchRequest | null>(
-    () =>
-      request
-        ? {
-            ...request,
-            installationId,
-            ...(selectedProfile ? { profileId: selectedProfile } : {}),
-            ...(temporaryProfileId ? { controls: { profileId: temporaryProfileId } } : {}),
-          }
-        : null,
-    [request, installationId, selectedProfile, temporaryProfileId],
-  );
+  const fullRequest = useMemo<LaunchRequest | null>(() => {
+    if (!request) return null;
+    const controls = {
+      ...(temporaryProfileId ? { profileId: temporaryProfileId } : {}),
+      ...(temporaryPlayers ? { players: temporaryPlayers } : {}),
+    };
+    return {
+      ...request,
+      installationId,
+      ...(selectedProfile ? { profileId: selectedProfile } : {}),
+      ...(temporaryProfileId || temporaryPlayers ? { controls } : {}),
+    };
+  }, [request, installationId, selectedProfile, temporaryProfileId, temporaryPlayers]);
   const session = latestSession(sessions, target, installationId);
   const running = session?.state.state === "running";
   const overrideLabel = target.software ? "this software" : "this machine";
@@ -167,10 +188,29 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
     ? `${target.software.list}:${target.software.name} on ${target.machine}`
     : target.machine;
 
+  const showPlayers = playersOpen && controllers !== null;
   const details =
-    children || temporaryProfile || controlsNotice ? (
+    children || temporaryProfile || controlsNotice || showPlayers ? (
       <>
         {children}
+        {showPlayers && (
+          <TemporaryPlayers
+            view={controllers}
+            saved={resolution?.players ?? []}
+            value={temporaryPlayers}
+            onChange={(next) => {
+              setControlsPlayers(next);
+              setControlsNotice(null);
+            }}
+            scopes={scopes}
+            onSaved={(scope) => {
+              setControlsPlayers(null);
+              setPlayersOpen(false);
+              setControlsNotice(`The players are saved for: ${scope.label}.`);
+              controlsChanged();
+            }}
+          />
+        )}
         {temporaryProfile && (
           <SaveControlsPreference
             key={temporaryProfile.id}
@@ -258,6 +298,24 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                 setControlsNotice(null);
               }}
             />
+            <button
+              type="button"
+              className="button button--secondary button--small"
+              aria-expanded={playersOpen}
+              disabled={!controllers}
+              title={
+                !controllers
+                  ? "Players"
+                  : temporaryPlayers
+                    ? `Players: ${describePlayers(controllers, temporaryPlayers)} — temporary for this launch`
+                    : `Players: ${describePlayers(controllers, resolution?.players ?? [])}`
+              }
+              onClick={() => {
+                setPlayersOpen(!playersOpen);
+              }}
+            >
+              Players{temporaryPlayers ? " (temporary)" : ""}
+            </button>
           </>
         }
       />
@@ -344,6 +402,7 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
                     scopes={scopes}
                     software={software}
                     temporary={temporaryProfileId}
+                    temporaryPlayers={temporaryPlayers}
                     onChanged={controlsChanged}
                     onConfigure={() => {
                       setConfiguring(true);
@@ -396,6 +455,11 @@ export function LaunchControls({ target, request, summary, children }: LaunchCon
               : resolution !== null && resolution.cfgDirectory !== null
           }
           cfgDirectory={temporaryProfile ? null : (resolution?.cfgDirectory ?? null)}
+          players={
+            controllers
+              ? describePlayers(controllers, temporaryPlayers ?? resolution?.players ?? [])
+              : null
+          }
           onStart={async () => {
             if (!fullRequest) return;
             setError(null);

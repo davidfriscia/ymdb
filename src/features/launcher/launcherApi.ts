@@ -1,5 +1,11 @@
 import { invokeCommand } from "../../shared/ipc";
-import type { Assignment, ControlsSource } from "../controllers/controllersApi";
+import type {
+  Assignment,
+  ControllerBinding,
+  ControlsSource,
+  JoystickProvider,
+  Players,
+} from "../controllers/controllersApi";
 
 // These types mirror the Rust contracts in `src-tauri/src/launcher/` and
 // `src-tauri/src/commands/launcher.rs`. Keep both sides in sync.
@@ -86,17 +92,65 @@ export interface LaunchRequest {
 export type OptionSource =
   "global" | "profile" | "machine" | "software" | "romManager" | "controllers";
 
+/** Mirrors `PlanMapping` in `launcher/controls.rs`: a player mapped to a device. */
+export interface PlanMapping {
+  /** 1-based player number, also the MAME joystick index. */
+  player: number;
+  controllerId: string;
+  controllerName: string;
+  provider: JoystickProvider;
+  deviceId: string;
+  binding: ControllerBinding;
+}
+
+/** Mirrors `PlannedControllerFile` in `launcher/controls.rs`; written when MAME starts. */
+export interface PlannedControllerFile {
+  /** The `-ctrlr` value. */
+  name: string;
+  path: string;
+  hash: string;
+  content: string;
+  /** The file whose sections it keeps. */
+  baseline: string | null;
+}
+
 /** Mirrors `PlanControls` in `launcher/controls.rs`. */
 export interface PlanControls {
   profileId: string;
   profileName: string;
   profileSource: ControlsSource;
-  /** Preferences only: not bound to physical devices yet. */
-  players: string[];
+  players: Players;
   playersSource: ControlsSource | null;
   /** MAME configuration directory of a user profile, created at launch. */
   cfgDirectory: string | null;
   baseFile: string | null;
+  /** The players mapped to devices, Player 1 first. */
+  mappings: PlanMapping[];
+  joystickProvider: JoystickProvider | null;
+  controllerFile: PlannedControllerFile | null;
+}
+
+/** Mirrors `MappingStatus` in `launcher/mapping_check.rs`. */
+export type MappingStatus =
+  "pending" | "verified" | "verifiedPortOrder" | "missing" | "notApplied" | "unknown";
+
+/** Mirrors `PlayerVerification` in `launcher/mapping_check.rs`. */
+export interface PlayerVerification {
+  player: number;
+  controllerId: string;
+  controllerName: string;
+  deviceId: string;
+  binding: ControllerBinding;
+  status: MappingStatus;
+  deviceName: string | null;
+}
+
+/** Mirrors `MappingVerification` in `launcher/mapping_check.rs`. */
+export interface MappingVerification {
+  /** `false` while MAME may still report the mappings. */
+  complete: boolean;
+  players: PlayerVerification[];
+  message: string | null;
 }
 
 /** Mirrors `PlanArgument` in `command.rs`. */
@@ -192,6 +246,8 @@ export interface SessionInfo {
   title: string;
   commandLine: string[];
   controls: PlanControls;
+  /** Which player mappings MAME applied; `null` when the plan maps no device. */
+  mapping: MappingVerification | null;
   /** The warnings of the plan the session was started with. */
   warnings: string[];
   startedAt: number;

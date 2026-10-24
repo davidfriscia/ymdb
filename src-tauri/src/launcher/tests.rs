@@ -106,10 +106,23 @@ impl Catalog {
         controls: ControlsContext<'_>,
         request: &LaunchRequest,
     ) -> Result<PreparedLaunch, LaunchError> {
+        self.prepare_at(&executable(), config, search_paths, controls, request)
+    }
+
+    /// Prepares with the MAME executable `executable` (whose directory may
+    /// hold INI files).
+    fn prepare_at(
+        &self,
+        executable: &Path,
+        config: &LaunchConfig,
+        search_paths: &RequiredSearchPaths,
+        controls: ControlsContext<'_>,
+        request: &LaunchRequest,
+    ) -> Result<PreparedLaunch, LaunchError> {
         self.read(|connection| {
             prepare(
                 connection,
-                &executable(),
+                executable,
                 config,
                 search_paths,
                 controls,
@@ -566,6 +579,7 @@ impl Controls {
                 device_class: DeviceClass::Joystick,
                 device_id: None,
                 provider: None,
+                binding: None,
             })
             .expect("stick");
         fs::create_dir_all(paths.profile_dir("six-buttons")).expect("dir");
@@ -895,13 +909,22 @@ fn the_request_overrides_controls_independently_of_the_launch_profile() {
     );
     assert_eq!(prepared.plan.command_line(), ["pong", "-speed", "4"]);
 
-    // Players are preferences only: no option, a warning.
+    // A controller without a configured device cannot be mapped.
     request.controls = Some(Assignment {
         profile_id: None,
-        players: Some(vec!["stick".to_owned()]),
+        players: Some(vec![Some("stick".to_owned())]),
+    });
+    assert!(matches!(
+        prepare(&request),
+        Err(LaunchError::Invalid(message)) if message.contains("Player 1") && message.contains("not configured")
+    ));
+    // Assigning nobody keeps the profile's command line.
+    request.controls = Some(Assignment {
+        profile_id: None,
+        players: Some(vec![None, None]),
     });
     let prepared = prepare(&request).expect("prepare");
-    assert_eq!(prepared.plan.controls.players, ["stick"]);
+    assert!(prepared.plan.controls.players.is_empty());
     assert_eq!(prepared.plan.controls.profile_id, "fighting");
     let cfg = controls.cfg_directory("fighting");
     assert_eq!(
@@ -916,7 +939,7 @@ fn the_request_overrides_controls_independently_of_the_launch_profile() {
             ""
         ]
     );
-    assert!(prepared.warnings[0].contains("not applied to MAME yet"));
+    assert!(prepared.warnings.is_empty(), "{:?}", prepared.warnings);
 
     // Unknown references in a request are refused.
     request.controls = Some(Assignment {
@@ -933,14 +956,14 @@ fn launch_requests_accept_controls() {
     let request: LaunchRequest = serde_json::from_value(serde_json::json!({
         "installationId": INSTALLATION_ID,
         "machine": "pong",
-        "controls": { "profileId": "fighting", "players": ["stick"] }
+        "controls": { "profileId": "fighting", "players": [null, "stick"] }
     }))
     .expect("parse");
     assert_eq!(
         request.controls,
         Some(Assignment {
             profile_id: Some("fighting".to_owned()),
-            players: Some(vec!["stick".to_owned()]),
+            players: Some(vec![None, Some("stick".to_owned())]),
         })
     );
     let request: LaunchRequest = serde_json::from_value(serde_json::json!({
@@ -956,5 +979,626 @@ fn launch_requests_accept_controls() {
             "controls": { "ctrlr": "x" }
         }))
         .is_err()
+    );
+}
+
+// --- Player mappings -------------------------------------------------------
+
+use crate::controllers::devices::JoystickProvider;
+use crate::controllers::model::ControllerBinding;
+
+const PAD_A: &str = "USB gamepad            product_e401081f-0000-0000-0000-504944564944 instance_1a2b3c4d-1111-11f0-8001-444553540000";
+const PAD_B: &str = "USB gamepad            product_e401081f-0000-0000-0000-504944564944 instance_5e6f7a8b-2222-11f1-8001-444553540000";
+const F310: &str = "Controller (Gamepad F310) product_c21d046d-0000-0000-0000-504944564944 instance_9c0d1e2f-3333-11f0-8001-444553540000";
+
+/// The provider `auto` selects on this operating system.
+fn provider() -> JoystickProvider {
+    JoystickProvider::available()[0]
+}
+
+impl Controls {
+    /// Registers a mapped joystick; returns its id.
+    fn add_device(&mut self, name: &str, device_id: &str, binding: ControllerBinding) -> String {
+        self.config
+            .create_controller(ControllerInput {
+                name: name.to_owned(),
+                kind: ControllerKind::Gamepad,
+                device_class: DeviceClass::Joystick,
+                device_id: Some(device_id.to_owned()),
+                provider: Some(provider().name().to_owned()),
+                binding: Some(binding),
+            })
+            .expect("controller")
+    }
+
+    fn assign_players(
+        &mut self,
+        level: AssignmentLevel,
+        key: Option<&str>,
+        players: &[Option<&str>],
+    ) {
+        let target = AssignmentTarget {
+            level,
+            key: key.map(str::to_owned),
+        };
+        self.config
+            .update_assignment(
+                &target,
+                crate::controllers::model::AssignmentUpdate {
+                    players: crate::controllers::model::FieldUpdate::Set {
+                        value: players.iter().map(|id| id.map(str::to_owned)).collect(),
+                    },
+                    ..Default::default()
+                },
+            )
+            .expect("assign players");
+    }
+
+    /// Three gamepads, as in the hardware tests: F310 (device binding) and
+    /// two identical GP100 (port order).
+    fn with_three_pads() -> Self {
+        let mut controls = Self::new();
+        controls.add_device("F310", F310, ControllerBinding::Device);
+        controls.add_device("GP100 A", PAD_A, ControllerBinding::PortOrder);
+        controls.add_device("GP100 B", PAD_B, ControllerBinding::PortOrder);
+        controls
+    }
+}
+
+fn generated_args(controls: &Controls, prepared: &PreparedLaunch) -> Vec<String> {
+    let file = prepared
+        .plan
+        .controls
+        .controller_file
+        .as_ref()
+        .expect("file");
+    vec![
+        "-ctrlrpath".to_owned(),
+        controls
+            .paths
+            .generated_dir()
+            .to_string_lossy()
+            .into_owned(),
+        "-ctrlr".to_owned(),
+        file.name.clone(),
+        "-joystickprovider".to_owned(),
+        provider().name().to_owned(),
+        "-verbose".to_owned(),
+    ]
+}
+
+#[test]
+fn the_mame_profile_maps_players_and_keeps_its_configuration_directory() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::with_three_pads();
+    controls.assign_players(
+        AssignmentLevel::Default,
+        None,
+        &[Some("f310"), Some("gp100-a"), Some("gp100-b")],
+    );
+    let config = LaunchConfig {
+        global_options: options(&[("window", OptionValue::Boolean(true))]),
+        ..LaunchConfig::default()
+    };
+    let files = controls.files();
+    let prepared = catalog
+        .prepare_controls(
+            &config,
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    let plan = &prepared.plan.controls;
+    assert_eq!(plan.profile_id, "mame");
+    // MAME's own configuration directory: no -cfg_directory.
+    assert!(!plan.is_managed());
+    let mut expected = vec!["pong".to_owned(), "-window".to_owned()];
+    expected.extend(generated_args(&controls, &prepared));
+    assert_eq!(prepared.plan.command_line(), expected);
+    assert!(
+        option_sources(&prepared)
+            .iter()
+            .skip(1)
+            .all(|(_, source)| *source == OptionSource::Controllers)
+    );
+    assert_eq!(
+        plan.mappings
+            .iter()
+            .map(|mapping| (
+                mapping.player,
+                mapping.controller_id.as_str(),
+                mapping.binding
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (1, "f310", ControllerBinding::Device),
+            (2, "gp100-a", ControllerBinding::PortOrder),
+            (3, "gp100-b", ControllerBinding::PortOrder)
+        ]
+    );
+    assert_eq!(plan.joystick_provider, Some(provider()));
+    let file = plan.controller_file.as_ref().expect("file");
+    assert_eq!(file.baseline, None);
+    let info = crate::controllers::base_file::validate(file.content.as_bytes()).expect("valid");
+    assert_eq!(info.mappings.len(), 3);
+    assert_eq!(info.mappings[2].device, PAD_B);
+    assert_eq!(info.mappings[2].controller.to_string(), "JOYCODE_3");
+    // Port order controllers are named in a warning.
+    assert!(
+        prepared
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("GP100 A, GP100 B")
+                && warning.contains("Swapping ports")),
+        "{:?}",
+        prepared.warnings
+    );
+
+    // The preview writes nothing; starting writes the file once.
+    assert_eq!(controls.files(), files);
+    assert!(!file.path.exists());
+    super::controls::materialize(plan).expect("materialize");
+    assert_eq!(fs::read_to_string(&file.path).expect("read"), file.content);
+    assert_eq!(file.path.parent(), Some(controls.paths.generated_dir()));
+    let modified = fs::metadata(&file.path)
+        .and_then(|m| m.modified())
+        .expect("mtime");
+    super::controls::materialize(plan).expect("again");
+    assert_eq!(
+        fs::metadata(&file.path)
+            .and_then(|m| m.modified())
+            .expect("mtime"),
+        modified
+    );
+    // A file with that name but other content is never reused.
+    fs::write(&file.path, "corrupted").expect("write");
+    super::controls::materialize(plan).expect("repaired");
+    assert_eq!(fs::read_to_string(&file.path).expect("read"), file.content);
+    // No temporary file is left.
+    assert_eq!(
+        fs::read_dir(controls.paths.generated_dir())
+            .expect("dir")
+            .count(),
+        1
+    );
+
+    // Preparing again gives the same plan; other assignments another file.
+    let again = catalog
+        .prepare_controls(
+            &config,
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    assert_eq!(again.plan, prepared.plan);
+    controls.assign_players(
+        AssignmentLevel::Machine,
+        Some("pong"),
+        &[Some("gp100-b"), Some("gp100-a")],
+    );
+    let swapped = catalog
+        .prepare_controls(
+            &config,
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    let swapped_file = swapped
+        .plan
+        .controls
+        .controller_file
+        .as_ref()
+        .expect("file");
+    assert_ne!(swapped_file.name, file.name);
+    assert_eq!(swapped.plan.controls.mappings.len(), 2);
+}
+
+#[test]
+fn players_and_profile_are_resolved_independently() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::with_three_pads();
+    controls.assign(AssignmentLevel::Default, None, Some("fighting"));
+    controls.assign_players(AssignmentLevel::Machine, Some("pong"), &[Some("gp100-a")]);
+    let prepare = |controls: &Controls, request: &LaunchRequest| {
+        catalog.prepare_controls(
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            request,
+        )
+    };
+    let prepared = prepare(&controls, &machine_request("pong")).expect("prepare");
+    let plan = &prepared.plan.controls;
+    assert_eq!(plan.profile_id, "fighting");
+    assert_eq!(
+        plan.profile_source,
+        crate::controllers::resolve::ControlsSource::Default
+    );
+    assert_eq!(
+        plan.players_source,
+        Some(crate::controllers::resolve::ControlsSource::Machine)
+    );
+    // A managed profile without base: its directory, and the generated
+    // file instead of `-ctrlr ""`.
+    let cfg = controls.cfg_directory("fighting");
+    let mut expected = vec!["pong".to_owned(), "-cfg_directory".to_owned(), cfg];
+    expected.extend(generated_args(&controls, &prepared));
+    assert_eq!(prepared.plan.command_line(), expected);
+
+    // Changing the profile of the machine keeps its players, and the
+    // reverse.
+    controls.assign(AssignmentLevel::Machine, Some("pong"), Some("mame"));
+    controls.assign_players(AssignmentLevel::Machine, Some("pong"), &[Some("gp100-a")]);
+    let machine = controls
+        .config
+        .assignment(&AssignmentTarget {
+            level: AssignmentLevel::Machine,
+            key: Some("pong".to_owned()),
+        })
+        .cloned()
+        .expect("machine");
+    assert_eq!(machine.profile_id.as_deref(), Some("mame"));
+    assert_eq!(machine.players, Some(vec![Some("gp100-a".to_owned())]));
+
+    // A temporary selection overrides the players for this launch only.
+    let before = controls.config.clone();
+    let mut request = machine_request("pong");
+    request.controls = Some(Assignment {
+        profile_id: None,
+        players: Some(vec![None, Some("f310".to_owned()), None]),
+    });
+    let prepared = prepare(&controls, &request).expect("prepare");
+    let plan = &prepared.plan.controls;
+    assert_eq!(plan.profile_id, "mame");
+    assert_eq!(
+        plan.players_source,
+        Some(crate::controllers::resolve::ControlsSource::Request)
+    );
+    assert_eq!(plan.players, [None, Some("f310".to_owned())]);
+    assert_eq!(plan.mappings.len(), 1);
+    assert_eq!(plan.mappings[0].player, 2);
+    // A partial assignment is allowed with a warning.
+    assert!(
+        prepared
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("Player 1 has no assigned controller"))
+    );
+    assert_eq!(controls.config, before);
+    // Explicitly no controllers: no mapping, the previous command line.
+    request.controls = Some(Assignment {
+        profile_id: None,
+        players: Some(Vec::new()),
+    });
+    let prepared = prepare(&controls, &request).expect("prepare");
+    assert_eq!(prepared.plan.command_line(), ["pong"]);
+    assert!(prepared.plan.controls.controller_file.is_none());
+
+    // Software and machine + software levels.
+    controls.assign_players(
+        AssignmentLevel::Software,
+        Some("nes:smb"),
+        &[Some("gp100-b")],
+    );
+    controls.assign_players(
+        AssignmentLevel::MachineSoftware,
+        Some("nes/nes:smb"),
+        &[Some("f310"), Some("gp100-b")],
+    );
+    let request = software_request("nes", "nes", "smb", &[("cart", "cart")]);
+    let prepared = prepare(&controls, &request).expect("prepare");
+    assert_eq!(
+        prepared.plan.controls.players_source,
+        Some(crate::controllers::resolve::ControlsSource::MachineSoftware)
+    );
+    assert_eq!(prepared.plan.controls.mappings.len(), 2);
+}
+
+#[test]
+fn a_managed_profile_keeps_its_base_sections_with_mappings() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::with_three_pads();
+    controls.assign(AssignmentLevel::Default, None, Some("six-buttons"));
+    controls.assign_players(
+        AssignmentLevel::Default,
+        None,
+        &[Some("gp100-b"), Some("gp100-a")],
+    );
+    let prepared = catalog
+        .prepare_controls(
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    let plan = &prepared.plan.controls;
+    let base = controls.paths.base_file("six-buttons");
+    assert_eq!(plan.base_file.as_deref(), Some(base.as_path()));
+    let file = plan.controller_file.as_ref().expect("file");
+    assert_eq!(file.baseline.as_deref(), Some(base.as_path()));
+    // The base sections follow the generated one, verbatim.
+    let start = BASE_FILE.find("<system").expect("system");
+    assert!(file.content.ends_with(&BASE_FILE[start..]));
+    let info = crate::controllers::base_file::validate(file.content.as_bytes()).expect("valid");
+    assert_eq!(info.systems, ["default", "default"]);
+    // `-ctrlr base` is replaced by the generated file.
+    let line = prepared.plan.command_line();
+    assert!(!line.contains(&"base".to_owned()));
+    let cfg = controls.cfg_directory("six-buttons");
+    let mut expected = vec!["pong".to_owned(), "-cfg_directory".to_owned(), cfg];
+    expected.extend(generated_args(&controls, &prepared));
+    assert_eq!(line, expected);
+    super::controls::materialize(plan).expect("materialize");
+    assert_eq!(fs::read_to_string(&base).expect("base"), BASE_FILE);
+}
+
+#[test]
+fn invalid_or_contradictory_assignments_are_refused() {
+    let catalog = Catalog::new();
+    let prepare = |controls: &Controls| {
+        catalog.prepare_controls(
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+    };
+    let refused = |controls: &Controls, expected: &str| match prepare(controls) {
+        Err(LaunchError::Invalid(message)) => assert!(message.contains(expected), "{message}"),
+        other => panic!("expected an error containing '{expected}', got {other:?}"),
+    };
+
+    // A controller of another class.
+    let mut controls = Controls::new();
+    controls
+        .config
+        .create_controller(ControllerInput {
+            name: "Light Gun".to_owned(),
+            kind: ControllerKind::Lightgun,
+            device_class: DeviceClass::Lightgun,
+            device_id: None,
+            provider: None,
+            binding: None,
+        })
+        .expect("gun");
+    controls.assign_players(AssignmentLevel::Default, None, &[Some("light-gun")]);
+    refused(&controls, "not a joystick");
+
+    // Controllers of different providers.
+    if JoystickProvider::available().len() > 1 {
+        let mut controls = Controls::with_three_pads();
+        let other = JoystickProvider::available()[1];
+        controls
+            .config
+            .create_controller(ControllerInput {
+                name: "Other provider".to_owned(),
+                kind: ControllerKind::Gamepad,
+                device_class: DeviceClass::Joystick,
+                device_id: Some("Other pad".to_owned()),
+                provider: Some(other.name().to_owned()),
+                binding: Some(ControllerBinding::PortOrder),
+            })
+            .expect("other");
+        controls.assign_players(
+            AssignmentLevel::Default,
+            None,
+            &[Some("f310"), Some("other-provider")],
+        );
+        refused(&controls, "different joystick providers");
+    }
+
+    // A provider of another operating system, stored in controllers.json.
+    let mut controls = Controls::with_three_pads();
+    let foreign = JoystickProvider::ALL
+        .into_iter()
+        .find(|provider| !provider.is_available());
+    if let Some(foreign) = foreign {
+        controls.config.controllers[0].provider = Some(foreign.name().to_owned());
+        controls.assign_players(AssignmentLevel::Default, None, &[Some("f310")]);
+        refused(&controls, "not available on this operating system");
+    }
+
+    // A base file without default section (imported before the check) is
+    // reported and kept as it is.
+    let mut controls = Controls::new();
+    controls.assign(AssignmentLevel::Default, None, Some("six-buttons"));
+    let base = controls.paths.base_file("six-buttons");
+    let machine_only =
+        r#"<mameconfig version="10"><system name="sf2"><input/></system></mameconfig>"#;
+    fs::write(&base, machine_only).expect("write");
+    refused(&controls, "no <system name=\"default\">");
+    assert_eq!(fs::read_to_string(&base).expect("base"), machine_only);
+
+    // A base file mapping a device to an assigned joystick index.
+    let mut controls = Controls::with_three_pads();
+    controls.assign(AssignmentLevel::Default, None, Some("six-buttons"));
+    controls.assign_players(AssignmentLevel::Default, None, &[Some("f310")]);
+    fs::write(
+        controls.paths.base_file("six-buttons"),
+        r#"<mameconfig version="10"><system name="default"><input><mapdevice device="XInput Player 1" controller="JOYCODE_1"/></input></system></mameconfig>"#,
+    )
+    .expect("write");
+    refused(&controls, "JOYCODE_1");
+}
+
+#[test]
+fn registered_devices_are_validated() {
+    let mut config = ControllersConfig::new();
+    let input = |name: &str, id: &str, binding| ControllerInput {
+        name: name.to_owned(),
+        kind: ControllerKind::Gamepad,
+        device_class: DeviceClass::Joystick,
+        device_id: Some(id.to_owned()),
+        provider: Some(provider().name().to_owned()),
+        binding: Some(binding),
+    };
+    config
+        .create_controller(input("A", PAD_A, ControllerBinding::PortOrder))
+        .expect("a");
+    // The same device id (without case) twice.
+    assert!(
+        config
+            .create_controller(input(
+                "A again",
+                &PAD_A.to_uppercase(),
+                ControllerBinding::PortOrder
+            ))
+            .unwrap_err()
+            .to_string()
+            .contains("same")
+    );
+    // An id contained in another: MAME could match either.
+    assert!(
+        config
+            .create_controller(input("Prefix", "USB gamepad", ControllerBinding::PortOrder))
+            .is_err()
+    );
+    // A binding needs a provider and a device id.
+    let mut incomplete = input("Incomplete", PAD_B, ControllerBinding::PortOrder);
+    incomplete.provider = None;
+    assert!(
+        config
+            .create_controller(incomplete)
+            .unwrap_err()
+            .to_string()
+            .contains("not configured")
+    );
+    // An unknown provider.
+    let mut unknown = input("Unknown", PAD_B, ControllerBinding::PortOrder);
+    unknown.provider = Some("rawinput".to_owned());
+    assert!(config.create_controller(unknown).is_err());
+    // An XInput slot never identifies a device.
+    if provider() == JoystickProvider::Winhybrid {
+        assert!(
+            config
+                .create_controller(input("Slot", "XInput Player 1", ControllerBinding::Device))
+                .unwrap_err()
+                .to_string()
+                .contains("port order")
+        );
+        config
+            .create_controller(input(
+                "Slot",
+                "XInput Player 1",
+                ControllerBinding::PortOrder,
+            ))
+            .expect("slot");
+    }
+    // Controllers registered before device mapping keep loading.
+    let mut legacy: ControllersConfig = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1,
+        "controllers": [
+            { "id": "stick", "name": "Stick", "kind": "arcadeStick", "deviceClass": "joystick", "deviceId": "Stick", "provider": "dinput" },
+            { "id": "stick-2", "name": "Stick 2", "kind": "arcadeStick", "deviceClass": "joystick", "deviceId": "Stick", "provider": "dinput" }
+        ],
+        "assignments": { "default": { "profileId": "mame", "players": ["stick", "stick-2"] } }
+    }))
+    .expect("legacy");
+    legacy.ensure_system_profiles();
+    legacy.validate().expect("valid");
+    assert_eq!(legacy.controllers[0].binding, None);
+    assert!(
+        legacy.controllers[0]
+            .device_binding()
+            .unwrap_err()
+            .contains("not configured")
+    );
+}
+
+#[test]
+fn the_mame_profile_composes_the_controller_file_of_mame_ini() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::with_three_pads();
+    controls.assign_players(AssignmentLevel::Default, None, &[Some("f310")]);
+    let mame_dir = controls.dir.path().join("MAME ✓");
+    fs::create_dir_all(mame_dir.join("ctrlr")).expect("dir");
+    let executable = mame_dir.join("mame");
+    let native = r#"<?xml version="1.0"?>
+<mameconfig version="10">
+    <system name="default"><input><port type="UI_PAUSE"><newseq type="standard">KEYCODE_P</newseq></port></input></system>
+</mameconfig>
+"#;
+    fs::write(mame_dir.join("ctrlr").join("xarcade.cfg"), native).expect("ctrlr");
+    let prepare = |controls: &Controls| {
+        catalog.prepare_at(
+            &executable,
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+    };
+
+    // Without mame.ini: only the mappings.
+    let prepared = prepare(&controls).expect("prepare");
+    let file = prepared
+        .plan
+        .controls
+        .controller_file
+        .clone()
+        .expect("file");
+    if file.baseline.is_some() {
+        // A home `.mame/mame.ini` of the test machine is read first.
+        return;
+    }
+
+    fs::write(
+        mame_dir.join("mame.ini"),
+        "ctrlr xarcade\njoystickprovider dinput\n",
+    )
+    .expect("ini");
+    let prepared = prepare(&controls).expect("prepare");
+    let file = prepared
+        .plan
+        .controls
+        .controller_file
+        .clone()
+        .expect("file");
+    assert_eq!(
+        file.baseline,
+        Some(mame_dir.join("ctrlr").join("xarcade.cfg"))
+    );
+    assert!(file.content.contains("KEYCODE_P"));
+    assert!(file.content.contains("<mapdevice"));
+    // The configuration directory stays MAME's own.
+    assert!(
+        !prepared
+            .plan
+            .command_line()
+            .contains(&"-cfg_directory".to_owned())
+    );
+    if provider().name() != "dinput" {
+        assert!(
+            prepared
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("mame.ini sets the joystick provider 'dinput'")),
+            "{:?}",
+            prepared.warnings
+        );
+    }
+
+    // A controller file named by mame.ini but missing.
+    fs::write(mame_dir.join("mame.ini"), "ctrlr missing\n").expect("ini");
+    assert!(
+        matches!(prepare(&controls), Err(LaunchError::Invalid(message)) if message.contains("'missing'"))
+    );
+
+    // A controller file set by another INI file cannot be composed safely.
+    fs::write(mame_dir.join("mame.ini"), "ctrlr xarcade\n").expect("ini");
+    fs::create_dir_all(mame_dir.join("ini")).expect("dir");
+    fs::write(mame_dir.join("ini").join("sf2.ini"), "ctrlr hotrod\n").expect("ini");
+    assert!(
+        matches!(prepare(&controls), Err(LaunchError::Invalid(message)) if message.contains("sf2.ini"))
+    );
+    // Without mapped players, those INI files are MAME's business.
+    controls.assign_players(AssignmentLevel::Default, None, &[]);
+    assert_eq!(
+        prepare(&controls).expect("prepare").plan.command_line(),
+        ["pong"]
     );
 }

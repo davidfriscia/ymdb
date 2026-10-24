@@ -656,7 +656,8 @@ MAME's `cfg` files and has no button editor. Three things have similar names:
   profile and MAME installation, optionally starting from a MAME controller
   configuration file (`.cfg`, used as the baseline: `-ctrlr`);
 - a **controller** is the logical identity of one of your devices (name, kind, MAME
-  device class, optional device ID and provider).
+  device class and, for a joystick or gamepad, the device ID that MAME reports, its
+  joystick provider and a binding). Controllers can be assigned to players.
 
 The built-in **MAME configuration** controller profile, the initial default, passes
 nothing to MAME and keeps MAME's own configuration, exactly as before.
@@ -681,12 +682,46 @@ current machine, or **Input Assignments (general)** for every machine. MAME save
 changes when you exit it normally; stopping MAME from YMDB discards them. The next
 launch with the same profile finds them; other profiles are not affected.
 
-Current limits: controllers are not bound to physical devices yet (no device
-detection or `mapdevice`), so player assignments are stored preferences only. MAME's
-configuration files also hold DIP switches, slot, mixer and video settings, so these
-are per controller profile and MAME installation too: a new profile starts from
-MAME's defaults. Two sessions using the same profile get a warning, since the last
-one to exit keeps its general settings.
+#### Physical controllers and players
+
+**Settings → Controllers → Detect devices** asks MAME (only when you click it, without
+a window, for a few seconds) which joysticks are connected, with the joystick provider
+you choose (`winhybrid`, MAME's default on Windows, `dinput`, `xinput` or `sdljoy`).
+Each device shows its MAME device ID; **Register…** creates a controller from it.
+Nothing is registered automatically, and devices that MAME cannot tell apart (for
+example identical gamepads with `sdljoy`) cannot be registered.
+
+Each controller has a **binding**:
+
+- **Device binding**: the device ID identifies this device wherever it is connected
+  (for example a controller with its own USB serial number, such as a Logitech F310).
+  Choose it only if the ID stays the same when the controller is plugged into another
+  USB port: detect again to check.
+- **Port/order binding**: the ID follows the USB port or the order the provider lists
+  the devices in (identical gamepads without a serial number, XInput slots). _This
+  controller is identified by USB port order. Swapping ports may change player
+  assignments._
+
+Assign controllers to players in **Settings → Controllers** (default players),
+**Advanced → Controls** (per machine, software or software on a machine, saved and
+reset separately from the controller profile) or temporarily with **Players** in the
+launch bar (for the next launches from that page; **Save players as preference**
+saves them). Each launch then generates a controller file with MAME `mapdevice`
+entries (keeping the sections of the profile's baseline file, or of the `ctrlr` set
+in `mame.ini` for the MAME configuration profile), passes the controllers' joystick
+provider, and checks MAME's output: the launch status shows for each player whether
+the mapping was applied to the device, applied by port order only, or whether the
+device was not connected. The command line preview shows the mappings and the
+generated file before the launch. Without assigned players, launches are exactly as
+before.
+
+Current limits: identical controllers are told apart only by their USB port; only
+joysticks are mapped; all controllers of a launch must use the same provider; with
+the MAME configuration profile, a `ctrlr` set by an INI file other than `mame.ini`
+prevents mapped launches. MAME's configuration files also hold DIP switches, slot,
+mixer and video settings, so these are per controller profile and MAME installation
+too: a new profile starts from MAME's defaults. Two sessions using the same profile
+get a warning, since the last one to exit keeps its general settings.
 
 ## Testing and quality checks
 
@@ -797,8 +832,10 @@ Implemented:
 - Controller profiles: controllers, controller profiles with an isolated MAME
   configuration directory per installation and an optional imported controller file,
   assignments by machine and software with inheritance, a temporary Controls
-  selection at launch and a guided configuration in MAME's own menus (see
-  [Controller profiles](#controller-profiles)).
+  selection at launch and a guided configuration in MAME's own menus; on-demand
+  joystick detection with MAME, device or port order bindings, and player
+  assignments applied with generated `mapdevice` files and verified from MAME's
+  output (see [Controller profiles](#controller-profiles)).
 - Remote repositories: global remote connections (SFTP with private keys, passphrases
   and host key verification), connection test and remote browsing, and per-installation
   ROM Manager settings for five categories with local destinations added to the MAME
@@ -813,8 +850,8 @@ Implemented:
 - Continuous integration on Windows, macOS and Linux.
 
 Not implemented yet: everything else, including ROM auditing (verifying the content of
-archives), an HTTPS provider, input device detection and binding (`mapdevice`), and
-artwork download. See
+archives), an HTTPS provider, mapping of light guns, mice and keyboards, and artwork
+download. See
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.

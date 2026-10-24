@@ -4,10 +4,13 @@ import type { LoadState } from "../../shared/useLoader";
 import {
   updateControllerAssignment,
   type Assignment,
+  type AssignmentUpdate,
   type ControllersView,
   type ControlsResolution,
+  type Players,
 } from "./controllersApi";
-import { describePlayers, describeSource, profileName } from "./controlsMessages";
+import { PlayersEditor } from "./PlayersEditor";
+import { describePlayers, describeSource, profileName, trimPlayers } from "./controlsMessages";
 import type { PreferenceScope } from "./useControls";
 
 interface ControlsPreferencesProps {
@@ -18,6 +21,8 @@ interface ControlsPreferencesProps {
   software: boolean;
   /** The temporary controller profile of the next launch, if any. */
   temporary: string | null;
+  /** The temporary players of the next launch, if any. */
+  temporaryPlayers: Players | null;
   onChanged: () => void;
   onConfigure: () => void;
   /** Why Configure Controls in MAME is unavailable, if it is. */
@@ -36,6 +41,7 @@ export function ControlsPreferences({
   scopes,
   software,
   temporary,
+  temporaryPlayers,
   onChanged,
   onConfigure,
   configureUnavailable,
@@ -100,16 +106,17 @@ export function ControlsPreferences({
               "MAME's own configuration directories of this installation"
             )}
           </dd>
-          {resolved.playersSource !== null && (
-            <>
-              <dt>Player preferences</dt>
-              <dd>
+          <dt>Players</dt>
+          <dd>
+            {resolved.playersSource !== null ? (
+              <>
                 {describePlayers(view, resolved.players)} —{" "}
-                {describeSource(resolved.playersSource, software)}. Stored only: not applied to MAME
-                yet.
-              </dd>
-            </>
-          )}
+                {describeSource(resolved.playersSource, software)}
+              </>
+            ) : (
+              "No controller assigned: MAME numbers the joysticks in the order the provider reports them"
+            )}
+          </dd>
         </dl>
       )}
       {temporary !== null && (
@@ -118,18 +125,25 @@ export function ControlsPreferences({
           instead (see Controls in the launch bar).
         </p>
       )}
+      {temporaryPlayers !== null && (
+        <p className="message message--warning">
+          The next launch from this page uses the temporary players{" "}
+          {describePlayers(view, temporaryPlayers)} instead (see Players in the launch bar).
+        </p>
+      )}
 
       <h4 className="controls-panel__heading">Saved preferences</h4>
       <p className="message message--muted">
         A preference applies to every launch it matches. Precedence: default, machine, software,
-        software on a given machine, then the temporary selection of the launch bar.
+        software on a given machine, then the temporary selection of the launch bar. The controller
+        profile and the players are inherited separately: changing one keeps the other.
       </p>
       {scopes.map((scope) => {
         const assignment = stored(scope);
         return (
           <PreferenceRow
             // A saved change shows the new value.
-            key={`${scope.target.level}:${assignment?.profileId ?? ""}`}
+            key={`${scope.target.level}:${assignment?.profileId ?? ""}:${JSON.stringify(assignment?.players ?? null)}`}
             view={view}
             scope={scope}
             assignment={assignment}
@@ -160,23 +174,35 @@ interface PreferenceRowProps {
   onChanged: () => void;
 }
 
+type RowAction = "save" | "reset" | "savePlayers" | "resetPlayers";
+
 /**
- * The saved controller profile of one level. Only the profile field changes:
- * player preferences stored at the same level are kept.
+ * The saved controller profile and players of one level. Each is saved and
+ * reset on its own: the other field stored at the same level is kept.
  */
 function PreferenceRow({ view, scope, assignment, onChanged }: PreferenceRowProps) {
   const current = assignment?.profileId ?? null;
   const [draft, setDraft] = useState(current ?? "");
-  const [saving, setSaving] = useState<"save" | "reset" | null>(null);
+  const storedPlayers = assignment?.players;
+  const [players, setPlayers] = useState<Players>(storedPlayers ?? []);
+  const [saving, setSaving] = useState<RowAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const playersChanged =
+    JSON.stringify(trimPlayers(players)) !== JSON.stringify(storedPlayers ?? null);
 
-  async function run(action: "save" | "reset") {
+  async function run(action: RowAction) {
     setSaving(action);
     setError(null);
+    const update: AssignmentUpdate =
+      action === "save"
+        ? { profileId: { kind: "set", value: draft } }
+        : action === "reset"
+          ? { profileId: { kind: "inherit" } }
+          : action === "savePlayers"
+            ? { players: { kind: "set", value: trimPlayers(players) } }
+            : { players: { kind: "inherit" } };
     try {
-      await updateControllerAssignment(scope.target, {
-        profileId: action === "save" ? { kind: "set", value: draft } : { kind: "inherit" },
-      });
+      await updateControllerAssignment(scope.target, update);
       onChanged();
     } catch (failure) {
       setError(describeError(failure));
@@ -231,12 +257,41 @@ function PreferenceRow({ view, scope, assignment, onChanged }: PreferenceRowProp
           </button>
         )}
       </div>
-      {assignment?.players !== undefined && (
-        <p className="message message--muted">
-          Player preferences saved here (kept when the profile changes, not applied to MAME yet):{" "}
-          {describePlayers(view, assignment.players)}
-        </p>
-      )}
+      <p className="controls-panel__level-title">
+        Players:{" "}
+        {storedPlayers !== undefined ? (
+          <strong>{describePlayers(view, storedPlayers)}</strong>
+        ) : (
+          <span className="message--muted">not set, inherited</span>
+        )}
+      </p>
+      <PlayersEditor
+        view={view}
+        value={players}
+        onChange={setPlayers}
+        label={`Players for ${scope.label}`}
+        disabled={saving !== null}
+      />
+      <div className="launch-panel__row">
+        <button
+          type="button"
+          className="button button--secondary button--small"
+          disabled={saving !== null || !playersChanged}
+          onClick={() => void run("savePlayers")}
+        >
+          {saving === "savePlayers" ? "Saving…" : "Save players"}
+        </button>
+        {storedPlayers !== undefined && (
+          <button
+            type="button"
+            className="button button--secondary button--small"
+            disabled={saving !== null}
+            onClick={() => void run("resetPlayers")}
+          >
+            {saving === "resetPlayers" ? "Resetting…" : "Reset players to inherited"}
+          </button>
+        )}
+      </div>
       {error && (
         <p className="message message--error" role="alert">
           {error}

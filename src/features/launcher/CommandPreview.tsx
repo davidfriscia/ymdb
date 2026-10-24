@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { describeError } from "../../shared/ipc";
 import { useLoader } from "../../shared/useLoader";
-import { describeSource } from "../controllers/controlsMessages";
+import { BINDING_LABELS, describeSource } from "../controllers/controlsMessages";
 import {
   previewLaunch,
   type LaunchRequest,
@@ -15,7 +15,7 @@ const SOURCE_LABELS: Record<OptionSource, string> = {
   machine: "Machine",
   software: "Software",
   romManager: "ROM Manager",
-  controllers: "Controller profile",
+  controllers: "Controls",
 };
 
 interface CommandPreviewProps {
@@ -75,6 +75,54 @@ export function CommandPreview({ request, configVersion, software = false }: Com
           <div className="details-list__row">
             <dt>Controller file</dt>
             <dd className="code">{plan.controls.baseFile}</dd>
+          </div>
+        )}
+        {plan.controls.mappings.length > 0 && plan.controls.playersSource !== null && (
+          <div className="details-list__row">
+            <dt>Players</dt>
+            <dd>
+              <ul className="command-preview__players" aria-label="Player mappings">
+                {plan.controls.mappings.map((mapping) => (
+                  <li key={mapping.player}>
+                    Player {mapping.player}: <strong>{mapping.controllerName}</strong> —{" "}
+                    {BINDING_LABELS[mapping.binding]},{" "}
+                    <span className="code">{mapping.provider}</span>{" "}
+                    <span className="code wrap">{mapping.deviceId}</span>
+                  </li>
+                ))}
+              </ul>
+              <span className="message--muted">
+                {describeSource(plan.controls.playersSource, software)}
+              </span>
+            </dd>
+          </div>
+        )}
+        {plan.controls.joystickProvider !== null && (
+          <div className="details-list__row">
+            <dt>Joystick provider</dt>
+            <dd className="code">{plan.controls.joystickProvider}</dd>
+          </div>
+        )}
+        {plan.controls.controllerFile !== null && (
+          <div className="details-list__row">
+            <dt>Generated controller file</dt>
+            <dd>
+              <span className="code wrap">{plan.controls.controllerFile.path}</span>
+              <span className="message--muted">
+                {" "}
+                (written when MAME starts
+                {plan.controls.controllerFile.baseline !== null
+                  ? `, keeping the sections of ${plan.controls.controllerFile.baseline}`
+                  : ""}
+                )
+              </span>
+              <details>
+                <summary>Content</summary>
+                <pre className="code" aria-label="Generated controller file">
+                  {plan.controls.controllerFile.content}
+                </pre>
+              </details>
+            </dd>
           </div>
         )}
       </dl>

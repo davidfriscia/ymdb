@@ -70,6 +70,9 @@ pub enum CommandError {
     AlreadyRunning { session_id: u64 },
     /// MAME could not be started.
     LaunchFailed { message: String },
+    /// The detection of input devices failed (MAME could not run, did not
+    /// finish, or its output was not recognized); it found no devices.
+    DetectionFailed { message: String },
     /// The remote connection does not exist (for example it was removed).
     ConnectionNotFound { connection_id: String },
     /// The remote connection is used by remote sources and cannot be removed.

@@ -7,9 +7,11 @@
 //! configuration file a launch uses, and never writes MAME's `cfg` files.
 //!
 //! - A **controller** is the logical identity of a physical device (name,
-//!   kind, MAME device class, optional device id and provider). Controllers
-//!   produce no MAME option yet: binding them to devices (`mapdevice`) is a
-//!   later step, so player assignments are preferences only.
+//!   kind, MAME device class, and for a mapped joystick its MAME device id,
+//!   joystick provider and binding: `device` when the id follows the device,
+//!   `portOrder` when it follows the port or enumeration order).
+//!   Controllers assigned to players are mapped to the MAME joystick index of
+//!   their player with a generated controller file ([`ctrlr_file`]).
 //! - A **controller profile** is a reusable input configuration. The system
 //!   profile `mame` ("MAME configuration") passes nothing to MAME, which keeps
 //!   the behavior of YMDB without profiles. A user profile owns one MAME
@@ -26,8 +28,14 @@
 //! - [`store`]: `controllers.json` and the `base.cfg` files.
 //! - [`base_file`]: validation of imported controller configuration files.
 //! - [`resolve`]: the effective profile and controllers of a launch.
+//! - [`devices`]: joystick providers and what their device ids identify.
+//! - [`discovery`]: on-demand detection of the connected joysticks with MAME.
+//! - [`ctrlr_file`]: the generated controller file of player mappings.
 
 pub mod base_file;
+pub mod ctrlr_file;
+pub mod devices;
+pub mod discovery;
 pub mod model;
 pub mod resolve;
 pub mod store;
@@ -37,6 +45,7 @@ use std::path::{Path, PathBuf};
 
 const PROFILES_DIR: &str = "controller-profiles";
 const INSTALLATIONS_DIR: &str = "installations";
+const GENERATED_DIR: &str = "controller-files";
 /// Name of the baseline controller file, passed to MAME as `-ctrlr base`.
 pub const BASE_NAME: &str = "base";
 
@@ -45,13 +54,30 @@ pub const BASE_NAME: &str = "base";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControllerPaths {
     config_dir: PathBuf,
+    generated_dir: PathBuf,
 }
 
 impl ControllerPaths {
+    /// Generated controller files go to `<config_dir>/controller-files`
+    /// unless [`Self::with_data_dir`] chooses the local data directory.
     pub fn new(config_dir: &Path) -> Self {
         Self {
             config_dir: config_dir.to_path_buf(),
+            generated_dir: config_dir.join(GENERATED_DIR),
         }
+    }
+
+    /// Generated controller files are derived data: they belong in the
+    /// local (non-roaming) data directory.
+    pub fn with_data_dir(mut self, data_dir: &Path) -> Self {
+        self.generated_dir = data_dir.join(GENERATED_DIR);
+        self
+    }
+
+    /// Directory of the generated controller files (named by their
+    /// content); passed to MAME as `-ctrlrpath` when devices are mapped.
+    pub fn generated_dir(&self) -> &Path {
+        &self.generated_dir
     }
 
     /// Directory of the files of a profile shared by every installation;

@@ -3,9 +3,12 @@ import { describeError } from "../../shared/ipc";
 import {
   updateControllerAssignment,
   type ControllerProfile,
+  type ControllersView,
   type ControlsResolution,
+  type Players,
 } from "./controllersApi";
-import { describeSource } from "./controlsMessages";
+import { describePlayers, describeSource, trimPlayers } from "./controlsMessages";
+import { PlayersEditor } from "./PlayersEditor";
 import type { PreferenceScope } from "./useControls";
 
 interface ControlsSelectProps {
@@ -170,6 +173,133 @@ export function SaveControlsPreference({ profile, scopes, onSaved }: SaveControl
             </button>
           </div>
         </form>
+      )}
+    </div>
+  );
+}
+
+interface TemporaryPlayersProps {
+  view: ControllersView;
+  /** The saved players of the target, resolved by the backend. */
+  saved: Players;
+  /** The temporary players of the next launches; `null` for the saved ones. */
+  value: Players | null;
+  onChange: (players: Players | null) => void;
+  scopes: PreferenceScope[];
+  /** Called once the temporary players are saved as a preference. */
+  onSaved: (scope: PreferenceScope) => void;
+}
+
+/**
+ * The players of the launches from this page. A choice is temporary (Play,
+ * the preview, Download & Play and Configure Controls use it) and saved
+ * only by an explicit "Save as preference", which changes only the players
+ * of the chosen level.
+ */
+export function TemporaryPlayers({
+  view,
+  saved,
+  value,
+  onChange,
+  scopes,
+  onSaved,
+}: TemporaryPlayersProps) {
+  const [draft, setDraft] = useState<Players>(value ?? saved);
+  const [scopeIndex, setScopeIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const name = useId();
+  const scope = scopes[scopeIndex] ?? scopes[0];
+
+  async function save() {
+    if (!scope || value === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateControllerAssignment(scope.target, { players: { kind: "set", value } });
+      onSaved(scope);
+    } catch (failure) {
+      setError(describeError(failure));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="controls-save" role="group" aria-label="Temporary players">
+      <PlayersEditor
+        view={view}
+        value={draft}
+        onChange={setDraft}
+        label="Players of the next launches"
+      />
+      <div className="actions">
+        <button
+          type="button"
+          className="button button--secondary button--small"
+          onClick={() => {
+            onChange(trimPlayers(draft));
+          }}
+        >
+          Use for the next launches
+        </button>
+        {value !== null && (
+          <button
+            type="button"
+            className="button button--secondary button--small"
+            onClick={() => {
+              onChange(null);
+              setDraft(saved);
+            }}
+          >
+            Use the saved players
+          </button>
+        )}
+      </div>
+      {value !== null && (
+        <>
+          <p className="message message--muted">
+            Players: <strong>{describePlayers(view, value)}</strong> for the launches from this page
+            only; nothing is saved.
+          </p>
+          {scopes.length > 0 && (
+            <form
+              className="inline-form"
+              aria-label="Save players as preference"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void save();
+              }}
+            >
+              <fieldset className="choice-group">
+                <legend>Save these players for</legend>
+                {scopes.map((entry, index) => (
+                  <label key={entry.target.level} className="choice">
+                    <input
+                      type="radio"
+                      name={name}
+                      checked={index === scopeIndex}
+                      onChange={() => {
+                        setScopeIndex(index);
+                      }}
+                    />
+                    {entry.label}
+                  </label>
+                ))}
+              </fieldset>
+              {error && (
+                <p className="message message--error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="actions">
+                <button type="submit" className="button button--secondary" disabled={saving}>
+                  {saving ? "Saving…" : "Save players as preference"}
+                </button>
+              </div>
+            </form>
+          )}
+        </>
       )}
     </div>
   );

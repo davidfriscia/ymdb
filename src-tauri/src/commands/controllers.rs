@@ -6,8 +6,9 @@
 //! saved, so a failed save leaves everything as it was. An unreadable file is
 //! never replaced: every command reports it until it can be read.
 //!
-//! Controllers are logical identities: assigning them to players records a
-//! preference that MAME does not receive yet (no `mapdevice` binding).
+//! Controllers with a configured device are mapped to their players'
+//! joystick indexes at launch (`launcher::controls`); the devices are
+//! detected on demand with `detect_controller_devices`.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -18,6 +19,8 @@ use tauri_plugin_dialog::DialogExt;
 
 use super::installations::InstallationsState;
 use super::{CommandError, run_blocking};
+use crate::controllers::devices::JoystickProvider;
+use crate::controllers::discovery::{self, DeviceDetection};
 use crate::controllers::model::{
     Assignment, AssignmentLevel, AssignmentTarget, AssignmentUpdate, Assignments, Controller,
     ControllerInput, ControllerProfile, ControllersConfig, ControllersError, ProfileKind,
@@ -41,6 +44,25 @@ impl ControllersState {
             store,
             config: Mutex::new(config),
         }
+    }
+
+    /// Generated controller files go to the local data directory.
+    pub fn with_data_dir(mut self, data_dir: Option<&Path>) -> Self {
+        if let Some(data_dir) = data_dir {
+            self.store = self.store.map(|store| store.with_data_dir(data_dir));
+        }
+        self
+    }
+
+    /// The configuration for the frontend, with the problems of the
+    /// profiles' `base.cfg` files.
+    pub fn view(&self) -> Result<ControllersView, CommandError> {
+        let paths = self.store()?.paths().clone();
+        let mut view = self.read(controllers_view)?;
+        for profile in view.profiles.iter_mut().filter(|profile| profile.has_base) {
+            profile.base_error = base_problem(&paths, &profile.id);
+        }
+        Ok(view)
     }
 
     fn store(&self) -> Result<&ControllersStore, CommandError> {
@@ -236,6 +258,9 @@ pub struct ControllerProfileView {
     /// Whether launches with this profile use a configuration directory of
     /// YMDB (`false` for the `mame` profile).
     pub managed: bool,
+    /// Why the profile's `base.cfg` cannot be used (missing, or imported
+    /// before a check it fails); the file is kept as it is.
+    pub base_error: Option<String>,
 }
 
 impl From<&ControllerProfile> for ControllerProfileView {
@@ -247,8 +272,24 @@ impl From<&ControllerProfile> for ControllerProfileView {
             has_base: profile.has_base,
             base_file_name: profile.base_file_name.clone(),
             managed: profile.is_managed(),
+            base_error: None,
         }
     }
+}
+
+/// Why the `base.cfg` of a profile cannot be used, if it cannot.
+fn base_problem(paths: &ControllerPaths, profile_id: &str) -> Option<String> {
+    let file = paths.base_file(profile_id);
+    let content = match std::fs::read(&file) {
+        Ok(content) => content,
+        Err(error) => {
+            return Some(format!(
+                "the file cannot be read ({}): {error}",
+                file.display()
+            ));
+        }
+    };
+    base_file::validate(&content).err()
 }
 
 /// The whole controllers configuration, returned by every command that changes it.
@@ -258,6 +299,9 @@ pub struct ControllersView {
     pub controllers: Vec<Controller>,
     pub profiles: Vec<ControllerProfileView>,
     pub assignments: Assignments,
+    /// The joystick providers of this operating system, the one MAME's
+    /// `auto` selects first.
+    pub providers: Vec<JoystickProvider>,
 }
 
 pub fn controllers_view(config: &ControllersConfig) -> ControllersView {
@@ -265,6 +309,7 @@ pub fn controllers_view(config: &ControllersConfig) -> ControllersView {
         controllers: config.controllers.clone(),
         profiles: config.profiles.iter().map(Into::into).collect(),
         assignments: config.assignments.clone(),
+        providers: JoystickProvider::available(),
     }
 }
 
@@ -339,7 +384,7 @@ pub fn resolve_controls_with(
 
 #[tauri::command]
 pub async fn get_controllers(app: AppHandle) -> Result<ControllersView, CommandError> {
-    run_blocking(move || app.state::<ControllersState>().read(controllers_view)).await?
+    run_blocking(move || app.state::<ControllersState>().view()).await?
 }
 
 #[tauri::command]
@@ -350,7 +395,7 @@ pub async fn create_controller(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.create_controller(controller)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -364,7 +409,7 @@ pub async fn update_controller(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.update_controller(&controller_id, controller)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -378,7 +423,7 @@ pub async fn delete_controller(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.delete_controller(&controller_id)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -403,7 +448,7 @@ pub async fn create_controller_profile(
         };
         let state = app.state::<ControllersState>();
         state.create_profile(&name, base.as_ref())?;
-        state.read(controllers_view).map(Some)
+        state.view().map(Some)
     })
     .await?
 }
@@ -417,7 +462,7 @@ pub async fn rename_controller_profile(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.rename_profile(&profile_id, &name)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -433,7 +478,7 @@ pub async fn delete_controller_profile(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.delete_profile(&profile_id)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -462,7 +507,7 @@ pub async fn import_controller_profile_base(
             return Ok(None);
         };
         state.import_base(&profile_id, &file)?;
-        state.read(controllers_view).map(Some)
+        state.view().map(Some)
     })
     .await?
 }
@@ -478,7 +523,7 @@ pub async fn remove_controller_profile_base(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.remove_base(&profile_id)?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -495,7 +540,7 @@ pub async fn set_controller_assignment(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.set_assignment(&target, assignment)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -513,7 +558,7 @@ pub async fn update_controller_assignment(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.update_assignment(&target, update)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -528,7 +573,7 @@ pub async fn reset_controller_assignment(
     run_blocking(move || {
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.reset_assignment(&target)?))?;
-        state.read(controllers_view)
+        state.view()
     })
     .await?
 }
@@ -557,6 +602,61 @@ pub async fn resolve_controls(
                 software.as_ref(),
             )
         })?
+    })
+    .await?
+}
+
+/// Detects the joysticks connected now, with the MAME executable of the
+/// installation and `provider` (the provider `auto` selects by default).
+/// MAME runs in a temporary directory without reading its INI files; nothing
+/// is registered or saved. A failed detection is an error, never an empty list.
+#[tauri::command]
+pub async fn detect_controller_devices(
+    installation_id: String,
+    provider: Option<JoystickProvider>,
+    app: AppHandle,
+) -> Result<DeviceDetection, CommandError> {
+    run_blocking(move || {
+        let resolved = app
+            .state::<InstallationsState>()
+            .resolve(&installation_id)?;
+        let provider = match provider {
+            Some(provider) => provider,
+            None => *JoystickProvider::available().first().ok_or_else(|| {
+                CommandError::InvalidRequest {
+                    message: "no joystick provider is available on this operating system"
+                        .to_owned(),
+                }
+            })?,
+        };
+        if !provider.is_available() {
+            return Err(CommandError::InvalidRequest {
+                message: format!(
+                    "the joystick provider '{}' is not available on this operating system",
+                    provider.name()
+                ),
+            });
+        }
+        let output = discovery::run(
+            &resolved.installation.executable_path,
+            provider,
+            &std::env::temp_dir(),
+        )
+        .map_err(|error| CommandError::DetectionFailed {
+            message: error.to_string(),
+        })?;
+        let state = app.state::<ControllersState>();
+        let (devices, warnings) = state
+            .read(|config| discovery::interpret(&output, provider, config))?
+            .map_err(|error| CommandError::DetectionFailed {
+                message: error.to_string(),
+            })?;
+        Ok(DeviceDetection {
+            installation_id: resolved.installation.id.clone(),
+            provider,
+            devices,
+            warnings,
+        })
     })
     .await?
 }

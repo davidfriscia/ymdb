@@ -81,6 +81,7 @@ export function session(
     title: `${machine} description`,
     commandLine: [machine],
     controls: planControls(),
+    mapping: null,
     warnings: [],
     startedAt: Date.UTC(2026, 9, 10, 20, 30),
     state,
@@ -97,6 +98,9 @@ export function planControls(overrides: Partial<PlanControls> = {}): PlanControl
     playersSource: null,
     cfgDirectory: null,
     baseFile: null,
+    mappings: [],
+    joystickProvider: null,
+    controllerFile: null,
     ...overrides,
   };
 }

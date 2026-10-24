@@ -15,6 +15,14 @@ pub const EXECUTABLE_NAMES: &[&str] = &["mame.exe", "mame64.exe"];
 #[cfg(not(windows))]
 pub const EXECUTABLE_NAMES: &[&str] = &["mame"];
 
+/// The MAME joystick providers (`-joystickprovider`) whose device ids YMDB
+/// maps, the one `auto` selects first. Windows builds of MAME 0.289 offer
+/// `winhybrid`, `dinput`, `xinput` and `sdljoy`; SDL builds offer `sdljoy`.
+#[cfg(windows)]
+pub const JOYSTICK_PROVIDERS: &[&str] = &["winhybrid", "dinput", "xinput", "sdljoy"];
+#[cfg(not(windows))]
+pub const JOYSTICK_PROVIDERS: &[&str] = &["sdljoy"];
+
 /// Filter for the native file picker: a display name and file extensions.
 /// `None` when executables have no conventional extension.
 #[cfg(windows)]

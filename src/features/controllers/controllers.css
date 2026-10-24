@@ -114,3 +114,50 @@
   background: var(--color-surface-elevated);
   font-family: inherit;
 }
+
+/* Device detection and player assignments */
+
+.device-detection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.players-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.players-editor__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.players-editor__label {
+  min-width: 72px;
+  color: var(--color-text-secondary);
+}
+
+.players-editor__device {
+  overflow-wrap: anywhere;
+}
+
+/* Launch status: player mappings verified from MAME's output */
+
+.session-mapping__list {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.command-preview__players {
+  margin: 0;
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}

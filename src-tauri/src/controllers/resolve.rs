@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use super::model::{
     Assignment, AssignmentLevel, AssignmentTarget, ControllersConfig, ControllersError,
-    MAME_PROFILE, machine_software_key, software_key,
+    MAME_PROFILE, Players, machine_software_key, software_key,
 };
 
 /// Where an effective value comes from.
@@ -46,8 +46,9 @@ impl From<AssignmentLevel> for ControlsSource {
 pub struct ResolvedControls {
     pub profile_id: String,
     pub profile_source: ControlsSource,
-    /// Controller ids by player; not bound to physical devices yet.
-    pub players: Vec<String>,
+    /// Controller ids by player, Player 1 first; `None` for a player
+    /// without a controller.
+    pub players: Players,
     /// `None` when no level assigns controllers.
     pub players_source: Option<ControlsSource>,
 }
@@ -106,6 +107,8 @@ pub fn resolve(
     software: Option<(&str, &str)>,
     request: Option<&Assignment>,
 ) -> Result<ResolvedControls, ControllersError> {
+    let request = request.cloned().map(Assignment::normalized);
+    let request = request.as_ref();
     if let Some(request) = request {
         config
             .validate_assignment(request)

@@ -6,18 +6,26 @@ import {
   updateController,
   type AssignmentTarget,
   type Controller,
+  type ControllerBinding,
   type ControllerInput,
   type ControllerKind,
   type ControllersView,
+  type DetectedDevice,
   type DeviceClass,
+  type JoystickProvider,
 } from "./controllersApi";
 import {
+  BINDING_DESCRIPTIONS,
+  BINDING_LABELS,
   controllerReferences,
   DEVICE_CLASS_LABELS,
   inUseReferences,
   KIND_LABELS,
+  mappingProblem,
+  PORT_ORDER_WARNING,
   validateName,
 } from "./controlsMessages";
+import { DeviceDetectionPanel } from "./DeviceDetection";
 import { References } from "./References";
 
 interface BlockProps {
@@ -25,29 +33,44 @@ interface BlockProps {
   onChanged: () => void;
 }
 
-/** Settings → Controllers: the logical controllers. */
+/** Settings → Controllers: device detection and the logical controllers. */
 export function ControllersBlock({ view, onChanged }: BlockProps) {
   const [adding, setAdding] = useState(false);
+  // The detected device being registered, if any.
+  const [registering, setRegistering] = useState<DetectedDevice | null>(null);
+  const formOpen = adding || registering !== null;
   return (
     <>
       <h3 className="panel__subtitle">Controllers</h3>
       <p className="message message--muted">
-        A controller is the logical identity of one of your devices (name, kind and, optionally, the
-        device ID shown by MAME&apos;s Input Devices menu). It is not a controller profile.
+        A controller is the logical identity of one of your devices. A joystick or gamepad with a
+        device ID, a provider and a binding can be assigned to players: each launch then maps it to
+        its player&apos;s joystick in MAME. It is not a controller profile.
       </p>
-      <p className="message message--warning" role="note">
-        Controller registration is available, but physical device assignments are not yet applied to
-        MAME. Device mapping will be supported in a future update.
-      </p>
-      {adding ? (
+      <h4 className="controllers-settings__heading">Detect devices</h4>
+      <DeviceDetectionPanel
+        view={view}
+        onRegister={(device) => {
+          setAdding(false);
+          setRegistering(device);
+        }}
+      />
+      <h4 className="controllers-settings__heading">Registered controllers</h4>
+      {formOpen ? (
         <ControllerForm
+          // A new detected device starts a new form.
+          key={registering ? `${registering.provider}:${registering.deviceId}` : "new"}
           controller={null}
+          providers={view.providers}
+          initial={registering ? draftFromDevice(registering) : undefined}
           onSaved={() => {
             setAdding(false);
+            setRegistering(null);
             onChanged();
           }}
           onCancel={() => {
             setAdding(false);
+            setRegistering(null);
           }}
         />
       ) : (
@@ -98,6 +121,7 @@ function ControllerItem({ view, controller, onChanged }: ControllerItemProps) {
   const [blockers, setBlockers] = useState<AssignmentTarget[] | null>(null);
   const titleId = useId();
   const references = controllerReferences(view, controller.id);
+  const problem = mappingProblem(controller);
 
   async function remove() {
     setRemoving(true);
@@ -120,6 +144,7 @@ function ControllerItem({ view, controller, onChanged }: ControllerItemProps) {
       <li className="controllers-list__item">
         <ControllerForm
           controller={controller}
+          providers={view.providers}
           onSaved={() => {
             setEditing(false);
             onChanged();
@@ -156,12 +181,26 @@ function ControllerItem({ view, controller, onChanged }: ControllerItemProps) {
             <span className="message--muted">Not set</span>
           )}
         </dd>
+        <dt>Binding</dt>
+        <dd>
+          {controller.binding ? (
+            BINDING_LABELS[controller.binding]
+          ) : (
+            <span className="message--muted">Not set</span>
+          )}
+        </dd>
       </dl>
+      {controller.binding === "portOrder" && (
+        <p className="message message--warning">{PORT_ORDER_WARNING}</p>
+      )}
+      {problem !== null && (
+        <p className="message message--muted">
+          {problem} Until then it cannot be mapped to a player.
+        </p>
+      )}
       {references.length > 0 && (
         <>
-          <p className="message message--muted">
-            Stored as a player preference (not applied to MAME yet) in:
-          </p>
+          <p className="message message--muted">Assigned to players in:</p>
           <References label={`Assignments using ${controller.name}`} targets={references} />
         </>
       )}
@@ -201,8 +240,8 @@ function ControllerItem({ view, controller, onChanged }: ControllerItemProps) {
         (references.length > 0 ? (
           <div className="confirm-box" role="group" aria-label="Remove controller">
             <p className="message message--warning">
-              {controller.name} cannot be removed while saved assignments store it as a player
-              preference. Remove it from them first: YMDB does not change them for you.
+              {controller.name} cannot be removed while saved assignments assign it to a player.
+              Remove it from them first: YMDB does not change them for you.
             </p>
             <References label={`Assignments using ${controller.name}`} targets={references} />
             <div className="actions">
@@ -253,9 +292,23 @@ interface Draft {
   deviceClass: DeviceClass;
   deviceId: string;
   provider: string;
+  /** `""` when not set. */
+  binding: ControllerBinding | "";
 }
 
-type Field = "name" | "deviceId" | "provider";
+type Field = "name" | "deviceId" | "provider" | "binding";
+
+/** The registration form of a detected device. */
+function draftFromDevice(device: DetectedDevice): Draft {
+  return {
+    name: device.name.slice(0, 60),
+    kind: "gamepad",
+    deviceClass: device.deviceClass,
+    deviceId: device.deviceId,
+    provider: device.provider,
+    binding: device.suggestedBinding ?? "",
+  };
+}
 
 /** Field checks mirroring the backend (`controllers/model.rs`), which validates again. */
 function validateDraft(draft: Draft): Partial<Record<Field, string>> {
@@ -269,29 +322,57 @@ function validateDraft(draft: Draft): Partial<Record<Field, string>> {
     errors.deviceId = "Remove the control characters.";
   const provider = draft.provider.trim();
   if (provider !== "" && !/^[a-z0-9_]{1,32}$/.test(provider))
-    errors.provider = "Use the MAME provider name, for example dinput or sdlgame.";
+    errors.provider = "Use the MAME provider name, for example winhybrid or dinput.";
+  if (draft.binding !== "") {
+    if (draft.deviceClass !== "joystick")
+      errors.binding = "Only joysticks and gamepads can be mapped to players.";
+    else if (deviceId === "") errors.deviceId = "Enter the device ID reported by MAME.";
+    else if (provider === "") errors.provider = "Choose the provider the device ID comes from.";
+    else if (draft.binding === "device" && /^XInput Player \d+$/.test(deviceId))
+      errors.binding =
+        "An XInput slot follows the order the controllers were connected in: use the port/order binding.";
+  }
   return errors;
 }
 
 interface ControllerFormProps {
   /** `null` to add a controller. */
   controller: Controller | null;
+  /** The joystick providers of this operating system. */
+  providers: JoystickProvider[];
+  /** The values of a new controller, for example from a detected device. */
+  initial?: Draft;
   onSaved: () => void;
   onCancel: () => void;
 }
 
-function ControllerForm({ controller, onSaved, onCancel }: ControllerFormProps) {
-  const [draft, setDraft] = useState<Draft>({
-    name: controller?.name ?? "",
-    kind: controller?.kind ?? "gamepad",
-    deviceClass: controller?.deviceClass ?? "joystick",
-    deviceId: controller?.deviceId ?? "",
-    provider: controller?.provider ?? "",
-  });
+function ControllerForm({
+  controller,
+  providers,
+  initial,
+  onSaved,
+  onCancel,
+}: ControllerFormProps) {
+  const [draft, setDraft] = useState<Draft>(
+    () =>
+      initial ?? {
+        name: controller?.name ?? "",
+        kind: controller?.kind ?? "gamepad",
+        deviceClass: controller?.deviceClass ?? "joystick",
+        deviceId: controller?.deviceId ?? "",
+        provider: controller?.provider ?? "",
+        binding: controller?.binding ?? "",
+      },
+  );
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const id = useId();
+  // A stored provider of another system stays selectable.
+  const providerChoices: string[] =
+    draft.provider !== "" && !providers.includes(draft.provider as JoystickProvider)
+      ? [...providers, draft.provider]
+      : providers;
 
   function update<K extends keyof Draft>(field: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -308,6 +389,7 @@ function ControllerForm({ controller, onSaved, onCancel }: ControllerFormProps) 
       deviceClass: draft.deviceClass,
       deviceId: draft.deviceId.trim() || null,
       provider: draft.provider.trim() || null,
+      binding: draft.binding === "" ? null : draft.binding,
     };
     setSaving(true);
     setSaveError(null);
@@ -321,41 +403,42 @@ function ControllerForm({ controller, onSaved, onCancel }: ControllerFormProps) 
     }
   }
 
-  const text = (field: Field, label: string, hint: string) => (
-    <div className="field">
-      <label className="field__label" htmlFor={`${id}-${field}`}>
-        {label}
-      </label>
-      <input
-        id={`${id}-${field}`}
-        className="input"
-        value={draft[field]}
-        aria-invalid={errors[field] !== undefined}
-        aria-describedby={errors[field] ? `${id}-${field}-error` : undefined}
-        onChange={(event) => {
-          update(field, event.target.value);
-        }}
-      />
-      <span className="message message--muted">{hint}</span>
-      {errors[field] && (
-        <span id={`${id}-${field}-error`} className="message message--error">
-          {errors[field]}
-        </span>
-      )}
-    </div>
-  );
+  const fieldError = (field: Field) =>
+    errors[field] && (
+      <span id={`${id}-${field}-error`} className="message message--error">
+        {errors[field]}
+      </span>
+    );
 
   return (
     <form
       className="inline-form"
-      aria-label={controller ? `Edit ${controller.name}` : "New controller"}
+      aria-label={
+        controller ? `Edit ${controller.name}` : initial ? "Register device" : "New controller"
+      }
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
     >
-      {text("name", "Name", "For example Arcade Stick Player 1.")}
+      <div className="field">
+        <label className="field__label" htmlFor={`${id}-name`}>
+          Name
+        </label>
+        <input
+          id={`${id}-name`}
+          className="input"
+          value={draft.name}
+          aria-invalid={errors.name !== undefined}
+          aria-describedby={errors.name ? `${id}-name-error` : undefined}
+          onChange={(event) => {
+            update("name", event.target.value);
+          }}
+        />
+        <span className="message message--muted">For example Arcade Stick Player 1.</span>
+        {fieldError("name")}
+      </div>
       <div className="field">
         <label className="field__label" htmlFor={`${id}-kind`}>
           Kind
@@ -395,15 +478,81 @@ function ControllerForm({ controller, onSaved, onCancel }: ControllerFormProps) 
         </select>
         <span className="message message--muted">How MAME numbers the device&apos;s inputs.</span>
       </div>
-      {text(
-        "deviceId",
-        "Device ID (optional)",
-        "As copied from MAME: Input Settings → Input Devices → Copy Device ID.",
+      <div className="field">
+        <label className="field__label" htmlFor={`${id}-provider`}>
+          Provider
+        </label>
+        <select
+          id={`${id}-provider`}
+          className="input"
+          value={draft.provider}
+          aria-invalid={errors.provider !== undefined}
+          aria-describedby={errors.provider ? `${id}-provider-error` : undefined}
+          onChange={(event) => {
+            update("provider", event.target.value);
+          }}
+        >
+          <option value="">Not set</option>
+          {providerChoices.map((provider) => (
+            <option key={provider} value={provider}>
+              {provider}
+            </option>
+          ))}
+        </select>
+        <span className="message message--muted">
+          The MAME joystick provider the device ID was detected with: device IDs differ between
+          providers.
+        </span>
+        {fieldError("provider")}
+      </div>
+      <div className="field">
+        <label className="field__label" htmlFor={`${id}-deviceId`}>
+          Device ID
+        </label>
+        <input
+          id={`${id}-deviceId`}
+          className="input"
+          value={draft.deviceId}
+          aria-invalid={errors.deviceId !== undefined}
+          aria-describedby={errors.deviceId ? `${id}-deviceId-error` : undefined}
+          onChange={(event) => {
+            update("deviceId", event.target.value);
+          }}
+        />
+        <span className="message message--muted">
+          The complete ID reported by MAME, best obtained with Detect devices.
+        </span>
+        {fieldError("deviceId")}
+      </div>
+      <fieldset
+        className="choice-group"
+        aria-describedby={errors.binding ? `${id}-binding-error` : undefined}
+      >
+        <legend>Binding</legend>
+        {(["", "device", "portOrder"] as const).map((binding) => (
+          <label key={binding} className="choice">
+            <input
+              type="radio"
+              name={`${id}-binding`}
+              checked={draft.binding === binding}
+              onChange={() => {
+                update("binding", binding);
+              }}
+            />
+            {binding === "" ? "Not set: not mapped to players" : BINDING_DESCRIPTIONS[binding]}
+          </label>
+        ))}
+        {fieldError("binding")}
+      </fieldset>
+      {draft.binding === "portOrder" && (
+        <p className="message message--warning">{PORT_ORDER_WARNING}</p>
       )}
-      {text(
-        "provider",
-        "Provider (optional)",
-        "The MAME input provider the device ID was obtained with, for example dinput.",
+      {draft.binding === "device" && (
+        <p className="message message--muted">
+          Choose the device binding only if the device ID stays the same when the controller is
+          connected to another USB port (detect again to check). Identical controllers without their
+          own serial number are told apart only by their port.
+        </p>
       )}
       {saveError && (
         <p className="message message--error" role="alert">

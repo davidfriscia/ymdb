@@ -6,13 +6,16 @@ import {
   updateControllerAssignment,
   type AssignmentTarget,
   type ControllersView,
+  type Players,
 } from "./controllersApi";
+import { PlayersEditor } from "./PlayersEditor";
 import {
   assignmentEntries,
   describePlayers,
   describeTarget,
   LEVEL_LABELS,
   profileName,
+  trimPlayers,
 } from "./controlsMessages";
 
 interface BlockProps {
@@ -86,12 +89,24 @@ export function AssignmentsBlock({ view, onChanged }: BlockProps) {
           detail pages. Launch profiles are independent of controller profiles.
         </span>
       </div>
-      {defaults.players !== undefined && (
-        <p className="message message--muted">
-          Default player preferences (stored, not applied to MAME yet):{" "}
-          {describePlayers(view, defaults.players)}
-        </p>
-      )}
+      <DefaultPlayers
+        // A saved change starts from the new value.
+        key={JSON.stringify(defaults.players ?? null)}
+        view={view}
+        stored={defaults.players}
+        busy={saving !== null}
+        onSave={(players) =>
+          void run("default-players", () =>
+            updateControllerAssignment(
+              { level: "default" },
+              {
+                players:
+                  players === undefined ? { kind: "inherit" } : { kind: "set", value: players },
+              },
+            ),
+          )
+        }
+      />
       {saving === "default" && (
         <p className="message message--muted" role="status">
           Saving…
@@ -128,7 +143,7 @@ export function AssignmentsBlock({ view, onChanged }: BlockProps) {
                       ? `Controller profile: ${profileName(view, assignment.profileId)}`
                       : "Controller profile inherited"}
                     {assignment.players !== undefined &&
-                      ` · Player preferences (not applied): ${describePlayers(view, assignment.players)}`}
+                      ` · Players: ${describePlayers(view, assignment.players)}`}
                   </span>{" "}
                   <button
                     type="button"
@@ -162,6 +177,65 @@ export function AssignmentsBlock({ view, onChanged }: BlockProps) {
         </p>
       )}
     </>
+  );
+}
+
+interface DefaultPlayersProps {
+  view: ControllersView;
+  /** `undefined` when the default assigns no player list. */
+  stored: Players | undefined;
+  busy: boolean;
+  /** `undefined` removes the default players. */
+  onSave: (players: Players | undefined) => void;
+}
+
+/**
+ * The default players of every launch. Saving changes only the players:
+ * the default controller profile is kept.
+ */
+function DefaultPlayers({ view, stored, busy, onSave }: DefaultPlayersProps) {
+  const [draft, setDraft] = useState<Players>(stored ?? []);
+  const changed = JSON.stringify(trimPlayers(draft)) !== JSON.stringify(stored ?? null);
+  return (
+    <div className="field">
+      <PlayersEditor
+        view={view}
+        value={draft}
+        onChange={setDraft}
+        label="Default players"
+        disabled={busy}
+      />
+      <span className="message message--muted">
+        {stored === undefined
+          ? "No default players: MAME numbers the joysticks in the order the provider reports them."
+          : `Saved: ${describePlayers(view, stored)}.`}{" "}
+        Machines and software can assign their own players from their detail pages.
+      </span>
+      <div className="actions">
+        <button
+          type="button"
+          className="button button--secondary button--small"
+          disabled={busy || !changed}
+          onClick={() => {
+            onSave(trimPlayers(draft));
+          }}
+        >
+          Save default players
+        </button>
+        {stored !== undefined && (
+          <button
+            type="button"
+            className="button button--secondary button--small"
+            disabled={busy}
+            onClick={() => {
+              onSave(undefined);
+            }}
+          >
+            Remove default players
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

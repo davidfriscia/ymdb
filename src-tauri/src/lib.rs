@@ -70,7 +70,9 @@ pub fn run() {
             // Imported support files can be large: local data, not roaming.
             app.manage(SupportFilesState::new(data_dir.as_deref()));
             app.manage(SavedFiltersState::new(config_dir.as_deref()));
-            app.manage(ControllersState::new(config_dir.as_deref()));
+            app.manage(
+                ControllersState::new(config_dir.as_deref()).with_data_dir(data_dir.as_deref()),
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -149,6 +151,7 @@ pub fn run() {
             commands::controllers::update_controller_assignment,
             commands::controllers::reset_controller_assignment,
             commands::controllers::resolve_controls,
+            commands::controllers::detect_controller_devices,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

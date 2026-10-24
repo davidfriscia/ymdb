@@ -1,13 +1,18 @@
 import { CommandFailedError } from "../../shared/ipc";
+import type { MappingStatus } from "../launcher/launcherApi";
 import type {
   Assignment,
   AssignmentLevel,
   AssignmentTarget,
   Assignments,
+  Controller,
+  ControllerBinding,
   ControllerKind,
   ControllersView,
   ControlsSource,
+  DetectedDevice,
   DeviceClass,
+  Players,
 } from "./controllersApi";
 
 export const KIND_LABELS: Record<ControllerKind, string> = {
@@ -111,16 +116,70 @@ export function controllerReferences(
     .map(({ target }) => target);
 }
 
-/** Player preferences in words, with the names of the controllers. */
-export function describePlayers(view: ControllersView, players: string[]): string {
-  if (players.length === 0) return "No controller";
-  return players
-    .map((id, index) => {
-      const name = view.controllers.find((controller) => controller.id === id)?.name ?? id;
-      return `Player ${String(index + 1)}: ${name}`;
-    })
-    .join(", ");
+/** Player assignments in words, with the names of the controllers. */
+export function describePlayers(view: ControllersView, players: Players): string {
+  const assigned = players.flatMap((id, index) => {
+    if (id === null) return [];
+    const name = view.controllers.find((controller) => controller.id === id)?.name ?? id;
+    return [`Player ${String(index + 1)}: ${name}`];
+  });
+  return assigned.length === 0 ? "No controller" : assigned.join(", ");
 }
+
+export const BINDING_LABELS: Record<ControllerBinding, string> = {
+  device: "Device binding",
+  portOrder: "Port/order binding",
+};
+
+export const BINDING_DESCRIPTIONS: Record<ControllerBinding, string> = {
+  device:
+    "Device binding: the device ID identifies this device wherever it is connected (for example a controller with its own USB serial number).",
+  portOrder:
+    "Port/order binding: the device ID follows the USB port or the order the provider lists the devices in. It names whatever device is there, not a specific one.",
+};
+
+/** Shown for every controller identified by port or enumeration order. */
+export const PORT_ORDER_WARNING =
+  "This controller is identified by USB port order. Swapping ports may change player assignments.";
+
+/** MAME allows up to ten players. */
+export const MAX_PLAYERS = 10;
+
+/** Drops the players without a controller at the end, like the backend. */
+export function trimPlayers(players: Players): Players {
+  const next = [...players];
+  while (next.length > 0 && next[next.length - 1] === null) next.pop();
+  return next;
+}
+
+/** The controllers registered with the provider and device id of a detected device (exact id, like MAME). */
+export function registeredFor(view: ControllersView, device: DetectedDevice): Controller[] {
+  const id = device.deviceId.toLowerCase();
+  return view.controllers.filter(
+    (controller) =>
+      controller.provider === device.provider && controller.deviceId?.toLowerCase() === id,
+  );
+}
+
+/**
+ * Why a controller cannot be mapped to a player, mirroring
+ * `Controller::device_binding` (the backend checks again at launch).
+ */
+export function mappingProblem(controller: Controller): string | null {
+  if (controller.deviceClass !== "joystick") return "Only joysticks and gamepads can be mapped.";
+  if (!controller.deviceId || !controller.provider || !controller.binding)
+    return "Device not configured: detect the devices, then set its provider, device ID and binding.";
+  return null;
+}
+
+export const MAPPING_STATUS_LABELS: Record<MappingStatus, string> = {
+  pending: "Waiting for MAME",
+  verified: "Applied to this device",
+  verifiedPortOrder: "Applied (by port order: the physical device is not guaranteed)",
+  missing: "Device not connected",
+  notApplied: "Not applied",
+  unknown: "Not verifiable",
+};
 
 export function profileName(view: ControllersView | null, profileId: string): string {
   return view?.profiles.find((profile) => profile.id === profileId)?.name ?? profileId;

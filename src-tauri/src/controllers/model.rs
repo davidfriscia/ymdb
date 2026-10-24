@@ -5,6 +5,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::devices::{self, JoystickProvider};
 use crate::catalog::is_short_name;
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -38,7 +39,7 @@ pub enum ControllerKind {
 }
 
 /// The MAME device class a controller belongs to (`JOYCODE`, `GUNCODE`,
-/// `MOUSECODE`, `KEYCODE`), which a future `mapdevice` binding needs.
+/// `MOUSECODE`, `KEYCODE`). Only joysticks are mapped to players.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceClass {
@@ -48,8 +49,21 @@ pub enum DeviceClass {
     Keyboard,
 }
 
-/// The logical identity of a physical device. It is not bound to a device
-/// yet: `device_id` and `provider` are informative until `mapdevice` support.
+/// What a controller's device id identifies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ControllerBinding {
+    /// The id identifies one specific device wherever it is connected (for
+    /// example a device with its own USB serial number). Asserted by the user.
+    Device,
+    /// The id follows the port or the enumeration order of the provider: it
+    /// names whatever device the provider reports there, not a specific one.
+    PortOrder,
+}
+
+/// The logical identity of a physical device. With a device id, a provider
+/// and a binding, the controller can be assigned to players: launches then
+/// map it to their MAME joystick index (`mapdevice`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Controller {
@@ -58,12 +72,50 @@ pub struct Controller {
     pub name: String,
     pub kind: ControllerKind,
     pub device_class: DeviceClass,
-    /// MAME device id (or a part of it), as shown by MAME's Input Devices menu.
+    /// The complete MAME device id reported for the device by `provider`
+    /// (what `mapdevice` matches).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
-    /// MAME input provider the device id was obtained with (for example `dinput`).
+    /// MAME joystick provider the device id was obtained with (for example
+    /// `winhybrid`); device ids differ between providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// `None` for controllers registered before device mapping: they are not
+    /// mapped until the user completes their device configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ControllerBinding>,
+}
+
+/// The device a controller is mapped to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceBinding<'a> {
+    pub provider: &'a str,
+    pub device_id: &'a str,
+    pub binding: ControllerBinding,
+}
+
+impl Controller {
+    /// The device of a controller that can be mapped to a player; the error
+    /// says what is missing.
+    pub fn device_binding(&self) -> Result<DeviceBinding<'_>, String> {
+        if self.device_class != DeviceClass::Joystick {
+            return Err(format!(
+                "'{}' is not a joystick controller: only joysticks and gamepads can be mapped to players",
+                self.name
+            ));
+        }
+        match (&self.provider, &self.device_id, self.binding) {
+            (Some(provider), Some(device_id), Some(binding)) => Ok(DeviceBinding {
+                provider,
+                device_id,
+                binding,
+            }),
+            _ => Err(format!(
+                "the device of '{}' is not configured: detect the devices, then set its provider, device id and binding",
+                self.name
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +220,10 @@ pub fn system_name(id: &str) -> Option<&'static str> {
         .map(|(_, name)| *name)
 }
 
+/// Controller ids by player, Player 1 first; `None` leaves a player without
+/// a controller.
+pub type Players = Vec<Option<String>>;
+
 /// Controller preferences at one level. Each field is inherited separately
 /// from the weaker levels when it is `None`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,12 +234,23 @@ pub struct Assignment {
     /// Controller ids by player (Player 1 first). `Some(vec![])` explicitly
     /// assigns no controller.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub players: Option<Vec<String>>,
+    pub players: Option<Players>,
 }
 
 impl Assignment {
     pub fn is_empty(&self) -> bool {
         self.profile_id.is_none() && self.players.is_none()
+    }
+
+    /// Drops the players without a controller at the end, so that equal
+    /// assignments are stored identically.
+    pub fn normalized(mut self) -> Self {
+        if let Some(players) = &mut self.players {
+            while players.last().is_some_and(Option::is_none) {
+                players.pop();
+            }
+        }
+        self
     }
 }
 
@@ -223,7 +290,7 @@ pub struct AssignmentUpdate {
     #[serde(default)]
     pub profile_id: FieldUpdate<String>,
     #[serde(default)]
-    pub players: FieldUpdate<Vec<String>>,
+    pub players: FieldUpdate<Players>,
 }
 
 /// The levels an assignment can be stored at, from the weakest.
@@ -364,6 +431,8 @@ pub struct ControllerInput {
     pub device_id: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
+    #[serde(default)]
+    pub binding: Option<ControllerBinding>,
 }
 
 /// Everything stored in `controllers.json`.
@@ -433,6 +502,7 @@ impl ControllersConfig {
                 ));
             }
         }
+        self.validate_devices()?;
         if self.profiles.len() > MAX_PROFILES {
             return Err(format!("at most {MAX_PROFILES} profiles are allowed"));
         }
@@ -469,7 +539,7 @@ impl ControllersConfig {
                 return Err(format!("at most {MAX_PLAYERS} players can be assigned"));
             }
             let mut seen = HashSet::new();
-            for id in players {
+            for id in players.iter().flatten() {
                 if self.controller(id).is_none() {
                     return Err(format!("the controller '{id}' does not exist"));
                 }
@@ -479,6 +549,48 @@ impl ControllersConfig {
             }
         }
         Ok(())
+    }
+
+    /// Two mapped controllers cannot name the same device: MAME matches
+    /// device ids as case-insensitive substrings, so the id of one must not
+    /// contain the id of another of the same provider either.
+    fn validate_devices(&self) -> Result<(), String> {
+        let bound: Vec<(&Controller, DeviceBinding<'_>)> = self
+            .controllers
+            .iter()
+            .filter_map(|controller| {
+                controller
+                    .device_binding()
+                    .ok()
+                    .map(|binding| (controller, binding))
+            })
+            .collect();
+        for (index, (first, a)) in bound.iter().enumerate() {
+            for (second, b) in &bound[index + 1..] {
+                if a.provider == b.provider && device_ids_overlap(a.device_id, b.device_id) {
+                    return Err(format!(
+                        "the controllers '{}' and '{}' use the same {} device id: MAME could not tell them apart",
+                        first.id, second.id, a.provider
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The controllers registered with the device id `device_id` of
+    /// `provider` (compared without case, like MAME).
+    pub fn controllers_with_device(&self, provider: &str, device_id: &str) -> Vec<&Controller> {
+        self.controllers
+            .iter()
+            .filter(|controller| {
+                controller.provider.as_deref() == Some(provider)
+                    && controller
+                        .device_id
+                        .as_deref()
+                        .is_some_and(|id| id.eq_ignore_ascii_case(device_id))
+            })
+            .collect()
     }
 
     /// Every stored assignment with its target, the default first.
@@ -543,13 +655,17 @@ impl ControllersConfig {
     ) -> Result<String, ControllersError> {
         let id = unique_id(&input.name, |id| self.controller(id).is_some());
         let controller = controller_from(id.clone(), input);
-        validate_controller(&controller).map_err(ControllersError::Invalid)?;
+        validate_new_device(&controller).map_err(ControllersError::Invalid)?;
         if self.controllers.len() >= MAX_CONTROLLERS {
             return Err(ControllersError::Invalid(format!(
                 "at most {MAX_CONTROLLERS} controllers are allowed"
             )));
         }
         self.controllers.push(controller);
+        if let Err(error) = self.validate_devices() {
+            self.controllers.pop();
+            return Err(ControllersError::Invalid(error));
+        }
         Ok(id)
     }
 
@@ -560,13 +676,23 @@ impl ControllersConfig {
         input: ControllerInput,
     ) -> Result<(), ControllersError> {
         let controller = controller_from(id.to_owned(), input);
-        validate_controller(&controller).map_err(ControllersError::Invalid)?;
+        validate_new_device(&controller).map_err(ControllersError::Invalid)?;
         let existing = self
             .controllers
             .iter_mut()
             .find(|controller| controller.id == id)
             .ok_or_else(|| controller_not_found(id))?;
-        *existing = controller;
+        let previous = std::mem::replace(existing, controller);
+        if let Err(error) = self.validate_devices() {
+            if let Some(existing) = self
+                .controllers
+                .iter_mut()
+                .find(|controller| controller.id == id)
+            {
+                *existing = previous;
+            }
+            return Err(ControllersError::Invalid(error));
+        }
         Ok(())
     }
 
@@ -581,7 +707,7 @@ impl ControllersConfig {
             assignment
                 .players
                 .as_ref()
-                .is_some_and(|players| players.iter().any(|player| player == id))
+                .is_some_and(|players| players.iter().flatten().any(|player| player == id))
         });
         if !references.is_empty() {
             return Err(ControllersError::InUse {
@@ -717,6 +843,7 @@ impl ControllersConfig {
         assignment: Assignment,
     ) -> Result<(), ControllersError> {
         target.validate().map_err(ControllersError::Invalid)?;
+        let assignment = assignment.normalized();
         self.validate_assignment(&assignment)
             .map_err(ControllersError::Invalid)?;
         let map = match target.level {
@@ -751,6 +878,7 @@ fn controller_from(id: String, input: ControllerInput) -> Controller {
         device_class: input.device_class,
         device_id: optional(input.device_id),
         provider: optional(input.provider),
+        binding: input.binding,
     }
 }
 
@@ -783,7 +911,51 @@ fn validate_controller(controller: &Controller) -> Result<(), String> {
             ));
         }
     }
+    if let Some(binding) = controller.binding {
+        let device = controller.device_binding().map_err(|error| {
+            format!(
+                "the binding of the controller '{}' cannot be used: {error}",
+                controller.id
+            )
+        })?;
+        let provider = JoystickProvider::from_name(device.provider).ok_or_else(|| {
+            format!(
+                "'{}' is not a MAME joystick provider that YMDB maps devices with (controller '{}')",
+                device.provider, controller.id
+            )
+        })?;
+        let identity = devices::identity(provider, device.device_id);
+        if !identity.allows(binding) {
+            return Err(format!(
+                "the device id of the controller '{}' is {}: only the port order binding describes it",
+                controller.id,
+                identity.describe()
+            ));
+        }
+    }
     Ok(())
+}
+
+/// Checks a controller being created or changed: a mapped device must also
+/// use a joystick provider of this operating system.
+fn validate_new_device(controller: &Controller) -> Result<(), String> {
+    validate_controller(controller)?;
+    if controller.binding.is_some()
+        && let Some(provider) = controller.provider.as_deref()
+        && !JoystickProvider::from_name(provider).is_some_and(JoystickProvider::is_available)
+    {
+        return Err(format!(
+            "the joystick provider '{provider}' is not available on this operating system"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether MAME could match one device id with the other: it compares them
+/// as case-insensitive substrings (`input_device::match_device_id`).
+pub fn device_ids_overlap(a: &str, b: &str) -> bool {
+    let (a, b) = (a.to_lowercase(), b.to_lowercase());
+    a.contains(&b) || b.contains(&a)
 }
 
 /// Ids are path segments: 1-40 lowercase ASCII letters, digits or '-'.

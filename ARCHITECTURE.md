@@ -959,17 +959,22 @@ MAME's own error:
   MAME's own INI files.
 - Sessions started before YMDB restarts are not tracked after the restart.
 
-### Controller management — Implemented (phase 1)
+### Controller management — Implemented
 
-Implemented in `src-tauri/src/controllers/` (model, persistence, resolution) and
-`src-tauri/src/launcher/controls.rs` (launch options), exposed by
-`commands/controllers.rs`, typed in `src/features/controllers/controllersApi.ts`. The
-interface is in `src/features/controllers/` (see [Controls interface](#controls-interface) below).
+Implemented in `src-tauri/src/controllers/` (model, persistence, resolution, device
+detection, generated controller files), `src-tauri/src/launcher/controls.rs` (launch
+options) and `src-tauri/src/launcher/mapping_check.rs` (post-launch verification),
+exposed by `commands/controllers.rs`, typed in
+`src/features/controllers/controllersApi.ts`. The interface is in
+`src/features/controllers/` (see [Controls interface](#controls-interface) below).
 
 MAME stays in charge of input configuration: the user assigns inputs in MAME's own
-menus and MAME saves them. YMDB only decides which MAME configuration directory and
-which controller configuration file a launch uses. It never writes `default.cfg`,
-`<machine>.cfg`, `mame.ini` or any other MAME file, and it has no button editor.
+menus and MAME saves them. YMDB decides which MAME configuration directory and which
+controller configuration file a launch uses, and maps the controllers assigned to
+players to MAME's joystick indexes with a controller file it generates
+([Device mapping](#device-mapping)). It never writes `default.cfg`, `<machine>.cfg`,
+`mame.ini`, an imported `base.cfg` or any other MAME file, and it has no button
+editor.
 
 #### MAME input configuration (verified with MAME 0.289)
 
@@ -997,11 +1002,15 @@ which controller configuration file a launch uses. It never writes `default.cfg`
 - **Controller**: the logical identity of a physical device: `id`, `name`, `kind`
   (`arcadeStick`, `gamepad`, `wheel`, `trackball`, `lightgun`, `keyboard`, `mouse`,
   `other`, descriptive only), `deviceClass` (`joystick`, `lightgun`, `mouse`,
-  `keyboard`: the MAME device class a future `mapdevice` needs) and optional
-  `deviceId` and `provider` (as shown by MAME's Input Devices menu). In phase 1
-  controllers produce no MAME option: assigning them to players records a
-  preference, and the plan gets a warning saying that MAME numbers devices in the
-  order the system reports them. Nothing detects or binds devices.
+  `keyboard`), and optional `deviceId` (the complete MAME device id that `mapdevice`
+  matches; no separate Windows identifier is stored, MAME does not report one for
+  joysticks), `provider` (the MAME joystick provider the id comes from) and
+  `binding`: `device` (the id identifies one specific device wherever it is
+  connected; asserted by the user) or `portOrder` (the id follows the USB port or
+  the provider's enumeration order and names whatever device is there). A joystick
+  with all three can be assigned to players; controllers registered before device
+  mapping have no `binding` and stay unmapped until the user completes them (no
+  identity is invented for them).
 - **Controller profile**: a reusable input configuration with a persistence context.
   The system profile `mame` ("MAME configuration") always exists, cannot be renamed
   or deleted, has no directory and passes nothing to MAME: it is the initial default
@@ -1010,7 +1019,9 @@ which controller configuration file a launch uses. It never writes `default.cfg`
   display) owns one MAME configuration directory per installation and an optional
   `base.cfg`.
 - **Assignments**: preferences at four levels, each with an optional `profileId` and
-  an optional ordered `players` list of controller ids (`[]` assigns none):
+  an optional ordered `players` list of controller ids, Player 1 first, where `null`
+  leaves a player without controller (`[]` assigns none; trailing `null`s are
+  dropped when saved; at most 10 players, MAME's limit):
   `default`, `machines` (`<machine>`), `software` (`<list>:<software>`, on any
   machine) and `machineSoftware` (`<machine>/<list>:<software>`). Keys use MAME
   names only (`is_short_name`); entries for names missing from a catalog are kept.
@@ -1051,7 +1062,10 @@ source of each field (`default`, `machine`, `software`, `machineSoftware`,
       "id": "stick-p1",
       "name": "Arcade Stick P1",
       "kind": "arcadeStick",
-      "deviceClass": "joystick"
+      "deviceClass": "joystick",
+      "deviceId": "USB gamepad            product_e401081f-0000-0000-0000-504944564944 instance_1a2b3c4d-1111-11f0-8001-444553540000",
+      "provider": "winhybrid",
+      "binding": "portOrder"
     }
   ],
   "profiles": [
@@ -1060,7 +1074,7 @@ source of each field (`default`, `machine`, `software`, `machineSoftware`,
   ],
   "assignments": {
     "default": { "profileId": "mame" },
-    "machines": { "sf2": { "profileId": "six-buttons", "players": ["stick-p1"] } },
+    "machines": { "sf2": { "profileId": "six-buttons", "players": [null, "stick-p1"] } },
     "software": { "nes:smb": { "players": [] } },
     "machineSoftware": { "nes/nes:smb": { "profileId": "six-buttons" } }
   }
@@ -1068,8 +1082,14 @@ source of each field (`default`, `machine`, `software`, `machineSoftware`,
 ```
 
 - A missing file is the initial state and is not created until something changes.
+  `binding` is an optional field (`serde(default)`): files of earlier versions load
+  unchanged and `schemaVersion` stays 1.
   The file is versioned, validated when loaded and before every save (ids, names,
-  keys, at most 10 players, no controller twice, every reference existing), written
+  keys, at most 10 players, no controller twice, every reference existing; a
+  `binding` needs a joystick with a device id and a known provider, an XInput slot
+  only allows `portOrder`, and two mapped controllers of one provider cannot have
+  ids that MAME could confuse, equal or one containing the other without case),
+  written
   atomically, and changes are saved before being kept in memory. An invalid or
   unreadable file is reported and never replaced; launches are then refused with a
   `settings` error until it is fixed, as for an invalid `launch.json`.
@@ -1092,10 +1112,18 @@ directories (they sit next to `launch.json`, whose directory is only removed whe
 empty).
 
 `base.cfg` is a copy of a MAME controller configuration file chosen by the user
-(the original is only read). It is checked before copying: regular file, at most
-1 MiB, well-formed XML, root `<mameconfig version="10">`, at least one
-`<system name="…">` with an `<input>` (or `<ui>`) section; inputs are not
-interpreted. The file is written (atomically) before `controllers.json` declares it,
+(the original is only read). It is checked before copying (`base_file.rs`): regular
+file, at most 1 MiB, well-formed XML, root `<mameconfig version="10">`, at least one
+`<system name="…">` with an `<input>` (or `<ui>`) section, a `<system
+name="default">` section in any position (MAME stops with exit code 3 when no
+section of a controller file applies to the running machine, so a file with machine
+sections only would break every other machine), and `<mapdevice>` elements with a
+device and a valid controller (`JOYCODE_n`, `GUNCODE_n`, `MOUSECODE_n`, `KEYCODE_n`,
+n = 1-255: MAME silently drops the remaining mappings of a section after an invalid
+one). Inputs are not interpreted. A `base.cfg` imported before these checks is
+validated again at every launch and in Settings (`baseError`): an incompatible file
+refuses launches with the profile with an explicit message and is never changed or
+deleted. The file is written (atomically) before `controllers.json` declares it,
 and removed again if the profile cannot be saved, so a profile never declares a
 missing `base.cfg`.
 
@@ -1113,11 +1141,15 @@ directory stays, but the effective inputs may change since the baseline is gone.
 `launcher::prepare` resolves, in order: machine/software, launch profile, launch
 options, ROM Manager search paths, then the controls (`controls::compose`):
 
-| Effective profile            | Options (origin `controllers`)                                          |
+| Effective profile            | Without mapped players (origin `controllers`)                           |
 | ---------------------------- | ----------------------------------------------------------------------- |
 | `mame`                       | none: the command line is exactly the one without controller management |
 | user profile, no `base.cfg`  | `-cfg_directory <context dir> -ctrlr ""`                                |
 | user profile with `base.cfg` | `-cfg_directory <context dir> -ctrlrpath <profile dir> -ctrlr base`     |
+
+With mapped players, `-ctrlrpath`/`-ctrlr` name the generated file instead and
+`-joystickprovider <provider> -verbose` are added; the `mame` profile still passes no
+`-cfg_directory` (see [Device mapping](#device-mapping)).
 
 - With a user profile, a `cfg_directory` resolved from the launch options is replaced
   in place and the plan warns, naming the level it came from; `launch.json` is not
@@ -1126,12 +1158,19 @@ options, ROM Manager search paths, then the controls (`controls::compose`):
   `ctrlr` from any MAME INI file never applies on top of the profile.
 - A missing `base.cfg` refuses the launch before MAME runs. Paths containing `;` (a
   MAME path separator) are refused.
-- `LaunchPlan.controls` names the profile, its source, the players, the
-  configuration directory and the base file; the preview shows them.
-- `prepare` (and so `preview_launch` and `resolve_controls`) writes nothing.
+- `LaunchPlan.controls` names the profile, its source, the players and their
+  source, the configuration directory, the base file, the mappings (player,
+  controller, provider, device id, binding), the joystick provider and the planned
+  controller file (path, hash, content, baseline); the preview shows them.
+- `prepare` (and so `preview_launch` and `resolve_controls`) writes nothing: it only
+  reads `base.cfg`, the native controller file and MAME's INI files.
   `controls::materialize` runs in `start_launch` and Download & Play right before
-  the process starts: it checks the base file again and creates the configuration
-  directory. Process management and Stop are unchanged.
+  the process starts: it checks the base file again, writes the generated
+  controller file of the plan (the exact content previewed) and creates the
+  configuration directory. Process management and Stop are unchanged.
+- `ctrlr`, `ctrlrpath`, `joystickprovider` and `verbose` are not launch option
+  definitions, so launch profiles cannot set them; `cfg_directory` is replaced with
+  a warning as above.
 - Sessions record their controls and the warnings of the plan they run
   (`SessionInfo.warnings`, set by `start_launch` and Download & Play from the plan
   prepared for that start, never from an earlier preview). When another running
@@ -1140,10 +1179,113 @@ options, ROM Manager search paths, then the controls (`controls::compose`):
   wins. Different machines keep their own `<machine>.cfg`; the same machine and
   software cannot run twice in one installation.
 
+#### Device mapping
+
+Verified with MAME 0.289 on Windows (Logitech F310, two identical Rii GP100), with
+MAME's source (`input.cpp`, `ioport.cpp`, `config.cpp`) for the details:
+
+- MAME numbers joysticks in the order its provider enumerates them.
+  `<mapdevice device="<id>" controller="JOYCODE_<n>"/>` in the `<input>` of a section
+  of the controller file moves the first device whose id contains `<id>`
+  (case-insensitive substring) to index n by swapping two indexes; the mappings of
+  a section are applied in device id order (`std::map`), sections in file order.
+  With distinct devices and distinct indexes the result does not depend on that
+  order. MAME's default inputs give joystick n to player n.
+- Device ids depend on the provider (`controllers/devices.rs`): `winhybrid` (what
+  `auto` selects on Windows) lists DirectInput devices first as
+  `<name> product_<guid> instance_<guid>`, then XInput devices as
+  `XInput Player <n>`; `dinput` lists every device with its instance GUID; `xinput`
+  only XInput slots; `sdljoy` reports SDL GUIDs that identical devices share. A
+  DirectInput instance follows the USB port for devices without their own serial
+  number (the two GP100 swap players when their ports are swapped); the F310 keeps
+  its ids across ports and reconnections, and its X and D modes are different
+  devices with different ids and buttons. The providers offered per operating
+  system are in `mame/platform.rs` (`JOYSTICK_PROVIDERS`: Windows `winhybrid`,
+  `dinput`, `xinput`, `sdljoy`; SDL builds `sdljoy`).
+- MAME prints nothing for a mapped device that is missing, and an invalid
+  `controller=` drops the following mappings of the section; a controller file
+  without a section for the running machine stops MAME (exit code 3).
+
+**Detection** (`controllers/discovery.rs`, command `detect_controller_devices`): only
+on an explicit user action, with the executable of the chosen installation, MAME
+runs `pong -noreadconfig -verbose -video none -sound none -nothrottle
+-seconds_to_run 1 -joystickprovider <provider>` directly (no shell) from a new
+temporary directory that receives everything it writes and is removed afterwards,
+with a 30 s timeout (the process is killed after it). Only the `Input: Adding
+joystick` lines (and the SDL `Joystick:` lines with vendor, product and serial) are
+interpreted (`mame/input_log.rs`). Each detected device reports its name, provider,
+complete device id, identity kind (`xinputSlot`, `directInputInstance`, `sdlModel`,
+`other`), USB vendor/product ids when the id encodes them, whether it is
+distinguishable (no other detected id that MAME could confuse with it), the
+bindings it supports, a suggested binding (`portOrder` for every distinguishable
+device: YMDB never infers a device identity), the controllers already registered
+with that exact provider and id, and notes. A failed run (MAME missing, timeout,
+unexpected exit code, output without any input device) is a `detectionFailed`
+error, never an empty list; "no joystick" is a successful empty result with a
+warning. Nothing is registered automatically, and devices that cannot be told apart
+cannot be registered.
+
+**Generated controller file** (`controllers/ctrlr_file.rs`): one `<system
+name="default">` section with one `mapdevice` per mapped player (ids XML-escaped,
+control characters refused), inserted right after `<mameconfig …>` of the baseline,
+whose bytes are kept verbatim (comments, every section, including machine sections
+and a `default` section in any position). Without baseline it is a complete file
+with that section only. The name is `ymdb-<FNV-1a 64 of the content>`, the file
+`<local data>/controller-files/<name>.cfg` (`ControllerPaths::generated_dir`), passed
+as `-ctrlrpath <dir> -ctrlr <name>`. `materialize` keeps an existing file with the
+same content and otherwise replaces it atomically, so a name never serves other
+content and no partial file is left. There is no cache database and no garbage
+collection: files are small and named by content.
+
+Mappings of the baseline (policy): one identical to a generated mapping (same id
+without case, same index) is kept; one for another device class or for a joystick
+index nobody is assigned to, with an id unrelated to every mapped id, is kept; any
+other (another device on an assigned index, or an assigned device moved elsewhere,
+in any section) is a conflict that refuses the launch with a message naming it. The
+baseline is never edited.
+
+**Rules at launch** (`controls::compose`): the players are resolved like the
+profile (field by field, same precedence, request override); every assigned
+controller must exist, be a joystick and have a device id, a provider available on
+this system and a binding; all mapped controllers must share one provider (MAME has
+one `-joystickprovider`); a player without controller before an assigned one is
+allowed with a warning; controllers with port order binding are named in a warning
+("Swapping ports may change player assignments"). The provider is always passed
+explicitly when devices are mapped and never otherwise; if `mame.ini` sets another
+`joystickprovider`, the plan says that the command line overrides it.
+
+**The `mame` profile**: without mapped players nothing changes (no option, no file,
+no directory). With mapped players it keeps MAME's own `cfg` directory and input
+settings, and the generated file must replace any `ctrlr` from MAME's INI files
+(the command line wins over them): `mame/ini.rs` reads the first `mame.ini` of the
+inipath and lists the other INI files of the inipath (and their `source`
+directories) that set a `ctrlr`. A `ctrlr` of `mame.ini` is looked up in its
+`ctrlrpath` and composed as the baseline (a missing file refuses the launch, as MAME
+would fail); a `ctrlr` from another INI file (applied by MAME per machine, parent,
+source file or screen type) cannot be composed safely and refuses the launch with
+the file named. Managed profiles always neutralize INI controller files, as before.
+
+**Verification** (`launcher/mapping_check.rs`): mapped launches add `-verbose`;
+the session monitor reads the beginning of the session log (at most 1 MiB) until
+the result is complete. It replays the `Input: Adding joystick #n` lines and the
+`Input: Remapped joystick #n` lines printed after `Attempting to parse: <file>.cfg`,
+up to the next `Attempting to parse:` or `Configuration file … not found` line
+(printed instead for a configuration file that does not exist yet). Per player:
+`verified` (moved there by a `Remapped` line and still there, `device` binding, no
+other connected device matching the id), `verifiedPortOrder` (applied, but by port
+order or with several matching devices: the physical device is not guaranteed),
+`missing` (no connected device matches), `notApplied` (found but not left at the
+index, or the controller file failed to load), `unknown` (the output does not say:
+MAME stopped early or no log), and `pending` while MAME has not read the file.
+Exit code 0 alone proves nothing. `SessionInfo.mapping` is `null` for launches
+without mapped players.
+
 #### Commands
 
 - `get_controllers`: controllers, profiles (`id`, `kind`, `name`, `hasBase`,
-  `baseFileName`, `managed`) and assignments.
+  `baseFileName`, `managed`, `baseError`), assignments and the joystick `providers`
+  of this system (the one `auto` selects first).
+- `detect_controller_devices(installationId, provider?)`: see Device mapping.
 - `create_controller(controller)`, `update_controller(controllerId, controller)`,
   `delete_controller(controllerId)`.
 - `create_controller_profile(name, importBase)`: with `importBase`, a native dialog
@@ -1166,7 +1308,7 @@ options, ROM Manager search paths, then the controls (`controls::compose`):
   configuration directory for the installation (not created).
 
 Every change returns the whole configuration. Errors: `notFound`, `invalidRequest`,
-`invalidFile`, `controllersInUse`, `settings`.
+`invalidFile`, `controllersInUse`, `settings`, `detectionFailed`.
 
 #### Verified with MAME 0.289
 
@@ -1191,19 +1333,43 @@ and saves no preference, that the first profile is unchanged when coming back, t
 removing a baseline keeps what MAME saved, and that MAME's own `cfg` and the real
 installation are untouched. Pressing keys in MAME's menus by hand was not automated.
 
+A third ignored test (`player_mappings_end_to_end`, at least two joysticks
+connected) detects the real devices, registers them in a temporary configuration
+and runs `pong` through the launch path: the `mame` profile without players keeps
+`["pong"]`; with players in reverse detection order it composes the `ctrlr` of the
+temporary `mame.ini`, keeps MAME's `cfg`, passes the provider, and a Lua probe
+reading `devindex` confirms the final joystick order while the verification
+reports every mapping applied; a managed profile composes its `base.cfg` and MAME
+saves in its directory; a temporary override changes one launch only; a registered
+but disconnected device is `missing`; a machine-only `base.cfg` is refused and
+kept; removing the players gives the first command line again.
+`player_mappings_hardware_check` is the same path with a window and a Lua logger of
+button 1 presses: pressing F310, GP100-A, GP100-B gave joysticks 1, 2, 3, and 1, 3, 2
+after swapping Players 2 and 3 (checked by hand on Windows with MAME 0.289).
+
 #### Controls interface
 
 - **Settings → Controllers** (`ControllersSettings.tsx`), one section with three
   blocks: **Controller Profiles** (`ProfilesBlock.tsx`: create, empty or from a
   controller file; rename; import, replace or remove the baseline file, each removal
   confirmed; delete with confirmation; the assignments using a profile are listed and
-  a used profile cannot be deleted), **Controllers** (`ControllersBlock.tsx`: add,
-  edit, remove, with the notice that device assignments are not applied yet and no
-  connection state) and **Default Assignments** (`AssignmentsBlock.tsx`: the default
-  controller profile and the saved assignments of machines, software and machine +
-  software, with player preferences shown read-only, a search and Remove). Names
-  missing from the current catalog are listed as stored. An unreadable
-  `controllers.json` shows the error and no control that could save.
+  a used profile cannot be deleted; a `baseError` is shown), **Controllers**
+  (`ControllersBlock.tsx`: **Detect devices** (`DeviceDetection.tsx`: installation
+  and provider choice, detected devices with id, USB ids, supported bindings, notes,
+  "Registered as …" from an exact provider + id match, and **Register…**, disabled
+  for devices that cannot be told apart, which opens the controller form filled
+  in); add, edit (name, kind, class, provider among this system's, device id,
+  binding with both meanings explained and the port order warning "This controller
+  is identified by USB port order. Swapping ports may change player assignments."),
+  remove; no connection state) and **Default Assignments** (`AssignmentsBlock.tsx`:
+  the default controller profile, the default players with Save and Remove, and the
+  saved assignments of machines, software and machine + software, with a search and
+  Remove). Names missing from the current catalog are listed as stored. An
+  unreadable `controllers.json` shows the error and no control that could save.
+- **Players editor** (`PlayersEditor.tsx`): one row per player (two shown, up to
+  10), a controller per player; controllers without a configured device or already
+  chosen for another player are disabled; the binding and provider of each choice
+  and the port order warning are shown.
 - **Launch bar**: a **Controls** selector next to the launch profile
   (`ControlsSelect.tsx`). Its first option is the saved preference resolved by the
   backend, labelled with its source (`describeSource`: inherited from the default or
@@ -1211,21 +1377,34 @@ installation are untouched. Pressing keys in MAME's menus by hand was not automa
   another profile is a temporary selection sent as `LaunchRequest.controls` by Play,
   Download & Play and the preview, never saved. While one is selected, **Save as
   preference** saves it at an explicit level (machine; software; software on the
-  selected machine) with `update_controller_assignment`.
+  selected machine) with `update_controller_assignment`. Next to it, **Players**
+  opens the temporary players (`TemporaryPlayers` in `ControlsSelect.tsx`): "Use for
+  the next launches" sends them as `LaunchRequest.controls.players` with Play,
+  Download & Play, the preview and Configure Controls; nothing is saved until
+  **Save players as preference** at an explicit level (players only). Temporary
+  players referencing a deleted controller lose that controller.
 - **Advanced → Controls for this machine/software** (`ControlsPreferences.tsx`): the
-  effective profile, its source, the configuration directory and the stored player
-  preferences, then one row per level (the levels of the target: machine; software,
-  software on the selected machine and the machine) with its stored profile, Save
-  and **Reset to inherited** (`inherit` of `profileId` only). Without a selected
-  machine, only the software level is offered and no machine + software key is made.
+  effective profile, its source, the configuration directory and the effective
+  players with their source, then one row per level (the levels of the target:
+  machine; software, software on the selected machine and the machine) with its
+  stored profile (Save, **Reset to inherited**: `inherit` of `profileId` only) and
+  its stored players (players editor, **Save players**, **Reset players to
+  inherited**: `inherit` of `players` only). Without a selected machine, only the
+  software level is offered and no machine + software key is made.
 - **Configure Controls in MAME** (`ConfigureControlsDialog.tsx`): explains the MAME
   menus (menu key, Input Assignments this system/general, saved at a normal exit,
   lost with Stop) and then starts the same request as Play, with the effective or
-  temporary profile; a warning says when the profile is MAME's own configuration.
+  temporary profile and players (so MAME maps the devices before the user assigns
+  inputs); a warning says when the profile is MAME's own configuration.
   No MAME option opens the menu and YMDB has no button editor.
 - The command preview shows the controller profile with its source, the MAME
-  configuration directory and the controller file; the launch status shows the
-  session's controller profile and the warnings of its plan.
+  configuration directory, the controller file, the player mappings (controller,
+  binding, provider, device id) with their source, the joystick provider and the
+  generated controller file (path, baseline, content); option arguments set by
+  controller management are labelled **Controls**. The launch status shows the
+  session's controller profile, the warnings of its plan and, for mapped launches,
+  the status of each player mapping reported by MAME (never a persistent
+  connected/disconnected state).
 - Every resolution comes from `resolve_controls` and the plan; the interface never
   computes the precedence. `controlsVersion` (launcher context) is incremented after
   each saved change, so resolutions, the settings and the preview reload;
@@ -1233,11 +1412,21 @@ installation are untouched. Pressing keys in MAME's menus by hand was not automa
 
 #### Limitations and next steps
 
-- No `mapdevice`, device detection or physical binding: player assignments are
-  preferences only and are not edited in the interface. Phase 2 will generate a
-  controller file combining `mapdevice` lines with the profile's `base.cfg` (in the
-  local data directory), may set the input providers, and can then offer player
-  assignments in the interface.
+- Identical controllers without their own serial number (such as two GP100) are
+  identified by USB port or enumeration order only: swapping their ports swaps
+  their players, and with only one of them connected, a mapping meant for the other
+  may apply to it or leave a player without controller. XInput slots follow the
+  connection order. YMDB never presents these as physical identities.
+- The `device` binding is the user's assertion; YMDB has no access to USB serial
+  numbers for DirectInput or XInput devices. Virtual devices (vJoy, ViGEm...) are
+  detected like any other device of their provider, with the same limits.
+- Only joysticks are mapped (`JOYCODE_n`); light guns, mice and keyboards keep
+  MAME's order. All mapped controllers of a launch share one provider.
+- A `ctrlr` set by an INI file other than `mame.ini` refuses mapped launches with
+  the `mame` profile (no per-machine INI resolution).
+- Verification relies on MAME 0.289's verbose messages; other versions may report
+  `unknown`. Device detection and mapping were verified on Windows only.
+- Generated controller files are never deleted (small, named by content).
 - DIP switches, slots, mixer and video settings are per profile and installation:
   a new profile starts from MAME's defaults for them.
 - Concurrent sessions sharing a profile only get a warning (no locking).

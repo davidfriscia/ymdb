@@ -219,6 +219,12 @@ function ProfileItem({ view, profile, isDefault, onChanged }: ProfileItemProps) 
           are saved in the profile&apos;s configuration directory.
         </p>
       )}
+      {profile.baseError !== null && (
+        <p className="message message--error" role="alert">
+          The baseline file cannot be used: {profile.baseError}. Launches with this profile are
+          refused until a corrected file is imported; the current file is kept as it is.
+        </p>
+      )}
       {keyed.length > 0 && (
         <>
           <p className="message message--muted">

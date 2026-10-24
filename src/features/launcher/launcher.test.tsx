@@ -459,7 +459,7 @@ describe("launcher", () => {
       ).toBeInTheDocument();
       expect(within(preview).getByText(cfgDirectory)).toBeInTheDocument();
       const args = within(within(preview).getByRole("list", { name: "Arguments" }));
-      expect(args.getAllByText("Controller profile")).toHaveLength(2);
+      expect(args.getAllByText("Controls")).toHaveLength(2);
       expect(args.getByText('-ctrlr ""')).toBeInTheDocument();
       expect(within(preview).getByLabelText("Full command line")).toHaveTextContent(
         `C:\\MAME\\mame.exe pacman -cfg_directory ${cfgDirectory} -ctrlr ""`,

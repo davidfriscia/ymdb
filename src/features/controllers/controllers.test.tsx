@@ -189,11 +189,10 @@ describe("Settings → Controllers", () => {
     expect(within(mame).queryByRole("button")).not.toBeInTheDocument();
 
     expect(screen.getByText(/No controller registered/)).toBeVisible();
-    expect(
-      screen.getByText(
-        "Controller registration is available, but physical device assignments are not yet applied to MAME. Device mapping will be supported in a future update.",
-      ),
-    ).toBeVisible();
+    // Detection needs a MAME installation and never runs by itself.
+    expect(screen.getByRole("button", { name: "Detect devices" })).toBeDisabled();
+    expect(screen.getByText("Register a MAME installation to detect devices.")).toBeVisible();
+    expect(calls("detect_controller_devices")).toHaveLength(0);
     expect(screen.getByLabelText("Default controller profile")).toHaveValue("mame");
     expect(screen.getByText(/Launch profiles are independent/)).toBeVisible();
     expect(
@@ -483,12 +482,25 @@ describe("Settings → Controllers: controllers", () => {
 
     await user.type(within(form).getByLabelText("Name"), "Arcade Stick P1");
     await user.selectOptions(within(form).getByLabelText("Kind"), "Arcade stick");
-    await user.type(within(form).getByLabelText("Provider (optional)"), "DInput");
+    // The providers of this system are offered.
+    expect(
+      within(within(form).getByLabelText("Provider"))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Not set", "winhybrid", "dinput", "xinput", "sdljoy"]);
+    // A binding needs a device id and its provider.
+    await user.click(within(form).getByRole("radio", { name: /^Port\/order binding/ }));
+    expect(
+      within(form).getByText(
+        "This controller is identified by USB port order. Swapping ports may change player assignments.",
+      ),
+    ).toBeVisible();
     await user.click(within(form).getByRole("button", { name: "Save controller" }));
-    expect(within(form).getByText(/Use the MAME provider name/)).toBeVisible();
-    await user.clear(within(form).getByLabelText("Provider (optional)"));
-    await user.type(within(form).getByLabelText("Provider (optional)"), "dinput");
-    await user.type(within(form).getByLabelText("Device ID (optional)"), "VID_D209&PID_1601");
+    expect(within(form).getByText("Enter the device ID reported by MAME.")).toBeVisible();
+    await user.type(within(form).getByLabelText("Device ID"), "VID_D209&PID_1601");
+    await user.click(within(form).getByRole("button", { name: "Save controller" }));
+    expect(within(form).getByText("Choose the provider the device ID comes from.")).toBeVisible();
+    await user.selectOptions(within(form).getByLabelText("Provider"), "dinput");
     await user.click(within(form).getByRole("button", { name: "Save controller" }));
     expect(calls("create_controller")).toEqual([
       {
@@ -498,20 +510,25 @@ describe("Settings → Controllers: controllers", () => {
           deviceClass: "joystick",
           deviceId: "VID_D209&PID_1601",
           provider: "dinput",
+          binding: "portOrder",
         },
       },
     ]);
     const list = await screen.findByRole("list", { name: "Controllers" });
     const item = within(list).getByRole("listitem", { name: /Arcade Stick P1/ });
     expect(within(item).getByText("VID_D209&PID_1601")).toBeVisible();
-    // No connection state: devices are not detected.
+    expect(within(item).getByText("Port/order binding")).toBeVisible();
+    expect(within(item).getByText(/Swapping ports may change player assignments/)).toBeVisible();
+    // No connection state: devices are only detected on request.
     expect(within(item).queryByText(/connected/i)).not.toBeInTheDocument();
 
     await user.click(within(item).getByRole("button", { name: "Edit…" }));
     const edit = screen.getByRole("form", { name: "Edit Arcade Stick P1" });
+    expect(within(edit).getByRole("radio", { name: /^Port\/order binding/ })).toBeChecked();
     await user.clear(within(edit).getByLabelText("Name"));
     await user.type(within(edit).getByLabelText("Name"), "Fight Stick");
-    await user.clear(within(edit).getByLabelText("Device ID (optional)"));
+    await user.clear(within(edit).getByLabelText("Device ID"));
+    await user.click(within(edit).getByRole("radio", { name: /^Not set/ }));
     await user.click(within(edit).getByRole("button", { name: "Save controller" }));
     expect(calls("update_controller")).toEqual([
       {
@@ -522,6 +539,7 @@ describe("Settings → Controllers: controllers", () => {
           deviceClass: "joystick",
           deviceId: null,
           provider: "dinput",
+          binding: null,
         },
       },
     ]);
@@ -550,7 +568,7 @@ describe("Settings → Controllers: controllers", () => {
     const { user } = renderWith(<ControllersSettings />);
     const list = await screen.findByRole("list", { name: "Controllers" });
     const item = within(list).getByRole("listitem", { name: /Arcade Stick P1/ });
-    expect(within(item).getByText(/not applied to MAME yet/)).toBeVisible();
+    expect(within(item).getByText("Assigned to players in:")).toBeVisible();
     await user.click(within(item).getByRole("button", { name: "Remove…" }));
     const confirm = within(item).getByRole("group", { name: "Remove controller" });
     expect(confirm).toHaveTextContent(/cannot be removed/);
@@ -611,7 +629,7 @@ describe("Settings → Controllers: default assignments", () => {
     const list = await screen.findByRole("list", { name: "Saved assignments" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(4);
     expect(list).toHaveTextContent(
-      "sf2 · Controller profile: Arcade Six Buttons · Player preferences (not applied): Player 1: Arcade Stick P1, Player 2: Pad",
+      "sf2 · Controller profile: Arcade Six Buttons · Players: Player 1: Arcade Stick P1, Player 2: Pad",
     );
     expect(list).toHaveTextContent("smb on nes · Controller profile inherited");
     expect(list).toHaveTextContent("gone:missing");
@@ -840,7 +858,10 @@ describe("launch bar: Controls", () => {
       within(panel)
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label")),
-    ).toEqual(["This software (nes:smb), on any machine"]);
+    ).toEqual([
+      "This software (nes:smb), on any machine",
+      "Players for This software (nes:smb), on any machine",
+    ]);
     await user.selectOptions(
       within(panel).getByLabelText(
         "Controller profile for This software (nes:smb), on any machine",
@@ -946,9 +967,7 @@ describe("Advanced → Controls", () => {
       expect(panel).toHaveTextContent("Arcade Six Buttons — specific to this software");
     });
     expect(panel).toHaveTextContent(/created when MAME first starts with this profile/);
-    expect(panel).toHaveTextContent(
-      "Player 1: Pad — inherited from the machine. Stored only: not applied to MAME yet.",
-    );
+    expect(panel).toHaveTextContent("Player 1: Pad — inherited from the machine");
     const software = within(panel).getByRole("group", {
       name: "This software (nes:smb), on any machine",
     });
@@ -993,7 +1012,7 @@ describe("Advanced → Controls", () => {
       name: "This machine (sf2)",
     });
     expect(updated).toHaveTextContent("not set, inherited");
-    expect(updated).toHaveTextContent(/Player preferences saved here .*Player 1: Arcade Stick P1/);
+    expect(updated).toHaveTextContent(/Players: Player 1: Arcade Stick P1/);
   });
 
   it("changes a preference and keeps the players stored at the same level", async () => {

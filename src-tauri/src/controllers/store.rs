@@ -63,6 +63,12 @@ impl ControllersStore {
         }
     }
 
+    /// Generated controller files go to `data_dir` (see [`ControllerPaths::with_data_dir`]).
+    pub fn with_data_dir(mut self, data_dir: &Path) -> Self {
+        self.paths = self.paths.with_data_dir(data_dir);
+        self
+    }
+
     pub fn paths(&self) -> &ControllerPaths {
         &self.paths
     }

@@ -277,7 +277,63 @@ mod tests {
                 "players": [],
                 "playersSource": null,
                 "cfgDirectory": null,
-                "baseFile": null
+                "baseFile": null,
+                "mappings": [],
+                "joystickProvider": null,
+                "controllerFile": null
+            })
+        );
+    }
+
+    #[test]
+    fn preview_serializes_player_mappings() {
+        use crate::controllers::devices::JoystickProvider;
+        use crate::controllers::model::ControllerBinding;
+        use crate::launcher::controls::{PlanMapping, PlannedControllerFile};
+        let mut origin = origin();
+        origin.controls.players = vec![None, Some("pad".to_owned())];
+        origin.controls.mappings = vec![PlanMapping {
+            player: 2,
+            controller_id: "pad".to_owned(),
+            controller_name: "Pad".to_owned(),
+            provider: JoystickProvider::Winhybrid,
+            device_id: "XInput Player 1".to_owned(),
+            binding: ControllerBinding::PortOrder,
+        }];
+        origin.controls.joystick_provider = Some(JoystickProvider::Winhybrid);
+        origin.controls.controller_file = Some(PlannedControllerFile {
+            name: "ymdb-0011223344556677".to_owned(),
+            path: PathBuf::from("/data/controller-files/ymdb-0011223344556677.cfg"),
+            hash: "0011223344556677".to_owned(),
+            content: "<mameconfig/>".to_owned(),
+            baseline: None,
+        });
+        let plan = LaunchPlan::build(&origin, Path::new("/opt/mame/mame"), "pong", None, &[]);
+        let json = serde_json::to_value(&plan).expect("serialize");
+        assert_eq!(
+            json["controls"]["players"],
+            serde_json::json!([null, "pad"])
+        );
+        assert_eq!(
+            json["controls"]["mappings"],
+            serde_json::json!([{
+                "player": 2,
+                "controllerId": "pad",
+                "controllerName": "Pad",
+                "provider": "winhybrid",
+                "deviceId": "XInput Player 1",
+                "binding": "portOrder"
+            }])
+        );
+        assert_eq!(json["controls"]["joystickProvider"], "winhybrid");
+        assert_eq!(
+            json["controls"]["controllerFile"],
+            serde_json::json!({
+                "name": "ymdb-0011223344556677",
+                "path": "/data/controller-files/ymdb-0011223344556677.cfg",
+                "hash": "0011223344556677",
+                "content": "<mameconfig/>",
+                "baseline": null
             })
         );
     }

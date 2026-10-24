@@ -138,14 +138,37 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   directory is created by `controls::materialize` right before MAME starts.
   Referenced profiles and controllers are not deleted; profile files are never
   deleted automatically (removing a `base.cfg` moves it aside, saves
-  `controllers.json`, then deletes it, or puts it back on failure). Controllers
-  produce no MAME option until `mapdevice` support: never present player assignments
-  as physical bindings.
+  `controllers.json`, then deletes it, or puts it back on failure). A `base.cfg`
+  needs a `<system name="default">` section and valid `mapdevice` controllers
+  (`base_file::validate`); files imported before a stricter check are reported at
+  launch and in Settings, never changed or deleted.
+- Device mapping: a joystick controller with `deviceId`, `provider` and `binding`
+  (`device` | `portOrder`) is mapped to its player's joystick index by a generated
+  controller file (`controllers/ctrlr_file.rs`): a `<system name="default">` section
+  of `mapdevice` inserted after `<mameconfig>` of the baseline, whose bytes are kept
+  verbatim; baseline mappings that touch assigned devices or indexes are conflicts,
+  never silently dropped. The file is named by its content
+  (`<local data>/controller-files/ymdb-<hash>.cfg`), planned by `compose` (read-only)
+  and written only by `materialize`. Mapped launches always pass the controllers'
+  `-joystickprovider` (one per launch) and `-verbose`; launches without mapped
+  players must keep their previous command line exactly (keep the regression tests).
+  The `mame` profile keeps MAME's `cfg` directory, composes the `ctrlr` of `mame.ini`
+  and refuses a `ctrlr` from any other INI file. Never infer a device identity:
+  detection suggests `portOrder`, `device` is the user's choice, XInput slots are
+  `portOrder` only, ids MAME could confuse (substring, case-insensitive) are refused,
+  and controllers without `binding` (older files) stay unmapped. Detection
+  (`controllers/discovery.rs`) runs only on an explicit action (`pong
+-noreadconfig -verbose -video none`, temporary directory, timeout) and a failure
+  is an error, never an empty list. Verification (`launcher/mapping_check.rs`)
+  reports only what MAME's verbose output proves; a port order mapping is never
+  presented as a physical identity, and no controller has a persistent connected
+  state.
 - The controllers interface (`features/controllers/`) never resolves precedence: it
   shows `resolve_controls` and the plan. Preferences are changed with
   `update_controller_assignment` (per-field `keep`/`set`/`inherit`), so changing one
-  field never drops the other. The Controls selection of the launch bar is temporary
-  (`LaunchRequest.controls`) and saved only by an explicit "Save as preference".
+  field never drops the other. The Controls and Players selections of the launch bar
+  are temporary (`LaunchRequest.controls`, used by Play, the preview, Download & Play
+  and Configure Controls) and saved only by an explicit "Save as preference".
   Saved changes increment the launcher's `controlsVersion`. Sessions carry the
   warnings of the plan they started with; never show preview warnings as a session's.
 - `src-tauri/src/remote/`: remote repositories. The ROM manager talks to repositories

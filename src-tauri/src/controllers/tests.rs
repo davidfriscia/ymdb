@@ -19,6 +19,7 @@ fn input(name: &str) -> ControllerInput {
         device_class: DeviceClass::Joystick,
         device_id: None,
         provider: None,
+        binding: None,
     }
 }
 
@@ -32,7 +33,7 @@ fn target(level: AssignmentLevel, key: Option<&str>) -> AssignmentTarget {
 fn assignment(profile: Option<&str>, players: Option<&[&str]>) -> Assignment {
     Assignment {
         profile_id: profile.map(str::to_owned),
-        players: players.map(|players| players.iter().map(|&id| id.to_owned()).collect()),
+        players: players.map(|players| players.iter().map(|&id| Some(id.to_owned())).collect()),
     }
 }
 
@@ -450,6 +451,63 @@ fn assignment_crud_validates_targets_and_references() {
 }
 
 #[test]
+fn players_may_leave_gaps_and_are_stored_normalized() {
+    let mut config = config();
+    let target = target(AssignmentLevel::Machine, Some("sf2"));
+    let gap = |players: &[Option<&str>]| AssignmentUpdate {
+        players: FieldUpdate::Set {
+            value: players.iter().map(|id| id.map(str::to_owned)).collect(),
+        },
+        ..AssignmentUpdate::default()
+    };
+    // Player 1 without controller, Player 2 assigned; trailing empty players dropped.
+    config
+        .update_assignment(&target, gap(&[None, Some("arcade-stick-p2"), None, None]))
+        .expect("update");
+    assert_eq!(
+        config.assignment(&target).expect("stored").players,
+        Some(vec![None, Some("arcade-stick-p2".to_owned())])
+    );
+    // Four players and more are allowed, up to MAME's ten.
+    config
+        .update_assignment(
+            &target,
+            gap(&[None, None, Some("arcade-stick-p1"), Some("arcade-stick-p2")]),
+        )
+        .expect("four players");
+    let eleven: Vec<Option<&str>> = std::iter::repeat_n(None, 10)
+        .chain([Some("arcade-stick-p1")])
+        .collect();
+    assert!(config.update_assignment(&target, gap(&eleven)).is_err());
+    // The same controller for two players is refused.
+    assert!(
+        config
+            .update_assignment(
+                &target,
+                gap(&[Some("arcade-stick-p1"), Some("arcade-stick-p1")])
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("two players")
+    );
+    // The JSON keeps the gaps.
+    let json = serde_json::to_value(config.assignment(&target).expect("stored")).expect("json");
+    assert_eq!(
+        json["players"],
+        serde_json::json!([null, null, "arcade-stick-p1", "arcade-stick-p2"])
+    );
+    // Old files (players without gaps) still load.
+    let old: Assignment =
+        serde_json::from_value(serde_json::json!({ "players": ["arcade-stick-p1"] })).expect("old");
+    assert_eq!(old.players, Some(vec![Some("arcade-stick-p1".to_owned())]));
+    // A controller used with a gap cannot be deleted.
+    assert!(matches!(
+        config.delete_controller("arcade-stick-p2"),
+        Err(ControllersError::InUse { .. })
+    ));
+}
+
+#[test]
 fn updates_change_one_field_and_keep_the_other() {
     let mut config = config();
     let machine = target(AssignmentLevel::Machine, Some("sf2"));
@@ -606,7 +664,11 @@ fn resolves_by_precedence_field_by_field() {
             resolved.players_source,
         )
     };
-    let players = |ids: &[&str]| ids.iter().map(|&id| id.to_owned()).collect::<Vec<_>>();
+    let players = |ids: &[&str]| {
+        ids.iter()
+            .map(|&id| Some(id.to_owned()))
+            .collect::<Vec<_>>()
+    };
 
     // 1. Default.
     set(

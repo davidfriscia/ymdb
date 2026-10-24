@@ -22,6 +22,7 @@ export type CommandError =
   | { kind: "notFound"; message: string }
   | { kind: "alreadyRunning"; sessionId: number }
   | { kind: "launchFailed"; message: string }
+  | { kind: "detectionFailed"; message: string }
   | { kind: "connectionNotFound"; connectionId: string }
   | { kind: "connectionInUse"; references: ConnectionReference[] }
   | { kind: "controllersInUse"; message: string; references: AssignmentTarget[] }
@@ -61,6 +62,7 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "notFound" ||
     kind === "alreadyRunning" ||
     kind === "launchFailed" ||
+    kind === "detectionFailed" ||
     kind === "connectionNotFound" ||
     kind === "connectionInUse" ||
     kind === "controllersInUse" ||
@@ -120,6 +122,8 @@ export function describeCommandError(error: CommandError): string {
       return "This machine or software is already running.";
     case "launchFailed":
       return `MAME could not be started: ${error.message}`;
+    case "detectionFailed":
+      return `The devices could not be detected: ${error.message}`;
     case "connectionNotFound":
       return "This remote connection no longer exists.";
     case "connectionInUse":

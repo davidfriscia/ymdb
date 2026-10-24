@@ -13,8 +13,18 @@ export type ControllerKind =
 export type DeviceClass = "joystick" | "lightgun" | "mouse" | "keyboard";
 
 /**
- * Mirrors `Controller` in `controllers/model.rs`: a logical identity. It is
- * not bound to a physical device yet; `deviceId` and `provider` are informative.
+ * Mirrors `ControllerBinding` in `controllers/model.rs`: `device` when the
+ * device id follows one specific device, `portOrder` when it follows the USB
+ * port or the enumeration order of the provider.
+ */
+export type ControllerBinding = "device" | "portOrder";
+
+/** Mirrors `JoystickProvider` in `controllers/devices.rs`: MAME's `-joystickprovider`. */
+export type JoystickProvider = "winhybrid" | "dinput" | "xinput" | "sdljoy";
+
+/**
+ * Mirrors `Controller` in `controllers/model.rs`: a logical identity. A
+ * joystick with a device id, a provider and a binding can be mapped to players.
  */
 export interface Controller {
   id: string;
@@ -23,6 +33,8 @@ export interface Controller {
   deviceClass: DeviceClass;
   deviceId?: string;
   provider?: string;
+  /** Missing for controllers registered before device mapping. */
+  binding?: ControllerBinding;
 }
 
 /** Mirrors `ControllerInput` in `controllers/model.rs`. */
@@ -32,6 +44,43 @@ export interface ControllerInput {
   deviceClass: DeviceClass;
   deviceId?: string | null;
   provider?: string | null;
+  binding?: ControllerBinding | null;
+}
+
+/** Controller ids by player, Player 1 first; `null` leaves a player without controller. */
+export type Players = (string | null)[];
+
+/** Mirrors `DeviceIdentity` in `controllers/devices.rs`. */
+export type DeviceIdentity = "xinputSlot" | "directInputInstance" | "sdlModel" | "other";
+
+/** Mirrors `DetectedDevice` in `controllers/discovery.rs`. */
+export interface DetectedDevice {
+  /** MAME's joystick number in this detection. */
+  index: number;
+  name: string;
+  provider: JoystickProvider;
+  deviceId: string;
+  deviceClass: DeviceClass;
+  identity: DeviceIdentity;
+  vendorId: string | null;
+  productId: string | null;
+  serial: string | null;
+  /** Whether no other detected device has an id MAME could confuse with it. */
+  distinguishable: boolean;
+  allowedBindings: ControllerBinding[];
+  /** `null` when the device cannot be told apart from another one. */
+  suggestedBinding: ControllerBinding | null;
+  /** Controllers registered with this provider and device id. */
+  registeredControllers: string[];
+  notes: string[];
+}
+
+/** Mirrors `DeviceDetection` in `controllers/discovery.rs`. */
+export interface DeviceDetection {
+  installationId: string;
+  provider: JoystickProvider;
+  devices: DetectedDevice[];
+  warnings: string[];
 }
 
 export type ProfileKind = "system" | "user";
@@ -46,13 +95,15 @@ export interface ControllerProfile {
   baseFileName: string | null;
   /** Whether launches use a configuration directory of YMDB (`false` for `mame`). */
   managed: boolean;
+  /** Why the profile's base file cannot be used; the file is kept as it is. */
+  baseError: string | null;
 }
 
 /** Mirrors `Assignment`: each field left out is inherited from weaker levels. */
 export interface Assignment {
   profileId?: string;
   /** Controller ids by player, Player 1 first; `[]` assigns none. */
-  players?: string[];
+  players?: Players;
 }
 
 export type AssignmentLevel = "default" | "machine" | "software" | "machineSoftware";
@@ -79,6 +130,8 @@ export interface ControllersView {
   controllers: Controller[];
   profiles: ControllerProfile[];
   assignments: Assignments;
+  /** The joystick providers of this operating system, the one `auto` selects first. */
+  providers: JoystickProvider[];
 }
 
 /** Mirrors `ControlsSource` in `controllers/resolve.rs`. */
@@ -93,7 +146,7 @@ export interface LevelAssignment extends AssignmentTarget {
 export interface ControlsResolution {
   profileId: string;
   profileSource: ControlsSource;
-  players: string[];
+  players: Players;
   playersSource: ControlsSource | null;
   profileName: string;
   /** The levels that apply, weakest first. */
@@ -178,7 +231,7 @@ export type FieldUpdate<T> = { kind: "keep" } | { kind: "set"; value: T } | { ki
 /** Mirrors `AssignmentUpdate`: each field left out keeps its stored value. */
 export interface AssignmentUpdate {
   profileId?: FieldUpdate<string>;
-  players?: FieldUpdate<string[]>;
+  players?: FieldUpdate<Players>;
 }
 
 /**
@@ -196,6 +249,18 @@ export function updateControllerAssignment(
  * Removes the profile's `base.cfg`. The profile and the configuration MAME
  * saved in its directories are kept.
  */
+/**
+ * Detects the joysticks connected now with the installation's MAME and
+ * `provider` (the default provider when omitted). Nothing is registered.
+ * Rejects (`detectionFailed`) when the detection fails: never an empty list.
+ */
+export function detectControllerDevices(
+  installationId: string,
+  provider: JoystickProvider | null,
+): Promise<DeviceDetection> {
+  return invokeCommand("detect_controller_devices", { installationId, provider });
+}
+
 export function removeControllerProfileBase(profileId: string): Promise<ControllersView> {
   return invokeCommand("remove_controller_profile_base", { profileId });
 }

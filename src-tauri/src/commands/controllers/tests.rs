@@ -193,6 +193,61 @@ fn removes_a_base_file_and_keeps_everything_else() {
 }
 
 #[test]
+fn the_view_reports_base_files_that_can_no_longer_be_used() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state =
+        ControllersState::new(Some(dir.path())).with_data_dir(Some(&dir.path().join("data")));
+    let id = state
+        .create_profile("Neo Geo", Some(&file(BASE)))
+        .expect("profile");
+    let view = state.view().expect("view");
+    let profile = view
+        .profiles
+        .iter()
+        .find(|profile| profile.id == id)
+        .expect("profile");
+    assert_eq!(profile.base_error, None);
+    assert_eq!(view.providers, JoystickProvider::available());
+
+    // A file imported before the default section was required.
+    let paths = ControllerPaths::new(dir.path());
+    let machine_only =
+        r#"<mameconfig version="10"><system name="neogeo"><input/></system></mameconfig>"#;
+    fs::write(paths.base_file(&id), machine_only).expect("write");
+    let view = state.view().expect("view");
+    let profile = view
+        .profiles
+        .iter()
+        .find(|profile| profile.id == id)
+        .expect("profile");
+    assert!(
+        profile
+            .base_error
+            .as_deref()
+            .is_some_and(|error| error.contains("no <system name=\"default\">")),
+        "{profile:?}"
+    );
+    // Reported, never changed or removed.
+    assert_eq!(
+        fs::read_to_string(paths.base_file(&id)).expect("base"),
+        machine_only
+    );
+    fs::remove_file(paths.base_file(&id)).expect("remove");
+    let view = state.view().expect("view");
+    let profile = view
+        .profiles
+        .iter()
+        .find(|profile| profile.id == id)
+        .expect("profile");
+    assert!(
+        profile
+            .base_error
+            .as_deref()
+            .is_some_and(|error| error.contains("cannot be read"))
+    );
+}
+
+#[test]
 fn an_invalid_file_is_reported_and_never_replaced() {
     let dir = tempfile::tempdir().expect("temp dir");
     let file = dir.path().join(CONTROLLERS_FILE_NAME);

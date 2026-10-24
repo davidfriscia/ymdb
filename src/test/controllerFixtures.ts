@@ -10,6 +10,7 @@ import type {
   ControlsSource,
   FieldUpdate,
   LevelAssignment,
+  Players,
 } from "../features/controllers/controllersApi";
 
 export const MAME_PROFILE: ControllerProfile = {
@@ -19,6 +20,7 @@ export const MAME_PROFILE: ControllerProfile = {
   hasBase: false,
   baseFileName: null,
   managed: false,
+  baseError: null,
 };
 
 export function userProfile(
@@ -33,6 +35,7 @@ export function userProfile(
     hasBase: false,
     baseFileName: null,
     managed: true,
+    baseError: null,
     ...overrides,
   };
 }
@@ -50,6 +53,7 @@ export function controllersView(overrides: Partial<ControllersView> = {}): Contr
   return {
     controllers: [],
     profiles: [MAME_PROFILE],
+    providers: ["winhybrid", "dinput", "xinput", "sdljoy"],
     assignments: {
       default: { profileId: "mame" },
       machines: {},
@@ -166,6 +170,7 @@ export function controllersBackend(initial: ControllersView = controllersView())
         deviceClass: input.deviceClass,
         ...(input.deviceId ? { deviceId: input.deviceId } : {}),
         ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.binding ? { binding: input.binding } : {}),
       });
       return snapshot();
     },
@@ -180,6 +185,7 @@ export function controllersBackend(initial: ControllersView = controllersView())
               deviceClass: input.deviceClass,
               ...(input.deviceId ? { deviceId: input.deviceId } : {}),
               ...(input.provider ? { provider: input.provider } : {}),
+              ...(input.binding ? { binding: input.binding } : {}),
             }
           : entry,
       );
@@ -276,7 +282,7 @@ export function controllersBackend(initial: ControllersView = controllersView())
       }));
       let profileId = "mame";
       let profileSource: ControlsSource = "default";
-      let players: string[] = [];
+      let players: Players = [];
       let playersSource: ControlsSource | null = null;
       for (const level of levels) {
         if (level.assignment?.profileId !== undefined) {
