@@ -19,7 +19,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::installations::{InstallationsState, ResolvedInstallation};
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::catalog::freshness::{CatalogFreshness, check_freshness};
 use crate::catalog::import::{
     ImportError, ImportPhase, ImportProgress, import_catalog, import_software_lists,
@@ -132,6 +132,15 @@ impl CatalogState {
         let result = work();
         drop(job);
         result
+    }
+
+    /// Whether an import of any installation is running.
+    pub fn is_importing(&self) -> bool {
+        self.job
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .running
+            .is_some()
     }
 
     pub(super) fn cancel(&self) {
@@ -331,6 +340,7 @@ pub fn start_catalog_import(
     installations: State<'_, InstallationsState>,
     catalog: State<'_, CatalogState>,
 ) -> Result<ImportStatus, CommandError> {
+    let _change = data_change()?;
     let resolved = installations.resolve(&installation_id)?;
     catalog.start(ImportKind::Machines, resolved, &installations)
 }
@@ -343,6 +353,7 @@ pub fn start_software_list_import(
     installations: State<'_, InstallationsState>,
     catalog: State<'_, CatalogState>,
 ) -> Result<ImportStatus, CommandError> {
+    let _change = data_change()?;
     let resolved = installations.resolve(&installation_id)?;
     catalog.start(ImportKind::SoftwareLists, resolved, &installations)
 }

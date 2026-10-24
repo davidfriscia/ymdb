@@ -1,0 +1,48 @@
+/* Settings → Application Data */
+
+.app-data__list,
+.app-data__external,
+.app-data__summary {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-data__summary {
+  padding-left: 20px;
+  list-style: disc;
+}
+
+.app-data__entry {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-data__entry .message,
+.app-data__entry .actions {
+  margin-top: 4px;
+}
+
+.app-data__entry-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-data__name {
+  font-weight: 600;
+}
+
+.app-data__path {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.85em;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.app-data__external li + li {
+  margin-top: 8px;
+}

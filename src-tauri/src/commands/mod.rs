@@ -5,6 +5,7 @@
 //! execution, native dialogs) runs on the blocking thread pool so the UI and
 //! the main thread stay responsive.
 
+pub mod app_data;
 pub mod catalog;
 pub mod controllers;
 pub mod detail;
@@ -87,6 +88,10 @@ pub enum CommandError {
     },
     /// A remote repository operation failed.
     Remote { error: RemoteError },
+    /// YMDB is copying its data for a backup: changes wait for the copy to end.
+    DataBusy,
+    /// The operation is not possible now (for example a backup while MAME runs).
+    Refused { message: String },
     /// Unexpected failure (for example a native dialog error).
     Internal { message: String },
 }
@@ -97,6 +102,13 @@ impl From<StoreError> for CommandError {
             message: error.to_string(),
         }
     }
+}
+
+/// Holds the data gate (see `app_data::gate`) for a change of application
+/// data. Fails instead of waiting while a backup copies the data, so that no
+/// thread (the main thread in particular) blocks for the length of a copy.
+fn data_change() -> Result<std::sync::RwLockReadGuard<'static, ()>, CommandError> {
+    crate::app_data::gate::shared().ok_or(CommandError::DataBusy)
 }
 
 /// Runs blocking work on the blocking thread pool.
@@ -175,6 +187,10 @@ mod tests {
             })
             .expect("serialize"),
             serde_json::json!({ "kind": "remote", "error": { "kind": "timedOut" } })
+        );
+        assert_eq!(
+            serde_json::to_value(CommandError::DataBusy).expect("serialize"),
+            serde_json::json!({ "kind": "dataBusy" })
         );
     }
 }

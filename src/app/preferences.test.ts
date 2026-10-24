@@ -3,6 +3,8 @@ import {
   DEFAULT_PREFERENCES,
   LEGACY_PREFERENCES_KEY,
   PREFERENCES_KEY,
+  exportStoredPreferences,
+  importStoredPreferences,
   loadPreferences,
   savePreferences,
   type UiPreferences,
@@ -167,5 +169,34 @@ describe("UI preferences", () => {
       savePreferences(DEFAULT_PREFERENCES, failing);
     }).not.toThrow();
     expect(loadPreferences(null)).toEqual(DEFAULT_PREFERENCES);
+  });
+});
+
+describe("Stored preferences in backups", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("exports the raw stored entries only", () => {
+    expect(exportStoredPreferences()).toEqual({});
+    localStorage.setItem(PREFERENCES_KEY, '{"theme":"dark"}');
+    localStorage.setItem("other", "x");
+
+    expect(exportStoredPreferences()).toEqual({ [PREFERENCES_KEY]: '{"theme":"dark"}' });
+  });
+
+  it("replaces the stored entries, ignoring unknown keys and invalid values", () => {
+    localStorage.setItem(LEGACY_PREFERENCES_KEY, '{"theme":"dark"}');
+
+    importStoredPreferences({
+      [PREFERENCES_KEY]: JSON.stringify({ theme: "dark" }),
+      [LEGACY_PREFERENCES_KEY]: 42,
+      other: "x",
+    });
+
+    expect(localStorage.getItem(PREFERENCES_KEY)).toBe('{"theme":"dark"}');
+    expect(localStorage.getItem(LEGACY_PREFERENCES_KEY)).toBeNull();
+    expect(localStorage.getItem("other")).toBeNull();
+    expect(loadPreferences().theme).toBe("dark");
   });
 });

@@ -24,7 +24,7 @@ use super::launcher::{
     LaunchSettings, LauncherState, launch_blocking, launch_settings, prepare_resolved,
 };
 use super::remote::RemoteState;
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::installations::new_id;
 use crate::launcher::LaunchRequest;
 use crate::launcher::config::ResolvedOption;
@@ -184,6 +184,15 @@ impl RomManagerState {
             .ok_or_else(|| CommandError::NotFound {
                 message: "the download plan is no longer available; prepare it again".to_owned(),
             })
+    }
+
+    /// Whether a download (or its Download & Play launch) is running.
+    pub fn is_downloading(&self) -> bool {
+        self.job
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|job| job.finished_at.is_none())
     }
 
     pub fn status(&self) -> Option<DownloadJobStatus> {
@@ -515,6 +524,7 @@ pub fn start_download(
     remote: State<'_, RemoteState>,
     installations: State<'_, InstallationsState>,
 ) -> Result<DownloadJobStatus, CommandError> {
+    let _change = data_change()?;
     let stored = roms.plan(&plan_id)?;
     // The installation must still exist, and the connections must be those
     // the plan was built with.

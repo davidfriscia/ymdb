@@ -27,6 +27,8 @@ export type CommandError =
   | { kind: "connectionInUse"; references: ConnectionReference[] }
   | { kind: "controllersInUse"; message: string; references: AssignmentTarget[] }
   | { kind: "remote"; error: RemoteError }
+  | { kind: "dataBusy" }
+  | { kind: "refused"; message: string }
   | { kind: "internal"; message: string };
 
 /** Thrown by {@link invokeCommand} when a Tauri command fails. */
@@ -67,6 +69,8 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "connectionInUse" ||
     kind === "controllersInUse" ||
     kind === "remote" ||
+    kind === "dataBusy" ||
+    kind === "refused" ||
     kind === "internal"
   );
 }
@@ -132,6 +136,10 @@ export function describeCommandError(error: CommandError): string {
       return `Cannot be removed: ${error.message}.`;
     case "remote":
       return describeRemoteError(error.error);
+    case "dataBusy":
+      return "YMDB is copying its data for a backup. Try again in a moment.";
+    case "refused":
+      return `Not possible now: ${error.message}.`;
     case "internal":
       return `Unexpected error: ${error.message}`;
   }

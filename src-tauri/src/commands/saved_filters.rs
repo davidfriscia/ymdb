@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use super::catalog::now_millis;
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::saved_filters::{SavedFilter, SavedFilters, SavedFiltersStore};
 
 pub struct SavedFiltersState {
@@ -98,6 +98,7 @@ pub async fn create_saved_filter(
     app: AppHandle,
 ) -> Result<SavedFilterCreated, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let (id, presets) = app
             .state::<SavedFiltersState>()
             .update(|filters| filters.create(&name, criteria_version, criteria, now_millis()))?;
@@ -115,6 +116,7 @@ pub async fn update_saved_filter(
     app: AppHandle,
 ) -> Result<Vec<SavedFilter>, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let ((), presets) = app
             .state::<SavedFiltersState>()
             .update(|filters| filters.update(&id, criteria_version, criteria, now_millis()))?;
@@ -130,6 +132,7 @@ pub async fn rename_saved_filter(
     app: AppHandle,
 ) -> Result<Vec<SavedFilter>, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let ((), presets) = app
             .state::<SavedFiltersState>()
             .update(|filters| filters.rename(&id, &name, now_millis()))?;
@@ -144,6 +147,7 @@ pub async fn delete_saved_filter(
     app: AppHandle,
 ) -> Result<Vec<SavedFilter>, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let ((), presets) = app
             .state::<SavedFiltersState>()
             .update(|filters| filters.delete(&id))?;

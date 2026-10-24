@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use super::installations::InstallationsState;
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::controllers::devices::JoystickProvider;
 use crate::controllers::discovery::{self, DeviceDetection};
 use crate::controllers::model::{
@@ -393,6 +393,7 @@ pub async fn create_controller(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.create_controller(controller)?))?;
         state.view()
@@ -407,6 +408,7 @@ pub async fn update_controller(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.update_controller(&controller_id, controller)?))?;
         state.view()
@@ -421,6 +423,7 @@ pub async fn delete_controller(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.delete_controller(&controller_id)?))?;
         state.view()
@@ -446,6 +449,7 @@ pub async fn create_controller_profile(
         } else {
             None
         };
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.create_profile(&name, base.as_ref())?;
         state.view().map(Some)
@@ -460,6 +464,7 @@ pub async fn rename_controller_profile(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.rename_profile(&profile_id, &name)?))?;
         state.view()
@@ -476,6 +481,7 @@ pub async fn delete_controller_profile(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.delete_profile(&profile_id)?))?;
         state.view()
@@ -506,6 +512,7 @@ pub async fn import_controller_profile_base(
         let Some(file) = pick_controller_file(&app)? else {
             return Ok(None);
         };
+        let _change = data_change()?;
         state.import_base(&profile_id, &file)?;
         state.view().map(Some)
     })
@@ -521,6 +528,7 @@ pub async fn remove_controller_profile_base(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.remove_base(&profile_id)?;
         state.view()
@@ -538,6 +546,7 @@ pub async fn set_controller_assignment(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.set_assignment(&target, assignment)?))?;
         state.view()
@@ -556,6 +565,7 @@ pub async fn update_controller_assignment(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.update_assignment(&target, update)?))?;
         state.view()
@@ -571,6 +581,7 @@ pub async fn reset_controller_assignment(
     app: AppHandle,
 ) -> Result<ControllersView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ControllersState>();
         state.update(|config| Ok(config.reset_assignment(&target)?))?;
         state.view()

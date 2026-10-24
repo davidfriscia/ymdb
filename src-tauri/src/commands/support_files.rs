@@ -16,7 +16,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use super::catalog::now_millis;
 use super::installations::InstallationsState;
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::catalog::classification::{
     self, ClassifiedDimension, ProjectionTarget, SyncOutcome, classified_dimensions,
 };
@@ -340,6 +340,7 @@ pub async fn apply_support_file_import(
     app: AppHandle,
 ) -> Result<SupportFilesView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         app.state::<SupportFilesState>()
             .apply_import(import_id, now_millis())
     })
@@ -352,7 +353,11 @@ pub async fn remove_support_file(
     format: SupportFileFormat,
     app: AppHandle,
 ) -> Result<SupportFilesView, CommandError> {
-    run_blocking(move || app.state::<SupportFilesState>().remove(format)).await?
+    run_blocking(move || {
+        let _change = data_change()?;
+        app.state::<SupportFilesState>().remove(format)
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -362,6 +367,7 @@ pub async fn set_active_support_source(
     app: AppHandle,
 ) -> Result<SupportFilesView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         app.state::<SupportFilesState>()
             .set_active(dimension, format)
     })

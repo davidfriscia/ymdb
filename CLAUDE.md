@@ -225,6 +225,22 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   A new kind of filter needs a new criteria version and a conversion; presets of an
   unknown version are kept, never rewritten. Presets never include presentation
   settings and are never updated implicitly.
+- `src-tauri/src/app_data/`: inventory, backup and restore of application data. A
+  new persistent file must be added to the inventory (`inventory.rs`) and either to the
+  backup scope (`scope.rs`: `classify`, `CONFIG_FILES`, `replaced_names`) or documented
+  as regenerable/transient. Archive entries are logical paths accepted by
+  `scope::classify`, never absolute paths; categories are derived, never trusted.
+  Databases go into a backup only through the SQLite backup API (`CatalogStore` via
+  `with_reader`, `SupportRepository::backup_to`). Every command that changes
+  application data, and every command starting an import, a download or a MAME
+  session, holds `commands::data_change()` (the shared data gate) for the whole
+  change, never across an `.await`. A restore never replaces files while YMDB runs:
+  it stages and verifies, then `restore::recover` swaps at the next start with a
+  rollback copy and a transaction file. Never store secrets in application data; if
+  one becomes necessary, the backup policy must be decided first.
+- Window placement lives in `window_state.rs` (`window-state.json`): the window is
+  created hidden and shown after `plan_restore`; keep the normal geometry separate
+  from the maximized state.
 - Detail DTOs (`catalog/detail/`) are separate from the search DTOs. Do not embed
   unbounded one-to-many relations (clones, software of a list, machines of a list)
   in them: return a count and list them through the paginated search.
@@ -290,6 +306,12 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   Clippy, cargo test). Run it before declaring work complete.
 - `pnpm tauri build --debug --no-bundle`: compile the full application without
   creating installers (same step as CI).
+
+## Git conventions
+
+- Every commit of this repository uses the identity `david <davidfriscia@gmail.com>`
+  (author and committer), configured with `git config --local`; never change the
+  global Git configuration of the machine.
 
 ## Continuous integration
 

@@ -20,12 +20,16 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 tauri-plugin-dialog = "2"
 serde_json = "1"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 quick-xml = "0.42"
 uuid = { version = "1", features = ["v4"] }
 russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "3.0.1"
 tokio = { version = "1", features = ["fs", "net", "time", "io-util", "rt"] }
+tauri-plugin-opener = "2.7.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+sha2 = "0.10"
+fs4 = "1.1.0"
 
 [dev-dependencies]
 tempfile = "3"

@@ -122,7 +122,8 @@ state (no persistence): the pages stay mounted, so it survives visits to other p
   installation (or the one already registering a chosen executable) is shown at once.
   Choosing a section never changes the active installation.
 - **Settings** (`SettingsView`): **Appearance** (theme), **Media Sources**, **Remote
-  Connections**, **Favorites**, **Support Files**, **About** (name, version) and
+  Connections**, **Controllers**, **Favorites**, **Support Files**, **Application
+  Data** (inventory, backup and restore), **About** (name, version) and
   **Diagnostics** (backend connection check). It opens on Appearance; the selected
   section is held by the shell, so the catalog can open **Support Files** directly.
 
@@ -2143,6 +2144,13 @@ Local data directory:
 - `support-files.sqlite`: the global repository of imported support files (see
   [MAME support files](#mame-support-files--implemented)).
 - `launch-logs/`: the output of MAME sessions (the 20 most recent are kept).
+- `controller-files/`: generated controller files of device mappings (derived).
+
+The configuration directory also holds `window-state.json` (see
+[Window state](#window-state--implemented)). Exports and restores use the work
+directories `<data>/.ymdb-export/` and `<root>/.ymdb-restore/`. See
+[Application data management](#application-data-management--implemented) for the
+complete inventory and the content of a backup.
 
 All JSON files are written atomically (a temporary file in the same directory is
 written, synced and renamed over the target) and validated when read. Access is
@@ -2156,6 +2164,170 @@ directory and are shared by all MAME installations.
 
 ROM, CHD and sample download destinations are configured per installation by the ROM
 Manager (`remote-sources.json`).
+
+### Window state — Implemented
+
+`src-tauri/src/window_state.rs` keeps the placement of the main window in
+`<config>/window-state.json` (`version`, `normal` geometry, `maximized`). The official
+`tauri-plugin-window-state` was evaluated (2.4.1) and not used: it always writes to
+`app_config_dir` (ignoring `YMDB_DATA_DIR`), writes non-atomically, keeps a saved size
+larger than the current screen, and either restores a saved position unchanged or
+ignores it; its logic could not be unit-tested here. The module is small, plain logic:
+
+- **Tracking**: `Moved` and `Resized` events schedule one sampling of the window
+  300 ms later (Windows reports the move and size of a maximization before the window
+  is known as maximized, verified on Windows 11), which updates an in-memory state only.
+  A minimized window changes nothing; a maximized one updates only `maximized`, so the
+  normal geometry (outer position in physical pixels, inner size in logical pixels)
+  is never replaced by the maximized one.
+- **Saving**: once, atomically, on `CloseRequested` and again on `RunEvent::Exit` (for
+  exits without a close request, such as the restart after a restore).
+- **Restoring**: the window is created hidden (`"visible": false`, `"center": true`
+  in `tauri.conf.json`); `plan_restore` (pure, unit-tested) decides the placement from
+  the saved state and the work areas and scale factors of the available monitors, then
+  the window is moved, resized (logical size, after the move so that the target
+  monitor's scale applies), maximized if needed and shown. Rules: no or unreadable
+  file → default size, centered; invalid sizes (zero, negative, non-finite, absurd)
+  → default; sizes below the minimum are raised, sizes above the target work area
+  reduced; a window inside a monitor (16 px tolerance for invisible borders) keeps its
+  position; a window partly visible is moved fully onto the monitor showing most of
+  it; a window on no monitor (disconnected monitor, changed resolution, corrupt
+  coordinates) is centered on the primary monitor.
+
+### Application data management — Implemented
+
+`src-tauri/src/app_data/` and `commands/app_data.rs` provide the inventory of the
+application data, full backups and full restores (**Settings → Application Data**,
+`features/app-data/`).
+
+#### Inventory
+
+| Data                                | Location                                                  | Class       | Backup                         |
+| ----------------------------------- | --------------------------------------------------------- | ----------- | ------------------------------ |
+| MAME installations                  | `<config>/installations.json`                             | owned       | yes                            |
+| Launch configurations               | `<config>/installations/<id>/launch.json`                 | owned       | yes                            |
+| ROM Manager sources                 | `<config>/installations/<id>/remote-sources.json`         | owned       | yes                            |
+| Profile MAME configurations         | `<config>/installations/<id>/controller-profiles/<p>/cfg` | owned       | yes                            |
+| Controllers, profiles, assignments  | `<config>/controllers.json`                               | owned       | yes                            |
+| Controller profile base files       | `<config>/controller-profiles/<p>/base.cfg`               | owned       | yes                            |
+| Favorites and lists                 | `<config>/lists.json`                                     | owned       | yes                            |
+| Saved filters                       | `<config>/saved-filters.json`                             | owned       | yes                            |
+| Media sources                       | `<config>/media.json`                                     | owned       | yes                            |
+| Remote connections                  | `<config>/remote-connections.json`                        | owned       | yes (contains no secrets)      |
+| Single-installation layout          | `<config>/settings.json`, `<config>/launch.json`          | owned       | yes                            |
+| Interface preferences               | webview `localStorage` (`ymdb.preferences.v2`)            | owned       | yes (sent by the frontend)     |
+| Catalogs                            | `<data>/installations/<id>/catalog.sqlite`                | owned       | yes (SQLite backup API)        |
+| Support files repository            | `<data>/support-files.sqlite`                             | owned       | yes (SQLite backup API)        |
+| Classification projections          | `<data>/installations/<id>/classifications.sqlite`        | regenerable | no: rebuilt by `sync_catalog`  |
+| Window state                        | `<config>/window-state.json`                              | regenerable | no: depends on the monitors    |
+| Generated controller files          | `<data>/controller-files/`                                | regenerable | no: written before launches    |
+| Webview data and caches             | `<data>/EBWebView` (Windows)                              | regenerable | no                             |
+| Launch logs                         | `<data>/launch-logs/`                                     | transient   | no                             |
+| Partial and temporary files         | `catalog.sqlite.partial`, `*.tmp`, `*.ymdb-download`      | transient   | no                             |
+| Export and restore work directories | `<data>/.ymdb-export/`, `<root>/.ymdb-restore/`           | transient   | no                             |
+| Legacy catalog                      | `<data>/catalog.sqlite`                                   | legacy      | no: unused after the migration |
+| MAME, ROMs, CHDs, samples, media    | paths in the configuration                                | external    | never: only the references     |
+| Private keys, `known_hosts`         | paths in the configuration, `~/.ssh`                      | external    | never: only the references     |
+
+Paths come from the stores and `AppLayout`; the frontend only receives them. YMDB
+stores no password, passphrase, token or key (`remote-connections.json` holds the
+key path and the approved public host key), so backups need no secret handling. The
+section has no action that deletes files.
+
+#### Backup format
+
+A ZIP archive (`.ymdb-backup.zip`, deflate) with one top-level directory:
+
+```text
+ymdb-backup/
+  manifest.json
+  config/...                               # files of the configuration root
+  data/installations/<id>/catalog.sqlite
+  data/support-files.sqlite
+  interface-preferences.json
+```
+
+`manifest.json`: `format` (`ymdb-backup`), `formatVersion` (1), `appVersion`,
+`createdAt` (ms), `platform` (`os`, `arch`), `schemas` (schema versions of the
+installations registry, the catalog and the repository) and `items` (logical path,
+category, kind `file`/`sqlite`, size, SHA-256). Entry names are logical paths, never
+absolute paths. The accepted paths are defined by `scope::classify`, which also
+derives each category (the category written in the manifest must match it).
+
+#### Export
+
+1. With the data gate (`app_data/gate.rs`) held exclusively: refuse if MAME sessions,
+   a catalog import or a download run; copy the JSON and profile files byte for byte
+   (no symlinks, no `*.tmp`) and the databases with the SQLite backup API (WAL pages
+   included, uncommitted transactions excluded; copies in rollback-journal mode and
+   `quick_check`ed) into `<data>/.ymdb-export/<uuid>/`.
+2. Without the gate: write `<destination>.partial`, reopen it with the import checks
+   and verify every checksum, then rename it to the destination.
+3. Failures and cancellation remove the partial file and the work directory; the
+   application data is only read.
+
+The **data gate** is a process-wide `RwLock`: every command that changes application
+data holds it shared (`commands::data_change`), as do the commands starting a catalog
+import, a download or a MAME session. Exclusive requests wait for the changes in
+progress; while one waits or holds the gate, new changes fail with `dataBusy` instead
+of blocking a thread. The snapshot is therefore consistent across all files (JSON,
+profile files and databases), not only within each database.
+
+#### Import
+
+1. **Check and stage** (dedicated thread, cancellable): `archive::open` refuses
+   non-ZIP files, entries outside `ymdb-backup/`, unsafe paths (absolute, `..`, drive
+   letters, backslashes, reserved names), symlinks, non-regular files, encrypted
+   entries, compression methods other than stored and deflate, duplicate names (also
+   ignoring case), implausible compression ratios, more than 100 000 entries or
+   256 GiB, files missing from the archive or from the manifest and size mismatches.
+   The manifest must be compatible (below) and the free space sufficient. Items are
+   extracted to `<root>/.ymdb-restore/staged/` without ever reading more bytes than
+   declared, with size and checksum verified; then every staged file is loaded by its
+   store (registry, lists, controllers, saved filters, media, connections, launch
+   configurations, remote sources) and every database is `quick_check`ed with its
+   schema version compared. The preview lists the backup, the current data replaced
+   (by category) and the external references missing on this computer.
+2. **Confirm**: with the data gate held exclusively and no session, import or
+   download running, `restore::schedule` writes `<config>/.ymdb-restore/transaction.json`
+   and YMDB restarts (`AppHandle::restart`; the gate stays held until the process
+   exits).
+3. **Swap at startup** (`restore::recover`, before any state opens a file): the
+   transaction records which replaced names exist, they are moved to
+   `<root>/.ymdb-restore/rollback/`, the staged data is moved into place (renames
+   within each root) and every item's size is checked. Replaced names: the
+   configuration files of the inventory plus `installations/` and
+   `controller-profiles/`; in the data root `installations/` and `support-files.sqlite`
+   with its journal, WAL and SHM files. Other files (window state, logs, generated
+   files, MAME files) are not touched. On success the rollback copy is deleted and the
+   outcome (with the interface preferences, which the frontend writes back to
+   `localStorage`) is reported once by `take_restore_outcome`.
+4. **Rollback**: any failure puts the previous data back (from the rollback copy;
+   items that did not exist before are removed). A transaction found in the
+   `swapping` phase (crash, power loss) is rolled back at the next start. If the
+   system refuses a rename during the rollback, the transaction is kept and recovery
+   is retried at the next start; nothing is deleted. An unreadable transaction file
+   stops the procedure without changing anything. The rollback cannot be guaranteed
+   against failures YMDB cannot repair (a damaged disk, a file kept locked by another
+   program across restarts).
+
+#### Version compatibility
+
+- Same version: accepted.
+- Older versions: accepted; JSON files load with field defaults, catalogs and the
+  repository are upgraded in place by their additive migrations when opened. The
+  backup archive itself remains the recovery copy.
+- Newer YMDB versions, newer format versions or newer schema versions: refused (no
+  silent downgrade).
+- Another platform: accepted with a note; external paths are kept as they are and
+  shown as missing.
+
+#### Commands
+
+`get_application_data`, `open_application_data_location` (by entry id),
+`start_backup_export` (native save dialog), `start_backup_import_check` (native file
+picker), `get_backup_status` (polled), `cancel_backup_job`, `discard_backup_job`,
+`apply_backup_import` (restarts YMDB) and `take_restore_outcome`.
 
 ### User lists (Favorites) — Implemented
 

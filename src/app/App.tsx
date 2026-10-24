@@ -7,7 +7,13 @@ import { MamePage } from "../features/installations/MamePage";
 import { LauncherProvider } from "../features/launcher/LauncherProvider";
 import { FavoritesProvider } from "../features/lists/FavoritesProvider";
 import { MediaProvider } from "../features/media/MediaProvider";
-import { loadPreferences, savePreferences, type UiPreferences } from "./preferences";
+import { takeRestoreOutcome, type RestoreOutcome } from "../features/app-data/appDataApi";
+import {
+  importStoredPreferences,
+  loadPreferences,
+  savePreferences,
+  type UiPreferences,
+} from "./preferences";
 import { SettingsView, type SettingsSection } from "./SettingsView";
 import { applyTheme } from "./theme/themes";
 
@@ -59,6 +65,31 @@ function Shell() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const onSupportFilesChanged = useCallback(() => {
     setSupportVersion((version) => version + 1);
+  }, []);
+  const [restoreOutcome, setRestoreOutcome] = useState<RestoreOutcome | null>(null);
+
+  // A restore applied at this start: restore the interface preferences of
+  // the backup and show the result in Settings.
+  useEffect(() => {
+    let active = true;
+    takeRestoreOutcome().then(
+      (outcome) => {
+        if (!active || outcome === null) return;
+        if (outcome.kind === "restored" && outcome.interfacePreferences !== null) {
+          importStoredPreferences(outcome.interfacePreferences);
+          setPreferences(loadPreferences());
+        }
+        setRestoreOutcome(outcome);
+        setSettingsSection("applicationData");
+        setView("settings");
+      },
+      () => {
+        // Without an outcome there is nothing to report.
+      },
+    );
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -161,6 +192,7 @@ function Shell() {
             section={settingsSection}
             onSectionChange={setSettingsSection}
             onSupportFilesChanged={onSupportFilesChanged}
+            restoreOutcome={restoreOutcome}
           />
         </main>
       </div>

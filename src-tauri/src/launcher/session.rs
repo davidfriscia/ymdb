@@ -213,6 +213,14 @@ impl SessionManager {
             .collect()
     }
 
+    /// Number of running sessions of every installation.
+    pub fn running_total(&self) -> usize {
+        self.lock()
+            .iter()
+            .filter(|session| session.info.state == SessionState::Running)
+            .count()
+    }
+
     /// Number of running sessions started from an installation.
     pub fn running_for(&self, installation_id: &str) -> usize {
         self.lock()

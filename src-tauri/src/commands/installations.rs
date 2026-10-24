@@ -15,7 +15,7 @@ use tauri::State;
 
 use super::catalog::CatalogState;
 use super::launcher::LauncherState;
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::catalog::store::{CATALOG_FILE_NAME, CatalogStore};
 use crate::installations::migration::{MigrationError, load_or_migrate};
 use crate::installations::registry::{
@@ -134,6 +134,30 @@ impl InstallationsState {
             .entry(id.to_owned())
             .or_insert_with(|| CatalogStore::in_dir(&layout.catalog_dir(id)))
             .clone()
+    }
+
+    /// Closes the cached read connections of the catalogs (those not in use
+    /// by a query), before the application restarts to restore a backup.
+    pub fn release_catalog_readers(&self) {
+        for store in self
+            .catalogs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+        {
+            store.release_reader();
+        }
+    }
+
+    /// The store of a catalog directory for a backup: the shared instance of
+    /// a known installation (so that its file lock applies), otherwise a new one.
+    pub fn backup_catalog_store(&self, id: &str) -> Result<CatalogStore, CommandError> {
+        let layout = self.layout()?;
+        let stores = self.catalogs.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(stores
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| CatalogStore::in_dir(&layout.catalog_dir(id))))
     }
 
     /// Number of catalogs with an open read connection.
@@ -397,6 +421,7 @@ pub async fn add_installation(
             installation: None,
         });
     }
+    let _change = data_change()?;
     let id = installations.register(&report)?;
     Ok(InstallationValidation {
         installation: Some(installations.summary(&id)?),
@@ -417,6 +442,7 @@ pub async fn verify_installation(
         .executable_path;
     let report = run_blocking(move || validate_executable(&path)).await?;
     if let Some(version) = report.version.clone().filter(|_| report.is_valid()) {
+        let _change = data_change()?;
         installations.record_verification(
             &installation_id,
             version,
@@ -437,6 +463,7 @@ pub fn rename_installation(
     display_name: Option<String>,
     installations: State<'_, InstallationsState>,
 ) -> Result<InstallationSummary, CommandError> {
+    let _change = data_change()?;
     installations.rename(&installation_id, display_name.as_deref())?;
     installations.summary(&installation_id)
 }
@@ -448,6 +475,7 @@ pub fn set_active_installation(
     installation_id: String,
     installations: State<'_, InstallationsState>,
 ) -> Result<InstallationsView, CommandError> {
+    let _change = data_change()?;
     installations.set_active(&installation_id)?;
     installations.view()
 }
@@ -464,6 +492,7 @@ pub fn remove_installation(
     catalog: State<'_, CatalogState>,
     launcher: State<'_, LauncherState>,
 ) -> Result<RemovalResult, CommandError> {
+    let _change = data_change()?;
     let resolved = installations.resolve(&installation_id)?;
     catalog.while_not_importing(&installation_id, || {
         let running = launcher.running_sessions(&installation_id);

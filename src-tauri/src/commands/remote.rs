@@ -19,7 +19,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use super::installations::{InstallationsState, ResolvedInstallation};
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::installations::new_id;
 use crate::launcher::options::OptionValue;
 use crate::mame::ini::{NativeSearchPaths, read_search_paths, resolve_entry};
@@ -258,6 +258,7 @@ pub fn save_remote_connection(
     connection: ConnectionInput,
     remote: State<'_, RemoteState>,
 ) -> Result<ConnectionsView, CommandError> {
+    let _change = data_change()?;
     save_connection(&remote, connection)
 }
 
@@ -269,6 +270,7 @@ pub fn remove_remote_connection(
     remote: State<'_, RemoteState>,
     installations: State<'_, InstallationsState>,
 ) -> Result<ConnectionsView, CommandError> {
+    let _change = data_change()?;
     remove_connection(&remote, &installations, &connection_id)
 }
 
@@ -291,6 +293,7 @@ pub fn approve_remote_host_key(
     fingerprint: String,
     remote: State<'_, RemoteState>,
 ) -> Result<ConnectionsView, CommandError> {
+    let _change = data_change()?;
     approve_host_key(&remote, &connection_id, &fingerprint)
 }
 
@@ -300,6 +303,7 @@ pub fn forget_remote_host_key(
     connection_id: String,
     remote: State<'_, RemoteState>,
 ) -> Result<ConnectionsView, CommandError> {
+    let _change = data_change()?;
     remote.update(|config| {
         config
             .set_approved_host_key(&connection_id, None)
@@ -647,6 +651,7 @@ pub async fn save_remote_sources(
 ) -> Result<RemoteSourcesView, CommandError> {
     use tauri::Manager;
     run_blocking(move || {
+        let _change = data_change()?;
         save_sources(
             &app.state::<InstallationsState>(),
             &app.state::<RemoteState>(),

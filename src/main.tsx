@@ -13,6 +13,7 @@ import "./features/roms/roms.css";
 import "./features/lists/lists.css";
 import "./features/support-files/supportFiles.css";
 import "./features/controllers/controllers.css";
+import "./features/app-data/appData.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

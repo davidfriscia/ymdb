@@ -89,3 +89,42 @@ function safeStorage(): Storage | null {
     return null;
   }
 }
+
+/**
+ * The stored interface preferences as raw entries, for application data
+ * backups (the webview storage is not a file YMDB can copy).
+ */
+export function exportStoredPreferences(
+  storage: Storage | null = safeStorage(),
+): Record<string, string> {
+  const entries: Record<string, string> = {};
+  for (const key of [PREFERENCES_KEY, LEGACY_PREFERENCES_KEY]) {
+    try {
+      const value = storage?.getItem(key);
+      if (typeof value === "string") entries[key] = value;
+    } catch {
+      // Unreadable storage: the backup has no interface preferences.
+    }
+  }
+  return entries;
+}
+
+/**
+ * Replaces the stored interface preferences with entries from a restored
+ * backup. Unknown keys and non-string values are ignored; the values are
+ * validated when read, like any stored preferences.
+ */
+export function importStoredPreferences(
+  entries: Record<string, unknown>,
+  storage: Storage | null = safeStorage(),
+): void {
+  try {
+    for (const key of [PREFERENCES_KEY, LEGACY_PREFERENCES_KEY]) {
+      const value = entries[key];
+      if (typeof value === "string") storage?.setItem(key, value);
+      else storage?.removeItem(key);
+    }
+  } catch {
+    // Storage unavailable: the defaults apply.
+  }
+}

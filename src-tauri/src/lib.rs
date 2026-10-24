@@ -1,5 +1,6 @@
 //! Application core of Your MAME DB (YMDB).
 
+mod app_data;
 mod atomic_file;
 mod catalog;
 mod commands;
@@ -15,12 +16,15 @@ mod roms;
 mod saved_filters;
 mod settings;
 mod support_files;
+mod window_state;
 
 use std::env;
 use std::path::PathBuf;
 
-use tauri::Manager;
+use tauri::{Manager, RunEvent, WindowEvent};
 
+use crate::app_data::AppDirs;
+use crate::commands::app_data::AppDataState;
 use crate::commands::catalog::CatalogState;
 use crate::commands::controllers::ControllersState;
 use crate::commands::installations::InstallationsState;
@@ -34,6 +38,7 @@ use crate::commands::support_files::SupportFilesState;
 use crate::installations::AppLayout;
 use crate::media::config::MediaConfigStore;
 use crate::media::protocol::SCHEME;
+use crate::window_state::WindowStateTracker;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,6 +56,19 @@ pub fn run() {
             // Missing directories are reported by the commands that need them
             // instead of preventing the application from starting.
             let (config_dir, data_dir) = app_dirs(app.path());
+            // A confirmed restore replaces the data before anything opens it.
+            let dirs = config_dir
+                .as_deref()
+                .zip(data_dir.as_deref())
+                .map(|(config, data)| AppDirs::new(config, data));
+            let restore_outcome = dirs.as_ref().and_then(app_data::restore::recover);
+            if let Some(dirs) = &dirs {
+                app_data::export::remove_work_dirs(dirs);
+            }
+            let webview_dir = commands::app_data::webview_data_dir(
+                app.path().app_local_data_dir().ok().as_deref(),
+            );
+            app.manage(AppDataState::new(dirs, webview_dir, restore_outcome));
             // Catalogs are large, machine-specific derived data: they belong
             // in the local (non-roaming) data directory. Loading the registry
             // upgrades the single-installation layout if needed; MAME is not run.
@@ -73,6 +91,7 @@ pub fn run() {
             app.manage(
                 ControllersState::new(config_dir.as_deref()).with_data_dir(data_dir.as_deref()),
             );
+            restore_main_window(app, config_dir.as_deref());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -152,9 +171,50 @@ pub fn run() {
             commands::controllers::reset_controller_assignment,
             commands::controllers::resolve_controls,
             commands::controllers::detect_controller_devices,
+            commands::app_data::get_application_data,
+            commands::app_data::open_application_data_location,
+            commands::app_data::start_backup_export,
+            commands::app_data::start_backup_import_check,
+            commands::app_data::get_backup_status,
+            commands::app_data::cancel_backup_job,
+            commands::app_data::discard_backup_job,
+            commands::app_data::apply_backup_import,
+            commands::app_data::take_restore_outcome,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run the YMDB application");
+        .build(tauri::generate_context!())
+        .expect("failed to build the YMDB application")
+        .run(|app, event| {
+            // Also covers exits without a close request (restart after a restore).
+            if let RunEvent::Exit = event
+                && let Some(tracker) = app.try_state::<WindowStateTracker>()
+            {
+                tracker.save();
+            }
+        });
+}
+
+/// Applies the saved placement to the main window (created hidden), shows
+/// it, and tracks its placement until it closes.
+fn restore_main_window(app: &tauri::App, config_dir: Option<&std::path::Path>) {
+    app.manage(WindowStateTracker::new(config_dir));
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let tracker = app.state::<WindowStateTracker>();
+    tracker.restore(&window);
+    tracker.track(&window);
+    let handle = window.clone();
+    window.on_window_event(move |event| {
+        let tracker = handle.state::<WindowStateTracker>();
+        match event {
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => tracker.schedule_track(&handle),
+            WindowEvent::CloseRequested { .. } => {
+                tracker.track(&handle);
+                tracker.save();
+            }
+            _ => {}
+        }
+    });
 }
 
 /// Configuration and local data directories. `YMDB_DATA_DIR`, when set, puts

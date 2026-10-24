@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { ApplicationDataSettings } from "../features/app-data/ApplicationDataSettings";
+import type { RestoreOutcome } from "../features/app-data/appDataApi";
 import { HealthCheck } from "../features/health-check/HealthCheck";
 import { MediaSourcesSettings } from "../features/media/MediaSourcesSettings";
 import { RemoteConnectionsSettings } from "../features/remote/RemoteConnectionsSettings";
@@ -16,6 +18,7 @@ export type SettingsSection =
   | "controllers"
   | "favorites"
   | "supportFiles"
+  | "applicationData"
   | "about"
   | "diagnostics";
 
@@ -26,6 +29,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "controllers", label: "Controllers" },
   { id: "favorites", label: "Favorites" },
   { id: "supportFiles", label: "Support Files" },
+  { id: "applicationData", label: "Application Data" },
   { id: "about", label: "About" },
   { id: "diagnostics", label: "Diagnostics" },
 ];
@@ -38,6 +42,8 @@ interface SettingsViewProps {
   onSectionChange: (section: SettingsSection) => void;
   /** The support files changed: catalogs reload their classifications. */
   onSupportFilesChanged: () => void;
+  /** Result of a restore applied when YMDB started, if any. */
+  restoreOutcome?: RestoreOutcome | null;
 }
 
 /**
@@ -50,6 +56,7 @@ export function SettingsView({
   section: selected,
   onSectionChange: setSelected,
   onSupportFilesChanged,
+  restoreOutcome = null,
 }: SettingsViewProps) {
   // Sections stay mounted once opened, so that unsaved forms are kept.
   const visited = useVisited(selected);
@@ -69,6 +76,8 @@ export function SettingsView({
         return <FavoritesSettings />;
       case "supportFiles":
         return <SupportFilesSettings onChanged={onSupportFilesChanged} />;
+      case "applicationData":
+        return <ApplicationDataSettings restoreOutcome={restoreOutcome} />;
       case "about":
         return <About />;
       case "diagnostics":

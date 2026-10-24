@@ -87,6 +87,14 @@ To run YMDB with separate, empty data (for tests or a portable setup), set
 `YMDB_DATA_DIR` to a directory: settings, catalog, launch and media configuration are
 then stored in its `config/` and `data/` subdirectories instead of the user's.
 
+Commits use one identity for author and committer, `david <davidfriscia@gmail.com>`,
+set in the repository's local Git configuration:
+
+```sh
+git config --local user.name "david"
+git config --local user.email "davidfriscia@gmail.com"
+```
+
 ## MAME installations
 
 YMDB uses MAME installations that already exist on your computer. It never downloads
@@ -723,6 +731,58 @@ mixer and video settings, so these are per controller profile and MAME installat
 too: a new profile starts from MAME's defaults. Two sessions using the same profile
 get a warning, since the last one to exit keeps its general settings.
 
+## Window state
+
+YMDB reopens its main window as it was closed: maximized if it was maximized,
+otherwise at the same position and size. The last normal geometry is kept separately
+from the maximized state, so leaving the maximized state after a restart brings back
+the previous size and position. The state is saved in `window-state.json` (in the
+configuration directory) when the window closes. At startup it is checked against the
+monitors available: a size larger than the screen is reduced, a window partly off
+screen is moved onto its monitor, and a window whose monitor is no longer connected
+(or a missing or damaged file) opens on the primary monitor. The window is shown only
+after its placement is applied.
+
+## Application data and backups
+
+**Settings → Application Data** lists every file and directory YMDB uses on this
+computer, with its purpose, absolute path, presence, size, number of files and
+whether it is part of a backup. **Open location** shows it in the file manager and
+**Copy path** copies its path. Files created only on first use are shown as "Not
+created yet". Data referenced by the configuration but not owned by YMDB (MAME
+executables, media directories, ROM destinations, private keys) is listed separately
+with its availability.
+
+**Export backup…** writes one archive (`ymdb-<date>-<time>.ymdb-backup.zip`) with
+every file YMDB owns: installations, launch configurations, ROM Manager sources,
+controllers and controller profile files (including the MAME configuration
+directories of profiles), favorites and lists, saved filters, media sources, remote
+connections, catalogs, the support files repository and the interface preferences.
+Databases are copied with the SQLite backup API, and the export waits for changes in
+progress and refuses new ones while it copies, so the archive is one consistent
+snapshot. The archive is verified (checksums included) before it gets its final name.
+
+Not included: ROMs, CHDs, samples, MAME installations and their files, media files,
+private keys, launch logs, generated controller files, classification projections
+(rebuilt from the catalogs and support files) and the window state. YMDB stores no
+password, passphrase or key, so a backup contains no secrets: remote connections keep
+the path of the private key and the approved public server identity.
+
+**Import backup…** checks the archive first (format and version, paths, sizes,
+checksums, no links or unexpected files, decompression limits, free space), extracts
+it to a staging directory and loads every file with the code that reads it, without
+changing the current data. A preview then shows the backup (date, YMDB version,
+platform, contents), the current data it replaces and the external paths missing on
+this computer. After confirmation (**Full restore — replace current application
+data**) YMDB restarts and replaces its data before opening it; the previous data is
+kept aside and put back if anything fails, and a restore interrupted by a crash is
+rolled back at the next start. External files are never copied or overwritten; paths
+that do not exist on this computer remain in the configuration and can be corrected.
+
+Export and import are refused while MAME, a catalog import or a ROM download runs.
+Backups of the same or an older YMDB version can be imported (their data is upgraded
+when read); backups of a newer version are refused.
+
 ## Testing and quality checks
 
 | Command             | Description                               |
@@ -844,6 +904,11 @@ Implemented:
   software list ROMs and CHDs, samples) with local and remote availability, warnings,
   sequential downloads with progress, cancellation and retry, and Download & Play (see
   [Downloading missing files](#downloading-missing-files-rom-manager)).
+- Window state persistence: maximized state, position and size, checked against the
+  connected monitors at startup (see [Window state](#window-state)).
+- Application data management: inventory of the files YMDB uses, full backup to a
+  verified ZIP archive and full restore with preview, staging and rollback (see
+  [Application data and backups](#application-data-and-backups)).
 - A `check_health` Tauri command that verifies frontend-backend communication and
   reports the application status, operating system, architecture and version.
 - Linting, formatting and test tooling for both the frontend and the Rust core.

@@ -12,7 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::atomic_file;
 use crate::catalog::search::ListMembers;
 use crate::lists::exchange::{self, ListImportSummary, ParsedImport};
@@ -234,6 +234,7 @@ pub async fn set_list_membership(
     app: AppHandle,
 ) -> Result<bool, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<ListsState>();
         let changed = state.read(|lists| {
             lists
@@ -326,7 +327,11 @@ pub async fn apply_lists_import(
     mode: ImportMode,
     app: AppHandle,
 ) -> Result<Vec<ImportOutcome>, CommandError> {
-    run_blocking(move || app.state::<ListsState>().apply_import(import_id, mode)).await?
+    run_blocking(move || {
+        let _change = data_change()?;
+        app.state::<ListsState>().apply_import(import_id, mode)
+    })
+    .await?
 }
 
 #[cfg(test)]

@@ -252,6 +252,13 @@ impl SupportRepository {
         Ok(connection)
     }
 
+    /// Writes a consistent copy of the repository to `destination` (SQLite
+    /// backup API), for application data backups.
+    pub fn backup_to(&self, destination: &Path) -> Result<(), RepositoryError> {
+        let connection = self.open()?;
+        crate::app_data::sqlite_backup(&connection, destination).map_err(RepositoryError::Invalid)
+    }
+
     pub fn snapshot(&self) -> Result<RepositorySnapshot, RepositoryError> {
         let connection = self.open()?;
         let repository_id: String = connection.query_row(

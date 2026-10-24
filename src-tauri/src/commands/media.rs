@@ -8,7 +8,7 @@ use tauri::http::{Response, header};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::media::config::{
     CATEGORIES, MediaCategory, MediaConfig, MediaConfigStore, MediaStoreError, SourceStatus,
     source_status,
@@ -119,6 +119,7 @@ pub async fn save_media_sources(
     app: AppHandle,
 ) -> Result<MediaSourcesView, CommandError> {
     run_blocking(move || {
+        let _change = data_change()?;
         let state = app.state::<MediaState>();
         let store = state.store.as_ref().ok_or_else(|| CommandError::Settings {
             message: "the application configuration directory is unavailable".to_owned(),

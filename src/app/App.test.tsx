@@ -26,6 +26,7 @@ const EMPTY: Record<string, unknown> = {
   get_support_files: { sources: [], dimensions: [] },
   get_classification_status: { dimensions: [], syncError: null },
   get_saved_filters: [],
+  take_restore_outcome: null,
 };
 
 function storedPreferences(): unknown {
@@ -96,6 +97,7 @@ describe("App", () => {
       "Controllers",
       "Favorites",
       "Support Files",
+      "Application Data",
       "About",
       "Diagnostics",
     ]);
@@ -282,5 +284,52 @@ describe("App", () => {
       renderer: "classicCards",
       rendererOptions: { classicCards: { cardSize: 220 } },
     });
+  });
+});
+
+describe("App after a restore", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+    invokeMock.mockReset();
+  });
+
+  it("applies the restored interface preferences and reports the restore", async () => {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ theme: "light" }));
+    responses = {
+      ...EMPTY,
+      take_restore_outcome: {
+        kind: "restored",
+        createdAt: Date.UTC(2026, 9, 24, 12, 0),
+        appVersion: "0.1.0",
+        interfacePreferences: { [PREFERENCES_KEY]: JSON.stringify({ theme: "dark" }) },
+      },
+      get_application_data: {
+        configDir: "C:/ymdb/config",
+        dataDir: "C:/ymdb/data",
+        customDataDir: false,
+        entries: [],
+        externalReferences: [],
+        restorePending: false,
+      },
+      get_backup_status: { state: "idle" },
+    };
+    invokeMock.mockImplementation((command: string) =>
+      command in responses
+        ? Promise.resolve(responses[command])
+        : Promise.reject(new Error(`unexpected command ${command}`)),
+    );
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/Application data restored from the backup created on/),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "Application Data" })).toBeVisible();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(storedPreferences()).toMatchObject({ theme: "dark" });
+    expect(invokeMock.mock.calls.filter(([name]) => name === "take_restore_outcome")).toHaveLength(
+      1,
+    );
   });
 });

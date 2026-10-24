@@ -13,7 +13,7 @@ use tauri::State;
 
 use super::controllers::ControllersState;
 use super::installations::{InstallationsState, ResolvedInstallation};
-use super::{CommandError, run_blocking};
+use super::{CommandError, data_change, run_blocking};
 use crate::catalog::freshness::{CatalogFreshness, check_freshness};
 use crate::catalog::store::CatalogInfo;
 use crate::controllers::ControllerPaths;
@@ -49,6 +49,11 @@ impl LauncherState {
     fn load(&self, resolved: &ResolvedInstallation) -> Result<LaunchConfig, LaunchStoreError> {
         let _guard = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
         resolved.launch_config.load()
+    }
+
+    /// Running sessions of every installation.
+    pub fn running_sessions_total(&self) -> usize {
+        self.sessions.running_total()
     }
 
     /// Running sessions started from an installation.
@@ -108,6 +113,7 @@ pub fn save_launch_config(
     installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
 ) -> Result<LaunchConfigView, CommandError> {
+    let _change = data_change()?;
     let resolved = installations.resolve(&installation_id)?;
     let _guard = launcher.lock.lock().unwrap_or_else(PoisonError::into_inner);
     let saved = resolved
@@ -185,6 +191,8 @@ fn start_session(
     prepared: PreparedLaunch,
     label: String,
 ) -> Result<SessionInfo, CommandError> {
+    // MAME writes the configuration directories of controller profiles.
+    let _change = data_change()?;
     launcher
         .sessions
         .start_with_warnings(
