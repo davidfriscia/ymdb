@@ -123,6 +123,22 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   Input/controller options belong to the future input devices feature.
 - Game sessions have no timeout and are never killed implicitly (not even when YMDB
   exits); only an explicit, confirmed Stop terminates them.
+- `src-tauri/src/controllers/`: controllers, controller profiles and assignments in the
+  global `controllers.json` (same store rules as `lists.json`). MAME configures inputs
+  and saves them; YMDB never writes `default.cfg`, `<machine>.cfg` or other MAME
+  files and has no button editor. The system profile `mame` passes no option and
+  must keep the launcher's command line unchanged (keep its regression test). A user
+  profile owns `installations/<id>/controller-profiles/<profileId>/cfg` (passed as
+  `-cfg_directory`, never shared between installations or profiles, never the
+  installation's own `cfg`) and an optional verbatim `controller-profiles/<profileId>/base.cfg`
+  (`-ctrlrpath`/`-ctrlr base`); without it, pass `-ctrlr ""` so that no INI `ctrlr`
+  applies. `ctrlr`/`ctrlrpath` are never launch option definitions. Profile and
+  players are resolved separately (default < machine < software < machine+software
+  < request); launch profiles are unrelated. `prepare`/preview create nothing: the
+  directory is created by `controls::materialize` right before MAME starts.
+  Referenced profiles and controllers are not deleted; profile files are never
+  deleted automatically. Controllers produce no MAME option until `mapdevice`
+  support: never present player assignments as physical bindings.
 - `src-tauri/src/remote/`: remote repositories. The ROM manager talks to repositories
   only through `provider::RemoteRepository`; a new protocol is a new `ProviderConfig`
   and `Repository` variant (never a reinterpretation of existing connections), and

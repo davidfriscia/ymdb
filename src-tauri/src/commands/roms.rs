@@ -18,13 +18,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
+use super::controllers::ControllersState;
 use super::installations::{InstallationsState, ResolvedInstallation};
-use super::launcher::{LauncherState, launch_blocking, launch_config, prepare_resolved};
+use super::launcher::{
+    LaunchSettings, LauncherState, launch_blocking, launch_settings, prepare_resolved,
+};
 use super::remote::RemoteState;
 use super::{CommandError, run_blocking};
 use crate::installations::new_id;
 use crate::launcher::LaunchRequest;
-use crate::launcher::config::{LaunchConfig, ResolvedOption};
+use crate::launcher::config::ResolvedOption;
 use crate::launcher::options::OptionValue;
 use crate::launcher::session::{LaunchTarget, SessionInfo};
 use crate::mame::ini::read_search_paths;
@@ -337,11 +340,11 @@ struct LocalPlan {
 /// checks them locally. Blocking.
 fn local_plan(
     resolved: &ResolvedInstallation,
-    config: &LaunchConfig,
+    settings: &LaunchSettings,
     request: &LaunchRequest,
     connections: &ConnectionsConfig,
 ) -> Result<LocalPlan, CommandError> {
-    let prepared = prepare_resolved(resolved, config, request)?;
+    let prepared = prepare_resolved(resolved, settings, request)?;
     let mut warnings = Vec::new();
     let sources = resolved.remote_sources.load().unwrap_or_else(|error| {
         warnings.push(PlanWarning {
@@ -447,7 +450,7 @@ pub async fn prepare_download_plan(
     let launcher = app.state::<LauncherState>();
     let remote = app.state::<RemoteState>();
     let resolved = installations.resolve(&request.installation_id)?;
-    let config = launch_config(&launcher, &resolved)?;
+    let settings = launch_settings(&launcher, &app.state::<ControllersState>(), &resolved)?;
     let installation_label = resolved.installation.label();
     let mut warnings = Vec::new();
     let connections = remote.load().unwrap_or_else(|error| {
@@ -463,7 +466,7 @@ pub async fn prepare_download_plan(
     });
 
     let (local, request, connections) = run_blocking(move || {
-        local_plan(&resolved, &config, &request, &connections)
+        local_plan(&resolved, &settings, &request, &connections)
             .map(|local| (local, request, connections))
     })
     .await??;
@@ -536,6 +539,7 @@ pub fn start_download(
             match launch_blocking(
                 &app.state::<InstallationsState>(),
                 &app.state::<LauncherState>(),
+                &app.state::<ControllersState>(),
                 request,
             ) {
                 Ok(SessionInfo { id, .. }) => LaunchOutcome::Started { session_id: id },

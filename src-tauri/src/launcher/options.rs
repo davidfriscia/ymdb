@@ -2,8 +2,8 @@
 //!
 //! Only options listed in [`DEFINITIONS`] are accepted. Every other MAME option
 //! stays under MAME's own configuration (`mame.ini`). The list is extended by
-//! adding definitions; input options are intentionally absent (see
-//! `ARCHITECTURE.md`, Launcher).
+//! adding definitions; input options (`ctrlr`, `ctrlrpath`, devices) are
+//! reserved to controller management (`launcher::controls`).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -199,7 +199,7 @@ pub const DEFINITIONS: &[OptionDefinition] = &[
         Path,
         Paths,
         "Configuration directory",
-        "Where MAME saves per-machine configuration.",
+        "Where MAME saves per-machine configuration. Not used with a controller profile, which has its own directory.",
     ),
     define(
         "nvram_directory",
@@ -451,7 +451,8 @@ mod tests {
                 .all(|name| name.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
         );
         // Input options belong to the future input devices feature.
-        for input in ["joystick", "mouse", "ctrlr", "lightgun"] {
+        // Input options belong to controller management, never to launch options.
+        for input in ["joystick", "mouse", "ctrlr", "ctrlrpath", "lightgun"] {
             assert!(definition(input).is_none(), "{input}");
         }
     }
@@ -511,6 +512,8 @@ mod tests {
         let invalid = [
             ("nosuchoption", OptionValue::Boolean(true)),
             ("joystick", OptionValue::Boolean(true)),
+            ("ctrlr", text("base")),
+            ("ctrlrpath", text("ctrlr")),
             ("window", text("yes")),
             ("volume", OptionValue::Number(-100.0)),
             ("volume", OptionValue::Number(1.5)),

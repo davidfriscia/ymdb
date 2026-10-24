@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CatalogFreshness } from "../features/catalog/catalogApi";
+import type { AssignmentTarget } from "../features/controllers/controllersApi";
 import type { ConnectionReference, RemoteError } from "../features/remote/remoteApi";
 import { describeReferences, describeRemoteError } from "../features/remote/remoteMessages";
 
@@ -23,6 +24,7 @@ export type CommandError =
   | { kind: "launchFailed"; message: string }
   | { kind: "connectionNotFound"; connectionId: string }
   | { kind: "connectionInUse"; references: ConnectionReference[] }
+  | { kind: "controllersInUse"; message: string; references: AssignmentTarget[] }
   | { kind: "remote"; error: RemoteError }
   | { kind: "internal"; message: string };
 
@@ -61,6 +63,7 @@ function isCommandError(value: unknown): value is CommandError {
     kind === "launchFailed" ||
     kind === "connectionNotFound" ||
     kind === "connectionInUse" ||
+    kind === "controllersInUse" ||
     kind === "remote" ||
     kind === "internal"
   );
@@ -121,6 +124,8 @@ export function describeCommandError(error: CommandError): string {
       return "This remote connection no longer exists.";
     case "connectionInUse":
       return `This remote connection is used by the ROM Manager of ${describeReferences(error.references)}. Choose another connection there first.`;
+    case "controllersInUse":
+      return `Cannot be removed: ${error.message}.`;
     case "remote":
       return describeRemoteError(error.error);
     case "internal":

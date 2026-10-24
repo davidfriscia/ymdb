@@ -365,7 +365,8 @@ The Rust crate in `src-tauri/`.
 - `lib.rs` builds the Tauri application, registers plugins, managed state and commands.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`,
   `installations.rs`, `catalog.rs`, `search.rs`, `detail.rs`, `launcher.rs`,
-  `media.rs`, `remote.rs`, `roms.rs`, `lists.rs`, `support_files.rs`, `saved_filters.rs`).
+  `media.rs`, `remote.rs`, `roms.rs`, `lists.rs`, `support_files.rs`, `saved_filters.rs`,
+  `controllers.rs`).
   Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
@@ -374,8 +375,8 @@ The Rust crate in `src-tauri/`.
   `installationNotFound`, `duplicateInstallation`, `removalNotAllowed`,
   `migrationFailed`, `importInProgress`, `downloadInProgress`, `invalidRequest`, `catalogNotImported`,
   `catalogUnreadable`, `softwareListsNotImported`, `catalogMismatch`, `notFound`,
-  `alreadyRunning`, `launchFailed`, `connectionNotFound`, `connectionInUse`, `remote`,
-  `internal`). A problem with one installation
+  `alreadyRunning`, `launchFailed`, `connectionNotFound`, `connectionInUse`,
+  `controllersInUse`, `remote`, `internal`). A problem with one installation
   (missing executable, unreadable catalog) is reported for that installation only.
 - `health.rs` builds the health report returned by `check_health`.
 - `atomic_file.rs` writes small files atomically (`installations.json`, `launch.json`,
@@ -397,6 +398,8 @@ The Rust crate in `src-tauri/`.
   classifications (see [MAME support files](#mame-support-files--implemented)).
 - `saved_filters.rs` stores the saved filter presets (see
   [Saved filter presets](#saved-filter-presets--implemented)).
+- `controllers/` manages controllers, controller profiles and their assignments (see
+  [Controller management](#controller-management--implemented-backend-phase-1)).
 
 ### MAME integration — Implemented
 
@@ -723,6 +726,9 @@ raw arguments.
   compatibility and the media devices able to mount each part.
 - `search_paths.rs`: extends `rompath`/`samplepath` with the ROM Manager destinations
   (see below).
+- `controls.rs`: the options of the controller profile of a launch and the creation of
+  its configuration directory when MAME starts (see
+  [Controller management](#controller-management--implemented-backend-phase-1)).
 - `command.rs`: `LaunchPlan`, the structured command line (executable, working
   directory, arguments with their role and, for options, the level they come from).
   The arguments of the plan are what is executed; the preview shown to the user is
@@ -751,11 +757,12 @@ the default.
 
 The option set is deliberately small (display, performance, sound, paths, machine
 configuration such as BIOS and RAM size, `seconds_to_run`) and grows by adding
-definitions. Input options (`joystick`, `mouse`, `ctrlr`, controller mappings) are
-intentionally not included: a future **Input Devices** feature will manage
-controllers and mappings per profile, machine or software and contribute options
-through the same `OptionSet` and precedence mechanism. Profiles are not tied to any
-controller type, so this needs no change to them.
+definitions. Input options (`ctrlr`, `ctrlrpath`, `joystick`, `mouse`, `lightgun`,
+device mappings) are never launch options: they belong to
+[Controller management](#controller-management--implemented-backend-phase-1), which
+contributes `cfg_directory`, `ctrlrpath` and `ctrlr` after the launch options and the
+ROM Manager, with the origin `controllers` (`launcher/controls.rs`). Launch profiles
+and controller profiles are independent: a launch selects one of each.
 
 #### Search paths of the ROM Manager
 
@@ -864,8 +871,12 @@ or lists of paths):
 - `stop_launch_session(id)`: kills a running session.
 
 A request names the installation, the machine, optionally the software with its part
-assignments, and optionally a profile; the backend always rebuilds the command line
-from it.
+assignments, optionally a profile and optionally a temporary controls override
+(`controls`: a controller profile and/or controllers, never saved); the backend always
+rebuilds the command line from it. The plan names the controller profile applied and
+its MAME configuration directory (`controls`). `preview_launch` writes nothing;
+`start_launch` (and Download & Play) creates the profile's directory right before
+starting MAME.
 
 #### Interface
 
@@ -944,6 +955,223 @@ MAME's own error:
 - Options are limited to the supported definitions; anything else is configured in
   MAME's own INI files.
 - Sessions started before YMDB restarts are not tracked after the restart.
+
+### Controller management — Implemented (backend, phase 1)
+
+Implemented in `src-tauri/src/controllers/` (model, persistence, resolution) and
+`src-tauri/src/launcher/controls.rs` (launch options), exposed by
+`commands/controllers.rs`, typed in `src/features/controllers/controllersApi.ts`. The
+interface (Settings section, Controls selector) is planned for the next phase; the
+command preview already shows the controller profile.
+
+MAME stays in charge of input configuration: the user assigns inputs in MAME's own
+menus and MAME saves them. YMDB only decides which MAME configuration directory and
+which controller configuration file a launch uses. It never writes `default.cfg`,
+`<machine>.cfg`, `mame.ini` or any other MAME file, and it has no button editor.
+
+#### MAME input configuration (verified with MAME 0.289)
+
+- At start MAME applies, in order: the controller file (`-ctrlr <name>`, looked up
+  as `<name>.cfg` in `-ctrlrpath`) as the baseline of the defaults, then
+  `default.cfg` (general assignments) and `<machine>.cfg` (assignments, DIP switches
+  and other settings of the machine), both from `-cfg_directory`. Later files win.
+- At a normal exit MAME rewrites `default.cfg` and `<machine>.cfg` entirely, with the
+  differences from the baseline; it never writes the controller file. A killed MAME
+  (YMDB's **Stop**) saves nothing.
+- A missing controller file is a fatal error (exit code 3). An **empty** `ctrlr`
+  value makes MAME skip the controller file (`config.cpp`:
+  `if (controller && *controller)`), and the command line wins over every INI file:
+  `-ctrlr ""` (an empty, separate process argument) neutralizes a `ctrlr` set in
+  `mame.ini`, in `ini/<machine>.ini`, in the INI of the parent/BIOS (`ini/neogeo.ini`)
+  or of the source file (`ini/source/neogeo.ini`), without errors or warnings
+  (verified with `turfmast` and a Lua probe of the effective `P1_BUTTON1` sequence).
+- MAME has no per-software configuration: a software uses the `<machine>.cfg` of the
+  machine running it (`nes -cart nes:smb:cart` → `nes.cfg`).
+- `cfg` files also hold DIP switches, slot, mixer and video settings, so these are
+  per controller profile too (accepted trade-off). NVRAM (`nvram_directory`) is not.
+
+#### Entities
+
+- **Controller**: the logical identity of a physical device: `id`, `name`, `kind`
+  (`arcadeStick`, `gamepad`, `wheel`, `trackball`, `lightgun`, `keyboard`, `mouse`,
+  `other`, descriptive only), `deviceClass` (`joystick`, `lightgun`, `mouse`,
+  `keyboard`: the MAME device class a future `mapdevice` needs) and optional
+  `deviceId` and `provider` (as shown by MAME's Input Devices menu). In phase 1
+  controllers produce no MAME option: assigning them to players records a
+  preference, and the plan gets a warning saying that MAME numbers devices in the
+  order the system reports them. Nothing detects or binds devices.
+- **Controller profile**: a reusable input configuration with a persistence context.
+  The system profile `mame` ("MAME configuration") always exists, cannot be renamed
+  or deleted, has no directory and passes nothing to MAME: it is the initial default
+  and keeps the behavior of YMDB without profiles. A user profile (`kind: user`,
+  `name`, `hasBase`) owns one MAME configuration directory per installation and an
+  optional `base.cfg`.
+- **Assignments**: preferences at four levels, each with an optional `profileId` and
+  an optional ordered `players` list of controller ids (`[]` assigns none):
+  `default`, `machines` (`<machine>`), `software` (`<list>:<software>`, on any
+  machine) and `machineSoftware` (`<machine>/<list>:<software>`). Keys use MAME
+  names only (`is_short_name`); entries for names missing from a catalog are kept.
+
+Controllers and profiles are independent: changing one never changes the other.
+Launch profiles (`launch.json`) are unrelated to controller profiles.
+
+Ids are stable, derived once from the name (`Arcade Stick P1` → `arcade-stick-p1`,
+with a numeric suffix when taken), 1-40 lowercase ASCII letters, digits or `-`, and
+never change on rename. A new profile never reuses the id of a former profile whose
+files still exist.
+
+#### Precedence
+
+For controller management only (launch options keep their own precedence), from the
+weakest:
+
+1. Default assignment (without a profile: `mame`).
+2. Machine.
+3. Software.
+4. Machine + software (the most specific context).
+5. Temporary override of the launch request (`LaunchRequest.controls`, never saved).
+
+`profileId` and `players` are resolved separately: a level that sets only the profile
+keeps the inherited controllers, and the other way round. The resolution reports the
+source of each field (`default`, `machine`, `software`, `machineSoftware`,
+`request`) and the stored assignment of every level (`resolve_controls`).
+
+#### Persistence
+
+`controllers.json` in the configuration directory, global:
+
+```json
+{
+  "schemaVersion": 1,
+  "controllers": [
+    {
+      "id": "stick-p1",
+      "name": "Arcade Stick P1",
+      "kind": "arcadeStick",
+      "deviceClass": "joystick"
+    }
+  ],
+  "profiles": [
+    { "id": "mame", "kind": "system", "hasBase": false },
+    { "id": "six-buttons", "kind": "user", "name": "Six Buttons", "hasBase": true }
+  ],
+  "assignments": {
+    "default": { "profileId": "mame" },
+    "machines": { "sf2": { "profileId": "six-buttons", "players": ["stick-p1"] } },
+    "software": { "nes:smb": { "players": [] } },
+    "machineSoftware": { "nes/nes:smb": { "profileId": "six-buttons" } }
+  }
+}
+```
+
+- A missing file is the initial state and is not created until something changes.
+  The file is versioned, validated when loaded and before every save (ids, names,
+  keys, at most 10 players, no controller twice, every reference existing), written
+  atomically, and changes are saved before being kept in memory. An invalid or
+  unreadable file is reported and never replaced; launches are then refused with a
+  `settings` error until it is fixed, as for an invalid `launch.json`.
+- A referenced profile or controller cannot be deleted (`controllersInUse` with the
+  referencing assignments). Deleting a profile keeps its `base.cfg` and its MAME
+  configuration directories; nothing is cleaned up automatically.
+
+Files of a user profile:
+
+```text
+<config>/controller-profiles/<profileId>/base.cfg                       # optional, imported verbatim
+<config>/installations/<installationId>/controller-profiles/<profileId>/cfg/   # -cfg_directory, MAME only
+```
+
+Paths depend only on the installation id (from the registry) and the profile id,
+never on names. A directory is never shared between installations or profiles, the
+installation's own `cfg` directory is never used for a user profile, and nothing is
+copied into a new directory. Removing an installation keeps its controller profile
+directories (they sit next to `launch.json`, whose directory is only removed when
+empty).
+
+`base.cfg` is a copy of a MAME controller configuration file chosen by the user
+(the original is only read). It is checked before copying: regular file, at most
+1 MiB, well-formed XML, root `<mameconfig version="10">`, at least one
+`<system name="…">` with an `<input>` (or `<ui>`) section; inputs are not
+interpreted. The file is written (atomically) before `controllers.json` declares it,
+and removed again if the profile cannot be saved, so a profile never declares a
+missing `base.cfg`.
+
+#### Launch integration
+
+`launcher::prepare` resolves, in order: machine/software, launch profile, launch
+options, ROM Manager search paths, then the controls (`controls::compose`):
+
+| Effective profile            | Options (origin `controllers`)                                          |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `mame`                       | none: the command line is exactly the one without controller management |
+| user profile, no `base.cfg`  | `-cfg_directory <context dir> -ctrlr ""`                                |
+| user profile with `base.cfg` | `-cfg_directory <context dir> -ctrlrpath <profile dir> -ctrlr base`     |
+
+- With a user profile, a `cfg_directory` resolved from the launch options is replaced
+  in place and the plan warns, naming the level it came from; `launch.json` is not
+  changed and the option still applies with the `mame` profile.
+- `-ctrlr ""` is always passed for a user profile without base file, so that a
+  `ctrlr` from any MAME INI file never applies on top of the profile.
+- A missing `base.cfg` refuses the launch before MAME runs. Paths containing `;` (a
+  MAME path separator) are refused.
+- `LaunchPlan.controls` names the profile, its source, the players, the
+  configuration directory and the base file; the preview shows them.
+- `prepare` (and so `preview_launch` and `resolve_controls`) writes nothing.
+  `controls::materialize` runs in `start_launch` and Download & Play right before
+  the process starts: it checks the base file again and creates the configuration
+  directory. Process management and Stop are unchanged.
+- Sessions record their controls. When another running session of the same
+  installation uses the same user profile, the plan warns (not blocking): both
+  sessions rewrite `default.cfg` at exit, and the last one to exit wins. Different
+  machines keep their own `<machine>.cfg`; the same machine and software cannot run
+  twice in one installation.
+
+#### Commands
+
+- `get_controllers`: controllers, profiles (`id`, `kind`, `name`, `hasBase`,
+  `managed`) and assignments.
+- `create_controller(controller)`, `update_controller(controllerId, controller)`,
+  `delete_controller(controllerId)`.
+- `create_controller_profile(name, importBase)`: with `importBase`, a native dialog
+  chooses the controller file first (`null` when cancelled; `invalidFile` when it is
+  not a controller file).
+- `rename_controller_profile(profileId, name)`, `delete_controller_profile(profileId)`,
+  `import_controller_profile_base(profileId)` (replaces `base.cfg`).
+- `set_controller_assignment(target, assignment)` with `target = { level, key? }`; an
+  empty assignment removes a machine or software level.
+  `reset_controller_assignment(target)` removes it (the default returns to `mame`).
+- `resolve_controls(installationId, machine, software?)`: the effective profile and
+  players with their sources, the stored assignment of every level and the profile's
+  configuration directory for the installation (not created).
+
+Every change returns the whole configuration. Errors: `notFound`, `invalidRequest`,
+`invalidFile`, `controllersInUse`, `settings`.
+
+#### Verified with MAME 0.289
+
+An ignored end-to-end test (`launcher/controls_e2e.rs`, `YMDB_E2E_MAME`) runs the real
+launch path on a temporary installation (hard link of the executable, its own
+`mame.ini` with a `ctrlr`, the real ROM and hash directories read only) with a Lua
+probe that exits MAME normally: the `mame` profile uses the INI controller file and
+the installation's `cfg`; a profile without base ignores it and gets its own
+`default.cfg`/`turfmast.cfg`; a change saved in the profile is applied on the next
+launch and kept after switching to another profile (with a base file) and back; a
+`nes -cart nes:smb:cart` launch with a software assignment saves `nes.cfg` in its
+profile; the preview creates nothing; no MAME or installation file is changed.
+Assigning inputs through MAME's interactive menus was not automated.
+
+#### Limitations and next steps
+
+- No `mapdevice`, device detection or physical binding: player assignments are
+  preferences only. Phase 2 will generate a controller file combining `mapdevice`
+  lines with the profile's `base.cfg` (in the local data directory) and may set the
+  input providers.
+- DIP switches, slots, mixer and video settings are per profile and installation.
+- Concurrent sessions sharing a profile only get a warning (no locking).
+- No cleanup of orphan directories, no "start from" copy between profiles or
+  installations, no removal of a `base.cfg` once imported (import another one).
+- MAME cannot open its input menu from the command line: "configure controls" is a
+  normal launch with the profile.
 
 ### Media sources — Implemented
 
@@ -1635,6 +1863,12 @@ Configuration directory:
   [Media sources](#media-sources--implemented)).
 - `saved-filters.json`: the saved filter presets, shared by all installations (see
   [Saved filter presets](#saved-filter-presets--implemented)).
+- `controllers.json`: controllers, controller profiles and their assignments, shared by
+  all installations, and `controller-profiles/<profileId>/base.cfg`, the imported
+  controller file of a profile (see
+  [Controller management](#controller-management--implemented-backend-phase-1)).
+- `installations/<id>/controller-profiles/<profileId>/cfg/`: the MAME configuration
+  directory of a controller profile for one installation, written by MAME only.
 - `settings.json` and `launch.json`: files of the single-installation layout. They are
   only read by the migration and never written again, so they remain as a backup.
 

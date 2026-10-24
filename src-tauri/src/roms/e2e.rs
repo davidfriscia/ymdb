@@ -21,7 +21,10 @@ use super::planner::{Organizations, PlanTarget, plan};
 use super::tests::{NAS, connection, sftp_connector, zip_bytes};
 use crate::catalog::import::{ImportProgress, import_catalog};
 use crate::catalog::store::CatalogStore;
+use crate::controllers::ControllerPaths;
+use crate::controllers::model::ControllersConfig;
 use crate::launcher::config::LaunchConfig;
+use crate::launcher::controls::ControlsContext;
 use crate::launcher::search_paths::RequiredSearchPaths;
 use crate::launcher::{LaunchRequest, prepare};
 use crate::mame::ini::read_search_paths;
@@ -200,6 +203,13 @@ async fn rom_manager_end_to_end() {
         machine: "pacman".to_owned(),
         software: None,
         profile_id: None,
+        controls: None,
+    };
+    let controllers = ControllersConfig::new();
+    let controller_paths = ControllerPaths::new(work.path());
+    let controls = ControlsContext {
+        config: &controllers,
+        paths: &controller_paths,
     };
     let prepared = store
         .with_reader(|connection| {
@@ -208,6 +218,7 @@ async fn rom_manager_end_to_end() {
                 &executable,
                 &LaunchConfig::default(),
                 &required,
+                controls,
                 &request,
             ))
         })

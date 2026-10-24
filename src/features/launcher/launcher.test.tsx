@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { launchConfig, launchConfigView, session } from "../../test/launcherFixtures";
+import { launchConfig, launchConfigView, planControls, session } from "../../test/launcherFixtures";
 import { installationsView, NEW_ID, OLD_ID } from "../../test/installationFixtures";
 import { InstallationsProvider } from "../installations/InstallationsProvider";
 import { InstallationScope, useInstallations } from "../installations/installationsContext";
@@ -94,6 +94,7 @@ function launcherBackend(
         plan: {
           executable: "C:\\Émulateurs MAME ✓\\mame.exe",
           workingDirectory: "C:\\Émulateurs MAME ✓",
+          controls: planControls(),
           arguments: [
             { role: "machine", tokens: [request.machine] },
             ...(request.software?.media ?? []).map((media) => ({
@@ -413,6 +414,48 @@ describe("launcher", () => {
         '"C:\\Émulateurs MAME ✓\\mame.exe" pacman -window',
       );
       expect(lastRequest("preview_launch")).toEqual({ installationId: NEW_ID, machine: "pacman" });
+    });
+
+    it("shows the controller profile and its MAME configuration directory", async () => {
+      const cfgDirectory = "C:\\YMDB\\installations\\x\\controller-profiles\\fighting\\cfg";
+      launcherBackend({
+        overrides: {
+          preview_launch: () => ({
+            plan: {
+              executable: "C:\\MAME\\mame.exe",
+              workingDirectory: "C:\\MAME",
+              controls: planControls({
+                profileId: "fighting",
+                profileName: "Fighting",
+                cfgDirectory,
+              }),
+              arguments: [
+                { role: "machine", tokens: ["pacman"] },
+                {
+                  role: "option",
+                  name: "cfg_directory",
+                  source: "controllers",
+                  tokens: ["-cfg_directory", cfgDirectory],
+                },
+                { role: "option", name: "ctrlr", source: "controllers", tokens: ["-ctrlr", ""] },
+              ],
+            },
+            commandLine: ["pacman", "-cfg_directory", cfgDirectory, "-ctrlr", ""],
+            warnings: [],
+          }),
+        },
+      });
+      const { user } = renderWithLauncher(<MachineLaunchPanel name="pacman" isRunnable />, true);
+      await openAdvanced(user);
+      const preview = await screen.findByLabelText("Command line");
+      expect(within(preview).getByText("Fighting")).toBeInTheDocument();
+      expect(within(preview).getByText(cfgDirectory)).toBeInTheDocument();
+      const args = within(within(preview).getByRole("list", { name: "Arguments" }));
+      expect(args.getAllByText("Controller profile")).toHaveLength(2);
+      expect(args.getByText('-ctrlr ""')).toBeInTheDocument();
+      expect(within(preview).getByLabelText("Full command line")).toHaveTextContent(
+        `C:\\MAME\\mame.exe pacman -cfg_directory ${cfgDirectory} -ctrlr ""`,
+      );
     });
 
     it("shows preview errors", async () => {

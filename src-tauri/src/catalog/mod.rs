@@ -18,7 +18,7 @@ pub mod search;
 pub mod software_model;
 pub mod software_parser;
 pub mod store;
-mod xml;
+pub(crate) mod xml;
 
 /// Whether `name` is a MAME short name of a machine, software list or
 /// software: 1-64 lowercase ASCII letters, digits or `_` (all names of MAME

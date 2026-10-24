@@ -17,8 +17,10 @@ use crate::catalog::search::machines::search_machines;
 use crate::catalog::search::request::MachineSearchRequest;
 use crate::catalog::store::{CatalogInfo, CatalogSource};
 use crate::commands::catalog::{CatalogState, ImportStatus};
-use crate::commands::launcher::prepare_resolved;
+use crate::commands::launcher::{LaunchSettings, prepare_resolved};
 use crate::commands::search::search;
+use crate::controllers::ControllerPaths;
+use crate::controllers::model::{Assignment, AssignmentLevel, AssignmentTarget, ControllersConfig};
 use crate::launcher::LaunchRequest;
 use crate::launcher::config::{LaunchConfig, Profile};
 use crate::launcher::options::{OptionSet, OptionValue};
@@ -145,6 +147,7 @@ fn machine_request(installation_id: &str, machine: &str) -> LaunchRequest {
         machine: machine.to_owned(),
         software: None,
         profile_id: None,
+        controls: None,
     }
 }
 
@@ -395,7 +398,7 @@ fn launches_use_the_requested_installation_and_its_own_options() {
     app.state.set_active(&new).expect("switch");
     let old_plan = prepare_resolved(
         &old_resolved,
-        &old_config,
+        &LaunchSettings::with_config(old_config.clone()),
         &LaunchRequest {
             profile_id: Some("fast".to_owned()),
             ..machine_request(&old, "apple2e")
@@ -416,7 +419,7 @@ fn launches_use_the_requested_installation_and_its_own_options() {
 
     let new_plan = prepare_resolved(
         &new_resolved,
-        &new_config,
+        &LaunchSettings::with_config(new_config.clone()),
         &machine_request(&new, "apple2e"),
     )
     .expect("prepare")
@@ -431,7 +434,7 @@ fn launches_use_the_requested_installation_and_its_own_options() {
     assert!(matches!(
         prepare_resolved(
             &new_resolved,
-            &new_config,
+            &LaunchSettings::with_config(new_config.clone()),
             &LaunchRequest {
                 profile_id: Some("fast".to_owned()),
                 ..machine_request(&new, "apple2e")
@@ -439,6 +442,59 @@ fn launches_use_the_requested_installation_and_its_own_options() {
         ),
         Err(CommandError::InvalidRequest { .. })
     ));
+}
+
+#[test]
+fn a_controller_profile_has_one_configuration_directory_per_installation() {
+    let app = App::new();
+    let old = app.add("0.279", "0.279");
+    let new = app.add("0.280", "0.280");
+    app.import(&old, LAUNCHER);
+    app.import(&new, LAUNCHER);
+    let config_dir = app.layout().config_dir.clone();
+    let mut controllers = ControllersConfig::new();
+    let profile = controllers
+        .create_profile("Fighting", false, |_| false)
+        .expect("profile");
+    controllers
+        .set_assignment(
+            &AssignmentTarget {
+                level: AssignmentLevel::Default,
+                key: None,
+            },
+            Assignment {
+                profile_id: Some(profile.clone()),
+                players: None,
+            },
+        )
+        .expect("assign");
+    let settings = LaunchSettings {
+        controllers,
+        controller_paths: ControllerPaths::new(&config_dir),
+        ..LaunchSettings::with_config(LaunchConfig::default())
+    };
+    let directory = |id: &str| {
+        let resolved = app.state.resolve(id).expect("resolve");
+        prepare_resolved(&resolved, &settings, &machine_request(id, "apple2e"))
+            .expect("prepare")
+            .plan
+            .controls
+            .cfg_directory
+            .expect("managed")
+    };
+    let old_dir = directory(&old);
+    let new_dir = directory(&new);
+    assert_ne!(old_dir, new_dir);
+    assert_eq!(
+        old_dir,
+        app.layout()
+            .launch_config_dir(&old)
+            .join("controller-profiles")
+            .join(&profile)
+            .join("cfg")
+    );
+    // Preparing creates nothing.
+    assert!(!old_dir.exists() && !new_dir.exists());
 }
 
 #[test]
@@ -460,7 +516,7 @@ fn a_launch_refuses_a_catalog_of_another_executable() {
     assert_eq!(
         prepare_resolved(
             &second_resolved,
-            &LaunchConfig::default(),
+            &LaunchSettings::with_config(LaunchConfig::default()),
             &machine_request(&second, "apple2e")
         )
         .err(),
@@ -471,7 +527,7 @@ fn a_launch_refuses_a_catalog_of_another_executable() {
     assert_eq!(
         prepare_resolved(
             &first_resolved,
-            &LaunchConfig::default(),
+            &LaunchSettings::with_config(LaunchConfig::default()),
             &machine_request(&first, "apple2e")
         )
         .err(),

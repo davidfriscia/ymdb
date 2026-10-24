@@ -6,6 +6,7 @@
 //! the main thread stay responsive.
 
 pub mod catalog;
+pub mod controllers;
 pub mod detail;
 pub mod health;
 pub mod installations;
@@ -23,6 +24,7 @@ use serde::Serialize;
 
 use crate::catalog::freshness::CatalogFreshness;
 use crate::catalog::store::StoreError;
+use crate::controllers::model::AssignmentTarget;
 use crate::remote::provider::RemoteError;
 use crate::remote::sources::ConnectionReference;
 
@@ -73,6 +75,12 @@ pub enum CommandError {
     /// The remote connection is used by remote sources and cannot be removed.
     ConnectionInUse {
         references: Vec<ConnectionReference>,
+    },
+    /// The controller or controller profile is used by these assignments and
+    /// cannot be removed.
+    ControllersInUse {
+        message: String,
+        references: Vec<AssignmentTarget>,
     },
     /// A remote repository operation failed.
     Remote { error: RemoteError },

@@ -1,4 +1,5 @@
 import { invokeCommand } from "../../shared/ipc";
+import type { Assignment, ControlsSource } from "../controllers/controllersApi";
 
 // These types mirror the Rust contracts in `src-tauri/src/launcher/` and
 // `src-tauri/src/commands/launcher.rs`. Keep both sides in sync.
@@ -78,9 +79,25 @@ export interface LaunchRequest {
   software?: { list: string; name: string; media: MediaAssignment[] };
   /** Omitted for the default profile. */
   profileId?: string;
+  /** Temporary controller profile and controllers for this launch only. */
+  controls?: Assignment;
 }
 
-export type OptionSource = "global" | "profile" | "machine" | "software" | "romManager";
+export type OptionSource =
+  "global" | "profile" | "machine" | "software" | "romManager" | "controllers";
+
+/** Mirrors `PlanControls` in `launcher/controls.rs`. */
+export interface PlanControls {
+  profileId: string;
+  profileName: string;
+  profileSource: ControlsSource;
+  /** Preferences only: not bound to physical devices yet. */
+  players: string[];
+  playersSource: ControlsSource | null;
+  /** MAME configuration directory of a user profile, created at launch. */
+  cfgDirectory: string | null;
+  baseFile: string | null;
+}
 
 /** Mirrors `PlanArgument` in `command.rs`. */
 export type PlanArgument =
@@ -94,6 +111,8 @@ export interface LaunchPreview {
     installationId: string;
     /** The launch profile applied. */
     profileId: string;
+    /** The controller profile and controllers applied. */
+    controls: PlanControls;
     executable: string;
     workingDirectory: string;
     arguments: PlanArgument[];
@@ -172,6 +191,7 @@ export interface SessionInfo {
   target: LaunchTarget;
   title: string;
   commandLine: string[];
+  controls: PlanControls;
   startedAt: number;
   state: SessionState;
 }

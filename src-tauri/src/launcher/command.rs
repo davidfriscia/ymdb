@@ -10,6 +10,7 @@ use std::process::Command;
 use serde::Serialize;
 
 use super::config::{OptionSource, ResolvedOption};
+use super::controls::PlanControls;
 use super::options;
 use super::resolve::MediaAssignment;
 
@@ -45,6 +46,8 @@ pub struct LaunchPlan {
     pub installation_id: String,
     /// The launch profile applied.
     pub profile_id: String,
+    /// The controller profile and controllers applied.
+    pub controls: PlanControls,
     pub executable: PathBuf,
     /// The executable's directory, so MAME finds its `mame.ini` and relative paths.
     pub working_directory: PathBuf,
@@ -58,10 +61,11 @@ pub struct SoftwareMedia<'a> {
     pub media: &'a [MediaAssignment],
 }
 
-/// The installation and profile a plan is prepared with.
+/// The installation, launch profile and controls a plan is prepared with.
 pub struct PlanOrigin<'a> {
     pub installation_id: &'a str,
     pub profile_id: &'a str,
+    pub controls: PlanControls,
 }
 
 impl LaunchPlan {
@@ -103,6 +107,7 @@ impl LaunchPlan {
         Self {
             installation_id: origin.installation_id.to_owned(),
             profile_id: origin.profile_id.to_owned(),
+            controls: origin.controls.clone(),
             executable: executable.to_path_buf(),
             working_directory: executable
                 .parent()
@@ -135,10 +140,15 @@ mod tests {
     use super::*;
     use crate::launcher::options::OptionValue;
 
-    const ORIGIN: PlanOrigin<'static> = PlanOrigin {
-        installation_id: "0123456789abcdef0123456789abcdef",
-        profile_id: "default",
-    };
+    const INSTALLATION_ID: &str = "0123456789abcdef0123456789abcdef";
+
+    fn origin() -> PlanOrigin<'static> {
+        PlanOrigin {
+            installation_id: INSTALLATION_ID,
+            profile_id: "default",
+            controls: PlanControls::native(),
+        }
+    }
 
     fn option(name: &str, value: OptionValue, source: OptionSource) -> ResolvedOption {
         ResolvedOption {
@@ -152,7 +162,7 @@ mod tests {
     fn builds_a_machine_command_line() {
         let executable = Path::new("/opt/Émulateurs MAME ✓/mame");
         let plan = LaunchPlan::build(
-            &ORIGIN,
+            &origin(),
             executable,
             "pacman",
             None,
@@ -197,7 +207,7 @@ mod tests {
             },
         ];
         let plan = LaunchPlan::build(
-            &ORIGIN,
+            &origin(),
             Path::new("C:\\MAME\\mame.exe"),
             "apple2e",
             Some(&SoftwareMedia {
@@ -232,7 +242,7 @@ mod tests {
             part: "cart".to_owned(),
         }];
         let plan = LaunchPlan::build(
-            &ORIGIN,
+            &origin(),
             Path::new("/opt/mame/mame"),
             "nes",
             Some(&SoftwareMedia {
@@ -256,7 +266,19 @@ mod tests {
             ])
         );
         assert_eq!(json["workingDirectory"], "/opt/mame");
-        assert_eq!(json["installationId"], ORIGIN.installation_id);
+        assert_eq!(json["installationId"], INSTALLATION_ID);
         assert_eq!(json["profileId"], "default");
+        assert_eq!(
+            json["controls"],
+            serde_json::json!({
+                "profileId": "mame",
+                "profileName": "MAME configuration",
+                "profileSource": "default",
+                "players": [],
+                "playersSource": null,
+                "cfgDirectory": null,
+                "baseFile": null
+            })
+        );
     }
 }

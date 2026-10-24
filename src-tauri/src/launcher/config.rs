@@ -247,6 +247,8 @@ pub enum OptionSource {
     /// A search path extended with the local destinations of the ROM
     /// manager (see `search_paths`).
     RomManager,
+    /// Set by the controller profile of the launch (see `controls`).
+    Controllers,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

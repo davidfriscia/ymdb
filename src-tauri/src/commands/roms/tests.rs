@@ -19,6 +19,7 @@ fn stored(artifacts: Vec<PlanArtifact>, warnings: usize) -> Arc<StoredPlan> {
         machine: "pacman".to_owned(),
         software: None,
         profile_id: None,
+        controls: None,
     };
     Arc::new(StoredPlan {
         plan: DownloadPlan {

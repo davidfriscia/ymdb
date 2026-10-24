@@ -14,6 +14,7 @@ const SOURCE_LABELS: Record<OptionSource, string> = {
   machine: "Machine",
   software: "Software",
   romManager: "ROM Manager",
+  controllers: "Controller profile",
 };
 
 interface CommandPreviewProps {
@@ -55,11 +56,21 @@ export function CommandPreview({ request, configVersion }: CommandPreviewProps) 
           <dt>Working directory</dt>
           <dd className="code">{plan.workingDirectory}</dd>
         </div>
+        <div className="details-list__row">
+          <dt>Controller profile</dt>
+          <dd>{plan.controls.profileName}</dd>
+        </div>
+        {plan.controls.cfgDirectory !== null && (
+          <div className="details-list__row">
+            <dt>MAME configuration</dt>
+            <dd className="code">{plan.controls.cfgDirectory}</dd>
+          </div>
+        )}
       </dl>
       <ol className="command-preview__arguments" aria-label="Arguments">
         {plan.arguments.map((argument, index) => (
           <li key={index} className="command-preview__argument">
-            <span className="code">{argument.tokens.join(" ")}</span>
+            <span className="code">{argument.tokens.map(showEmpty).join(" ")}</span>
             <span className="badge">{argumentLabel(argument)}</span>
           </li>
         ))}
@@ -87,7 +98,12 @@ function argumentLabel(argument: PlanArgument): string {
   }
 }
 
-/** Quotes tokens with spaces for display only; MAME receives them unquoted. */
+/** Quotes empty tokens and tokens with spaces for display only; MAME receives them unquoted. */
 function quote(token: string): string {
-  return /[\s"]/.test(token) ? `"${token.replace(/"/g, '\\"')}"` : token;
+  return token === "" || /[\s"]/.test(token) ? `"${token.replace(/"/g, '\\"')}"` : token;
+}
+
+/** Shows an empty argument (such as the value of `-ctrlr ""`) as `""`. */
+function showEmpty(token: string): string {
+  return token === "" ? '""' : token;
 }

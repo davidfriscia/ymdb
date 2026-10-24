@@ -1,6 +1,7 @@
 //! Launch preparation tests on a catalog imported from fixtures. Nothing here
 //! starts MAME.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -9,12 +10,18 @@ use tempfile::TempDir;
 
 use super::command::ArgumentRole;
 use super::config::{LaunchConfig, OptionSource, Profile, software_key};
+use super::controls::ControlsContext;
 use super::options::{OptionSet, OptionValue};
 use super::resolve::{ListRelation, MediaAssignment, SoftwareLaunchInfo, software_launch_info};
 use super::search_paths::RequiredSearchPaths;
 use super::{LaunchError, LaunchRequest, PreparedLaunch, SoftwareSelection, prepare};
 use crate::catalog::import::{ImportProgress, import_from_reader, import_software_from_reader};
 use crate::catalog::store::{CatalogSource, CatalogStore};
+use crate::controllers::ControllerPaths;
+use crate::controllers::model::{
+    Assignment, AssignmentLevel, AssignmentTarget, ControllerInput, ControllerKind,
+    ControllersConfig, DeviceClass,
+};
 
 const MACHINES: &str = include_str!("../catalog/testdata/launcher-machines.xml");
 const SOFTWARE: &str = include_str!("../catalog/testdata/listsoftware-sample.xml");
@@ -83,7 +90,32 @@ impl Catalog {
         search_paths: &RequiredSearchPaths,
         request: &LaunchRequest,
     ) -> Result<PreparedLaunch, LaunchError> {
-        self.read(|connection| prepare(connection, &executable(), config, search_paths, request))
+        let controllers = ControllersConfig::new();
+        let paths = ControllerPaths::new(Path::new("unused"));
+        let controls = ControlsContext {
+            config: &controllers,
+            paths: &paths,
+        };
+        self.prepare_controls(config, search_paths, controls, request)
+    }
+
+    fn prepare_controls(
+        &self,
+        config: &LaunchConfig,
+        search_paths: &RequiredSearchPaths,
+        controls: ControlsContext<'_>,
+        request: &LaunchRequest,
+    ) -> Result<PreparedLaunch, LaunchError> {
+        self.read(|connection| {
+            prepare(
+                connection,
+                &executable(),
+                config,
+                search_paths,
+                controls,
+                request,
+            )
+        })
     }
 }
 
@@ -99,6 +131,7 @@ fn machine_request(machine: &str) -> LaunchRequest {
         machine: machine.to_owned(),
         software: None,
         profile_id: None,
+        controls: None,
     }
 }
 
@@ -123,6 +156,7 @@ fn software_request(
                 .collect(),
         }),
         profile_id: None,
+        controls: None,
     }
 }
 
@@ -501,5 +535,426 @@ fn adds_rom_manager_destinations_to_the_search_paths() {
     assert_eq!(
         prepared.plan.command_line(),
         ["pong", "-rompath", "/mnt/roms;/srv/YMDB downloads ✓/roms"]
+    );
+}
+
+/// Controller profiles for the launch tests, in a temporary configuration
+/// directory: `fighting` (no base file) and `six-buttons` (with one).
+struct Controls {
+    dir: TempDir,
+    config: ControllersConfig,
+    paths: ControllerPaths,
+}
+
+const BASE_FILE: &str = r#"<mameconfig version="10"><system name="default"><input><port type="P1_BUTTON1"><newseq type="standard">KEYCODE_X</newseq></port></input></system></mameconfig>"#;
+
+impl Controls {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let paths = ControllerPaths::new(&dir.path().join("config ✓"));
+        let mut config = ControllersConfig::new();
+        config
+            .create_profile("Fighting", false, |_| false)
+            .expect("fighting");
+        config
+            .create_profile("Six Buttons", true, |_| false)
+            .expect("six");
+        config
+            .create_controller(ControllerInput {
+                name: "Stick".to_owned(),
+                kind: ControllerKind::ArcadeStick,
+                device_class: DeviceClass::Joystick,
+                device_id: None,
+                provider: None,
+            })
+            .expect("stick");
+        fs::create_dir_all(paths.profile_dir("six-buttons")).expect("dir");
+        fs::write(paths.base_file("six-buttons"), BASE_FILE).expect("base");
+        Self { dir, config, paths }
+    }
+
+    fn assign(&mut self, level: AssignmentLevel, key: Option<&str>, profile: Option<&str>) {
+        self.config
+            .set_assignment(
+                &AssignmentTarget {
+                    level,
+                    key: key.map(str::to_owned),
+                },
+                Assignment {
+                    profile_id: profile.map(str::to_owned),
+                    players: None,
+                },
+            )
+            .expect("assign");
+    }
+
+    fn context(&self) -> ControlsContext<'_> {
+        ControlsContext {
+            config: &self.config,
+            paths: &self.paths,
+        }
+    }
+
+    fn cfg_directory(&self, profile: &str) -> String {
+        self.paths
+            .context_dir(INSTALLATION_ID, profile)
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Every file and directory under the temporary directory.
+    fn files(&self) -> Vec<PathBuf> {
+        fn walk(dir: &Path, entries: &mut Vec<PathBuf>) {
+            for entry in fs::read_dir(dir).expect("read").flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, entries);
+                }
+                entries.push(path);
+            }
+        }
+        let mut entries = Vec::new();
+        walk(self.dir.path(), &mut entries);
+        entries.sort();
+        entries
+    }
+}
+
+fn option_sources(prepared: &PreparedLaunch) -> Vec<(String, OptionSource)> {
+    prepared
+        .plan
+        .arguments
+        .iter()
+        .filter_map(|argument| match &argument.role {
+            ArgumentRole::Option { name, source } => Some((name.clone(), *source)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_mame_profile_keeps_the_previous_command_line() {
+    let catalog = Catalog::new();
+    let controls = Controls::new();
+    let mut config = LaunchConfig {
+        global_options: options(&[
+            ("window", OptionValue::Boolean(true)),
+            ("cfg_directory", OptionValue::Text("D:/My cfg".to_owned())),
+        ]),
+        ..LaunchConfig::default()
+    };
+    config.profiles[0].options = options(&[("speed", OptionValue::Number(2.0))]);
+    let required = RequiredSearchPaths {
+        rompath: vec!["/srv/downloads".to_owned()],
+        ..RequiredSearchPaths::default()
+    };
+    let requests = [
+        machine_request("pong"),
+        software_request("nes", "nes", "smb", &[("cart", "cart")]),
+        software_request(
+            "apple2e",
+            "apple2_flop_orig",
+            "ultima4",
+            &[("flop1", "flop1"), ("flop2", "flop2")],
+        ),
+    ];
+    for request in requests {
+        // The command line built before controller management existed.
+        let without = catalog
+            .prepare_with(&config, &required, &request)
+            .expect("prepare");
+        let with = catalog
+            .prepare_controls(&config, &required, controls.context(), &request)
+            .expect("prepare");
+        assert_eq!(with.plan.command_line(), without.plan.command_line());
+        assert_eq!(with.warnings, without.warnings);
+        assert_eq!(with.plan.controls.profile_id, "mame");
+        assert!(!with.plan.controls.is_managed());
+        assert!(
+            option_sources(&with)
+                .iter()
+                .all(|(_, source)| *source != OptionSource::Controllers)
+        );
+    }
+    let prepared = catalog
+        .prepare_controls(
+            &config,
+            &required,
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    assert_eq!(
+        prepared.plan.command_line(),
+        [
+            "pong",
+            "-window",
+            "-speed",
+            "2",
+            "-rompath",
+            "roms;/srv/downloads",
+            "-cfg_directory",
+            "D:/My cfg"
+        ]
+    );
+}
+
+#[test]
+fn a_managed_profile_without_base_uses_its_directory_and_no_controller_file() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::new();
+    controls.assign(AssignmentLevel::Default, None, Some("fighting"));
+    let files = controls.files();
+    let prepared = catalog
+        .prepare_controls(
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    let cfg = controls.cfg_directory("fighting");
+    assert_eq!(
+        prepared.plan.command_line(),
+        ["pong", "-cfg_directory", cfg.as_str(), "-ctrlr", ""]
+    );
+    // The empty value is a real, separate argument of the process.
+    let args: Vec<_> = prepared
+        .plan
+        .command()
+        .get_args()
+        .map(|arg| arg.to_owned())
+        .collect();
+    assert_eq!(args.len(), 5);
+    assert!(args[4].is_empty());
+    assert_eq!(
+        option_sources(&prepared),
+        [
+            ("cfg_directory".to_owned(), OptionSource::Controllers),
+            ("ctrlr".to_owned(), OptionSource::Controllers)
+        ]
+    );
+    let plan = &prepared.plan.controls;
+    assert_eq!(plan.profile_id, "fighting");
+    assert_eq!(plan.profile_name, "Fighting");
+    assert_eq!(plan.cfg_directory.as_deref(), Some(Path::new(&cfg)));
+    assert_eq!(plan.base_file, None);
+    assert!(prepared.warnings.is_empty(), "{:?}", prepared.warnings);
+    // Preparing (and so previewing) creates nothing.
+    assert_eq!(controls.files(), files);
+    assert!(!Path::new(&cfg).exists());
+
+    // Starting creates the directory, and nothing else.
+    super::controls::materialize(plan).expect("materialize");
+    assert!(Path::new(&cfg).is_dir());
+    assert!(fs::read_dir(&cfg).expect("read").next().is_none());
+    super::controls::materialize(plan).expect("again");
+}
+
+#[test]
+fn a_managed_profile_with_base_passes_its_controller_file() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::new();
+    controls.assign(AssignmentLevel::Machine, Some("nes"), Some("six-buttons"));
+    let request = software_request("nes", "nes", "smb", &[("cart", "cart")]);
+    let prepared = catalog
+        .prepare_controls(
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &request,
+        )
+        .expect("prepare");
+    let cfg = controls.cfg_directory("six-buttons");
+    let profile_dir = controls
+        .paths
+        .profile_dir("six-buttons")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        prepared.plan.command_line(),
+        [
+            "nes",
+            "-cart",
+            "nes:smb:cart",
+            "-cfg_directory",
+            cfg.as_str(),
+            "-ctrlrpath",
+            profile_dir.as_str(),
+            "-ctrlr",
+            "base"
+        ]
+    );
+    assert_eq!(
+        prepared.plan.controls.base_file.as_deref(),
+        Some(controls.paths.base_file("six-buttons").as_path())
+    );
+    // The base file is never written by a launch.
+    assert_eq!(
+        fs::read_to_string(controls.paths.base_file("six-buttons")).expect("read"),
+        BASE_FILE
+    );
+
+    // A missing base file is reported before MAME runs.
+    fs::remove_file(controls.paths.base_file("six-buttons")).expect("remove");
+    assert!(matches!(
+        catalog.prepare_controls(
+            &LaunchConfig::default(),
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &request
+        ),
+        Err(LaunchError::Invalid(message)) if message.contains("missing")
+    ));
+    assert!(super::controls::materialize(&prepared.plan.controls).is_err());
+}
+
+#[test]
+fn a_managed_profile_replaces_the_cfg_directory_launch_option() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::new();
+    controls.assign(AssignmentLevel::Default, None, Some("fighting"));
+    let mut config = LaunchConfig::default();
+    config.machine_overrides.insert(
+        "pong".to_owned(),
+        options(&[
+            ("cfg_directory", OptionValue::Text("D:/Pong cfg".to_owned())),
+            ("window", OptionValue::Boolean(true)),
+        ]),
+    );
+    let prepared = catalog
+        .prepare_controls(
+            &config,
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            &machine_request("pong"),
+        )
+        .expect("prepare");
+    let cfg = controls.cfg_directory("fighting");
+    assert_eq!(
+        prepared.plan.command_line(),
+        [
+            "pong",
+            "-window",
+            "-cfg_directory",
+            cfg.as_str(),
+            "-ctrlr",
+            ""
+        ]
+    );
+    assert_eq!(prepared.warnings.len(), 1, "{:?}", prepared.warnings);
+    assert!(
+        prepared.warnings[0].contains("cfg_directory (from the machine options)"),
+        "{}",
+        prepared.warnings[0]
+    );
+    // The launch configuration keeps the option for the `mame` profile.
+    assert!(config.machine_overrides["pong"].contains_key("cfg_directory"));
+}
+
+#[test]
+fn the_request_overrides_controls_independently_of_the_launch_profile() {
+    let catalog = Catalog::new();
+    let mut controls = Controls::new();
+    controls.assign(AssignmentLevel::Default, None, Some("fighting"));
+    let mut config = LaunchConfig::default();
+    config.profiles.push(Profile {
+        id: "fast".to_owned(),
+        name: "Fast".to_owned(),
+        options: options(&[("speed", OptionValue::Number(4.0))]),
+    });
+    let before = controls.config.clone();
+    let prepare = |request: &LaunchRequest| {
+        catalog.prepare_controls(
+            &config,
+            &RequiredSearchPaths::default(),
+            controls.context(),
+            request,
+        )
+    };
+
+    // A launch profile does not change the controller profile.
+    let mut request = machine_request("pong");
+    request.profile_id = Some("fast".to_owned());
+    let prepared = prepare(&request).expect("prepare");
+    assert_eq!(prepared.plan.profile_id, "fast");
+    assert_eq!(prepared.plan.controls.profile_id, "fighting");
+    assert_eq!(prepared.plan.command_line()[1..3], ["-speed", "4"]);
+
+    // A temporary controller profile does not change the launch profile.
+    request.controls = Some(Assignment {
+        profile_id: Some("mame".to_owned()),
+        players: None,
+    });
+    let prepared = prepare(&request).expect("prepare");
+    assert_eq!(prepared.plan.profile_id, "fast");
+    assert_eq!(prepared.plan.controls.profile_id, "mame");
+    assert_eq!(
+        prepared.plan.controls.profile_source,
+        crate::controllers::resolve::ControlsSource::Request
+    );
+    assert_eq!(prepared.plan.command_line(), ["pong", "-speed", "4"]);
+
+    // Players are preferences only: no option, a warning.
+    request.controls = Some(Assignment {
+        profile_id: None,
+        players: Some(vec!["stick".to_owned()]),
+    });
+    let prepared = prepare(&request).expect("prepare");
+    assert_eq!(prepared.plan.controls.players, ["stick"]);
+    assert_eq!(prepared.plan.controls.profile_id, "fighting");
+    let cfg = controls.cfg_directory("fighting");
+    assert_eq!(
+        prepared.plan.command_line(),
+        [
+            "pong",
+            "-speed",
+            "4",
+            "-cfg_directory",
+            cfg.as_str(),
+            "-ctrlr",
+            ""
+        ]
+    );
+    assert!(prepared.warnings[0].contains("not applied to MAME yet"));
+
+    // Unknown references in a request are refused.
+    request.controls = Some(Assignment {
+        profile_id: Some("missing".to_owned()),
+        players: None,
+    });
+    assert!(matches!(prepare(&request), Err(LaunchError::Invalid(_))));
+    // The request never changes the saved assignments.
+    assert_eq!(controls.config, before);
+}
+
+#[test]
+fn launch_requests_accept_controls() {
+    let request: LaunchRequest = serde_json::from_value(serde_json::json!({
+        "installationId": INSTALLATION_ID,
+        "machine": "pong",
+        "controls": { "profileId": "fighting", "players": ["stick"] }
+    }))
+    .expect("parse");
+    assert_eq!(
+        request.controls,
+        Some(Assignment {
+            profile_id: Some("fighting".to_owned()),
+            players: Some(vec!["stick".to_owned()]),
+        })
+    );
+    let request: LaunchRequest = serde_json::from_value(serde_json::json!({
+        "installationId": INSTALLATION_ID,
+        "machine": "pong"
+    }))
+    .expect("parse");
+    assert_eq!(request.controls, None);
+    assert!(
+        serde_json::from_value::<LaunchRequest>(serde_json::json!({
+            "installationId": INSTALLATION_ID,
+            "machine": "pong",
+            "controls": { "ctrlr": "x" }
+        }))
+        .is_err()
     );
 }

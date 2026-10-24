@@ -643,8 +643,21 @@ directories, BIOS and RAM size and session options (for example `seconds_to_run`
 Values are checked before saving. They are saved in the installation's `launch.json`
 (`installations/<id>/launch.json` in the configuration directory). When the ROM Manager
 uses custom local directories, YMDB extends `-rompath`/`-samplepath` after these levels
-(see [Remote repositories](#remote-repositories)). Controller and input device settings
-are not managed by YMDB yet.
+(see [Remote repositories](#remote-repositories)).
+
+### Controller profiles
+
+MAME keeps configuring inputs in its own menus and saving them; YMDB never edits
+MAME's `cfg` files. A **controller profile** gives those settings their own place:
+with a profile, MAME reads and saves its configuration (`default.cfg`,
+`<machine>.cfg`, including DIP switches) in a directory of YMDB for that profile and
+installation, optionally starting from a MAME controller file imported into the
+profile (`-ctrlr`). The built-in **MAME configuration** profile, the default, passes
+nothing and keeps MAME's own configuration, exactly as before. Profiles, controllers
+and their assignments (default, machine, software, machine + software) are stored in
+`controllers.json`. In this version they are managed by the backend only (the
+command preview shows the profile used); the settings interface and the binding of
+controllers to physical devices (`mapdevice`) come later.
 
 ## Testing and quality checks
 
@@ -752,6 +765,10 @@ Implemented:
   command line preview, global options, launch profiles, machine and software
   options per installation, and session monitoring across installations (see
   [Launching MAME](#launching-mame)).
+- Controller profiles (backend): controllers, controller profiles with an isolated MAME
+  configuration directory per installation and an optional imported controller file,
+  assignments by machine and software, and their use by the launcher (see
+  [Controller profiles](#controller-profiles)).
 - Remote repositories: global remote connections (SFTP with private keys, passphrases
   and host key verification), connection test and remote browsing, and per-installation
   ROM Manager settings for five categories with local destinations added to the MAME
@@ -766,7 +783,8 @@ Implemented:
 - Continuous integration on Windows, macOS and Linux.
 
 Not implemented yet: everything else, including ROM auditing (verifying the content of
-archives), an HTTPS provider, input device configuration and artwork download. See
+archives), an HTTPS provider, the controller settings interface, input device
+detection and binding, and artwork download. See
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
 No releases have been published yet.

@@ -3,6 +3,7 @@
 mod atomic_file;
 mod catalog;
 mod commands;
+mod controllers;
 mod health;
 mod installations;
 mod launcher;
@@ -21,6 +22,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 use crate::commands::catalog::CatalogState;
+use crate::commands::controllers::ControllersState;
 use crate::commands::installations::InstallationsState;
 use crate::commands::launcher::LauncherState;
 use crate::commands::lists::ListsState;
@@ -68,6 +70,7 @@ pub fn run() {
             // Imported support files can be large: local data, not roaming.
             app.manage(SupportFilesState::new(data_dir.as_deref()));
             app.manage(SavedFiltersState::new(config_dir.as_deref()));
+            app.manage(ControllersState::new(config_dir.as_deref()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -133,6 +136,17 @@ pub fn run() {
             commands::saved_filters::update_saved_filter,
             commands::saved_filters::rename_saved_filter,
             commands::saved_filters::delete_saved_filter,
+            commands::controllers::get_controllers,
+            commands::controllers::create_controller,
+            commands::controllers::update_controller,
+            commands::controllers::delete_controller,
+            commands::controllers::create_controller_profile,
+            commands::controllers::rename_controller_profile,
+            commands::controllers::delete_controller_profile,
+            commands::controllers::import_controller_profile_base,
+            commands::controllers::set_controller_assignment,
+            commands::controllers::reset_controller_assignment,
+            commands::controllers::resolve_controls,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run the YMDB application");

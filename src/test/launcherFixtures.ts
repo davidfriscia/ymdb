@@ -3,6 +3,7 @@ import type {
   LaunchConfig,
   LaunchConfigView,
   OptionDefinition,
+  PlanControls,
   SessionInfo,
   SessionState,
 } from "../features/launcher/launcherApi";
@@ -79,7 +80,22 @@ export function session(
     target: { machine, software },
     title: `${machine} description`,
     commandLine: [machine],
+    controls: planControls(),
     startedAt: Date.UTC(2026, 9, 10, 20, 30),
     state,
+  };
+}
+
+/** The controls of a plan: the `mame` profile by default. */
+export function planControls(overrides: Partial<PlanControls> = {}): PlanControls {
+  return {
+    profileId: "mame",
+    profileName: "MAME configuration",
+    profileSource: "default",
+    players: [],
+    playersSource: null,
+    cfgDirectory: null,
+    baseFile: null,
+    ...overrides,
   };
 }

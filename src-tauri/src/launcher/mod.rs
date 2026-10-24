@@ -7,6 +7,7 @@
 //! - [`resolve`]: catalog lookups (machine, software, candidate machines).
 //! - [`command`]: the structured command line used for preview and execution.
 //! - [`search_paths`]: search paths extended with the ROM manager destinations.
+//! - [`controls`]: options of the controller profile of a launch.
 //! - [`session`]: started MAME processes.
 //!
 //! [`prepare`] is the single path from a launch request to a command line,
@@ -14,6 +15,7 @@
 
 pub mod command;
 pub mod config;
+pub mod controls;
 pub mod options;
 pub mod resolve;
 pub mod search_paths;
@@ -27,8 +29,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::is_short_name;
+use crate::controllers::model::{Assignment, ControllersError};
 use command::{LaunchPlan, PlanOrigin, SoftwareMedia};
 use config::LaunchConfig;
+use controls::ControlsContext;
 use resolve::{ListRelation, MediaAssignment};
 use search_paths::RequiredSearchPaths;
 use session::{LaunchTarget, SoftwareRef};
@@ -46,6 +50,10 @@ pub struct LaunchRequest {
     /// `None` uses the default profile.
     #[serde(default)]
     pub profile_id: Option<String>,
+    /// Temporary controller profile and controllers for this launch only;
+    /// each field left out is inherited from the saved assignments.
+    #[serde(default)]
+    pub controls: Option<Assignment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,12 +126,14 @@ impl From<rusqlite::Error> for LaunchError {
 /// Validates a request against the catalog and the launch configuration of
 /// its installation and builds its command line. `executable` is the
 /// installation's executable; `search_paths` lists the directories the
-/// installation's remote sources need MAME to search.
+/// installation's remote sources need MAME to search; `controls` gives the
+/// controller profiles and assignments. Nothing is written.
 pub fn prepare(
     connection: &Connection,
     executable: &Path,
     config: &LaunchConfig,
     search_paths: &RequiredSearchPaths,
+    controls: ControlsContext<'_>,
     request: &LaunchRequest,
 ) -> Result<PreparedLaunch, LaunchError> {
     let invalid = |message: String| LaunchError::Invalid(message);
@@ -221,6 +231,21 @@ pub fn prepare(
     if let Some(mame_dir) = executable.parent() {
         search_paths::compose(&mut options, search_paths, mame_dir);
     }
+    let controls = controls::compose(
+        &mut options,
+        &mut warnings,
+        controls,
+        &request.installation_id,
+        &machine.name,
+        software,
+        request.controls.as_ref(),
+    )
+    .map_err(|error| match error {
+        ControllersError::NotFound(message) => LaunchError::NotFound(message),
+        ControllersError::Invalid(message) | ControllersError::InUse { message, .. } => {
+            LaunchError::Invalid(message)
+        }
+    })?;
     let media = request.software.as_ref().map(|selection| SoftwareMedia {
         list: &selection.list,
         software: &selection.name,
@@ -229,6 +254,7 @@ pub fn prepare(
     let origin = PlanOrigin {
         installation_id: &request.installation_id,
         profile_id,
+        controls,
     };
     let plan = LaunchPlan::build(&origin, executable, &machine.name, media.as_ref(), &options);
     Ok(PreparedLaunch {
@@ -240,5 +266,7 @@ pub fn prepare(
     })
 }
 
+#[cfg(test)]
+mod controls_e2e;
 #[cfg(test)]
 mod tests;

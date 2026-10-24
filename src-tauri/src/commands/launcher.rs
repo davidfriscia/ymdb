@@ -11,11 +11,15 @@ use std::sync::{Mutex, PoisonError};
 use serde::Serialize;
 use tauri::State;
 
+use super::controllers::ControllersState;
 use super::installations::{InstallationsState, ResolvedInstallation};
 use super::{CommandError, run_blocking};
 use crate::catalog::freshness::{CatalogFreshness, check_freshness};
 use crate::catalog::store::CatalogInfo;
+use crate::controllers::ControllerPaths;
+use crate::controllers::model::ControllersConfig;
 use crate::launcher::config::LaunchConfig;
+use crate::launcher::controls::{self, ControlsContext};
 use crate::launcher::options::{DEFINITIONS, OptionDefinition};
 use crate::launcher::resolve::{SoftwareLaunchInfo, software_launch_info};
 use crate::launcher::search_paths::RequiredSearchPaths;
@@ -137,27 +141,40 @@ pub async fn get_software_launch_info(
     .await?
 }
 
-/// The command line a launch would run, without running it.
+/// The command line a launch would run, without running it. Nothing is
+/// created or written.
 #[tauri::command]
 pub async fn preview_launch(
     request: LaunchRequest,
     installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
+    controllers: State<'_, ControllersState>,
 ) -> Result<LaunchPreview, CommandError> {
-    Ok(prepare_request(request, &installations, &launcher)
-        .await?
-        .0
-        .into())
+    Ok(
+        prepare_request(request, &installations, &launcher, &controllers)
+            .await?
+            .0
+            .into(),
+    )
 }
 
-/// Starts MAME and returns the new session.
+/// Starts MAME and returns the new session. The configuration directory of
+/// the controller profile is created first, if needed.
 #[tauri::command]
 pub async fn start_launch(
     request: LaunchRequest,
     installations: State<'_, InstallationsState>,
     launcher: State<'_, LauncherState>,
+    controllers: State<'_, ControllersState>,
 ) -> Result<SessionInfo, CommandError> {
-    let (prepared, label) = prepare_request(request, &installations, &launcher).await?;
+    let (prepared, label) =
+        prepare_request(request, &installations, &launcher, &controllers).await?;
+    let plan = prepared.plan.clone();
+    run_blocking(move || controls::materialize(&plan.controls))
+        .await?
+        .map_err(|error| CommandError::LaunchFailed {
+            message: format!("the controller profile cannot be prepared: {error}"),
+        })?;
     launcher
         .sessions
         .start(prepared.target, prepared.title, label, &prepared.plan)
@@ -186,24 +203,74 @@ async fn prepare_request(
     request: LaunchRequest,
     installations: &InstallationsState,
     launcher: &LauncherState,
+    controllers: &ControllersState,
 ) -> Result<(PreparedLaunch, String), CommandError> {
     let resolved = installations.resolve(&request.installation_id)?;
-    let config = launch_config(launcher, &resolved)?;
+    let settings = launch_settings(launcher, controllers, &resolved)?;
     let label = resolved.installation.label();
-    let prepared = run_blocking(move || prepare_resolved(&resolved, &config, &request)).await??;
+    let mut prepared =
+        run_blocking(move || prepare_resolved(&resolved, &settings, &request)).await??;
+    warn_shared_profile(launcher, &mut prepared);
     Ok((prepared, label))
 }
 
-/// The launch configuration a launch of the installation uses.
-pub(super) fn launch_config(
+/// What a launch of an installation is prepared with, read once.
+pub(super) struct LaunchSettings {
+    pub config: LaunchConfig,
+    pub controllers: ControllersConfig,
+    pub controller_paths: ControllerPaths,
+}
+
+impl LaunchSettings {
+    /// A launch configuration with the initial controllers configuration
+    /// (the `mame` profile, which uses no file).
+    #[cfg(test)]
+    pub fn with_config(config: LaunchConfig) -> Self {
+        Self {
+            config,
+            controllers: ControllersConfig::new(),
+            controller_paths: ControllerPaths::new(Path::new("unused")),
+        }
+    }
+}
+
+/// The launch configuration and the controllers configuration a launch of
+/// the installation uses.
+pub(super) fn launch_settings(
     launcher: &LauncherState,
+    controllers: &ControllersState,
     resolved: &ResolvedInstallation,
-) -> Result<LaunchConfig, CommandError> {
-    launcher
+) -> Result<LaunchSettings, CommandError> {
+    let config = launcher
         .load(resolved)
         .map_err(|error| CommandError::Settings {
             message: format!("{error}. Fix or save the launch options in Settings."),
-        })
+        })?;
+    let (controllers, controller_paths) = controllers.snapshot()?;
+    Ok(LaunchSettings {
+        config,
+        controllers,
+        controller_paths,
+    })
+}
+
+/// MAME rewrites `default.cfg` when a session exits, so two sessions with
+/// the same controller profile directory keep the general input changes of
+/// the last one to exit. Not blocking: different games may run together.
+fn warn_shared_profile(launcher: &LauncherState, prepared: &mut PreparedLaunch) {
+    let controls = &prepared.plan.controls;
+    if !controls.is_managed() {
+        return;
+    }
+    let running = launcher
+        .sessions
+        .running_with_profile(&prepared.plan.installation_id, &controls.profile_id);
+    if !running.is_empty() {
+        prepared.warnings.push(format!(
+            "Another running MAME session uses the controller profile '{}': when both exit, the general input settings (default.cfg) of the last one to exit are kept.",
+            controls.profile_name
+        ));
+    }
 }
 
 /// Prepares and starts a launch on the calling thread (blocking), with the
@@ -212,12 +279,16 @@ pub(super) fn launch_config(
 pub(super) fn launch_blocking(
     installations: &InstallationsState,
     launcher: &LauncherState,
+    controllers: &ControllersState,
     request: &LaunchRequest,
 ) -> Result<SessionInfo, CommandError> {
     let resolved = installations.resolve(&request.installation_id)?;
-    let config = launch_config(launcher, &resolved)?;
+    let settings = launch_settings(launcher, controllers, &resolved)?;
     let label = resolved.installation.label();
-    let prepared = prepare_resolved(&resolved, &config, request)?;
+    let prepared = prepare_resolved(&resolved, &settings, request)?;
+    controls::materialize(&prepared.plan.controls).map_err(|error| CommandError::LaunchFailed {
+        message: format!("the controller profile cannot be prepared: {error}"),
+    })?;
     launcher
         .sessions
         .start(prepared.target, prepared.title, label, &prepared.plan)
@@ -226,7 +297,7 @@ pub(super) fn launch_blocking(
 
 pub(super) fn prepare_resolved(
     resolved: &ResolvedInstallation,
-    config: &LaunchConfig,
+    settings: &LaunchSettings,
     request: &LaunchRequest,
 ) -> Result<PreparedLaunch, CommandError> {
     let executable = &resolved.installation.executable_path;
@@ -236,14 +307,19 @@ pub(super) fn prepare_resolved(
         .ok_or(CommandError::CatalogNotImported)?;
     ensure_catalog_matches(&info, executable, request.software.is_some())?;
     let (search_paths, warning) = required_search_paths(resolved);
+    let controls = ControlsContext {
+        config: &settings.controllers,
+        paths: &settings.controller_paths,
+    };
     let mut prepared = resolved
         .catalog
         .with_reader(|connection| {
             Ok(prepare(
                 connection,
                 executable,
-                config,
+                &settings.config,
                 &search_paths,
+                controls,
                 request,
             ))
         })?

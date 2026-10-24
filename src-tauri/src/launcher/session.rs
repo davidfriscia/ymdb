@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 
 use super::command::LaunchPlan;
+use super::controls::PlanControls;
 use crate::mame::process::{self, ProcessError};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -76,6 +77,8 @@ pub struct SessionInfo {
     /// Description of the machine or software, for display.
     pub title: String,
     pub command_line: Vec<String>,
+    /// The controller profile and controllers the session was started with.
+    pub controls: PlanControls,
     /// Milliseconds since the Unix epoch.
     pub started_at: u64,
     pub state: SessionState,
@@ -155,6 +158,7 @@ impl SessionManager {
             target,
             title,
             command_line: plan.command_line(),
+            controls: plan.controls.clone(),
             started_at,
             state: SessionState::Running,
         };
@@ -188,6 +192,21 @@ impl SessionManager {
                     && session.info.state == SessionState::Running
             })
             .count()
+    }
+
+    /// Running sessions of an installation that use the configuration
+    /// directory of a user controller profile.
+    pub fn running_with_profile(&self, installation_id: &str, profile_id: &str) -> Vec<u64> {
+        self.lock()
+            .iter()
+            .filter(|session| {
+                session.info.installation_id == installation_id
+                    && session.info.state == SessionState::Running
+                    && session.info.controls.is_managed()
+                    && session.info.controls.profile_id == profile_id
+            })
+            .map(|session| session.info.id)
+            .collect()
     }
 
     /// Kills a running session. MAME cannot save NVRAM or its configuration.
@@ -361,6 +380,7 @@ mod tests {
         LaunchPlan {
             installation_id: installation_id.to_owned(),
             profile_id: "default".to_owned(),
+            controls: PlanControls::native(),
             executable: PathBuf::from(program),
             working_directory: dir.to_path_buf(),
             arguments: args
@@ -571,6 +591,53 @@ mod tests {
         assert_eq!(manager.list()[0].state, SessionState::Running);
         manager.stop(second.id).expect("stop");
         wait_until_finished(&manager, second.id);
+    }
+
+    #[test]
+    fn finds_running_sessions_sharing_a_controller_profile() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let manager = manager(dir.path());
+        let managed = |installation_id: &str, profile_id: &str| {
+            let mut plan = long_running_for(installation_id, dir.path());
+            plan.controls = PlanControls {
+                profile_id: profile_id.to_owned(),
+                cfg_directory: Some(dir.path().join(installation_id).join(profile_id)),
+                ..PlanControls::native()
+            };
+            plan
+        };
+        let session = manager
+            .start(
+                target("sf2"),
+                "Street Fighter II".to_owned(),
+                "MAME".to_owned(),
+                &managed(FIRST, "fighting"),
+            )
+            .expect("start");
+        // A different game with the same profile and installation shares its directory.
+        assert_eq!(
+            manager.running_with_profile(FIRST, "fighting"),
+            [session.id]
+        );
+        assert!(manager.running_with_profile(SECOND, "fighting").is_empty());
+        assert!(manager.running_with_profile(FIRST, "gamepad").is_empty());
+        assert_eq!(manager.list()[0].controls.profile_id, "fighting");
+        // Sessions with MAME's own configuration are not reported.
+        let native = manager
+            .start(
+                target("pacman"),
+                "Pac-Man".to_owned(),
+                "MAME".to_owned(),
+                &long_running_for(FIRST, dir.path()),
+            )
+            .expect("start");
+        assert!(manager.running_with_profile(FIRST, "mame").is_empty());
+
+        manager.stop(session.id).expect("stop");
+        wait_until_finished(&manager, session.id);
+        assert!(manager.running_with_profile(FIRST, "fighting").is_empty());
+        manager.stop(native.id).expect("stop");
+        wait_until_finished(&manager, native.id);
     }
 
     #[test]
