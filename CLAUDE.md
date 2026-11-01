@@ -312,6 +312,9 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   responses ignored, memoized inputs).
 - See `ARCHITECTURE.md` for planned components; update it when a component moves
   from planned to implemented.
+- User and developer guides live in `docs/` (index: `docs/index.md`); `README.md`
+  stays a short introduction. Update the matching guide when user-visible behavior
+  changes, using the real names of pages, fields and buttons.
 
 ## Commands
 
