@@ -120,28 +120,59 @@ export function SettingsView({
 function Appearance({ theme, onThemeChange }: Pick<SettingsViewProps, "theme" | "onThemeChange">) {
   return (
     <section className="panel" aria-label="Appearance">
-      <fieldset className="choice-group">
+      <fieldset className="choice-group theme-options">
         <legend>Theme</legend>
-        {THEMES.map((option) => (
-          <label key={option.id} className="choice">
-            <input
-              type="radio"
-              name="theme"
-              value={option.id}
-              checked={theme === option.id}
-              onChange={() => {
-                onThemeChange(option.id);
-              }}
-            />
-            {option.label}
-          </label>
-        ))}
+        {THEMES.map((option) => {
+          const nameId = `theme-${option.id}-name`;
+          const descriptionId = `theme-${option.id}-description`;
+          return (
+            <label key={option.id} className="theme-option">
+              <input
+                type="radio"
+                name="theme"
+                value={option.id}
+                checked={theme === option.id}
+                aria-labelledby={nameId}
+                aria-describedby={descriptionId}
+                onChange={() => {
+                  onThemeChange(option.id);
+                }}
+              />
+              <ThemePreview theme={option.id} />
+              <span className="theme-option__text">
+                <span id={nameId} className="theme-option__name">
+                  {option.label}
+                </span>
+                <span id={descriptionId} className="theme-option__description">
+                  {option.description}
+                </span>
+              </span>
+            </label>
+          );
+        })}
       </fieldset>
       <p className="message message--muted">
         The theme applies immediately to the whole application. Interface preferences are the same
         for every MAME installation.
       </p>
     </section>
+  );
+}
+
+/** A small sample of a theme, drawn with that theme's own tokens. */
+function ThemePreview({ theme }: { theme: ThemeId }) {
+  return (
+    <span className="theme-preview" data-theme-preview={theme} aria-hidden="true">
+      <span className="theme-preview__sidebar" />
+      <span className="theme-preview__surface">
+        <span className="theme-preview__line" />
+        <span className="theme-preview__line theme-preview__line--muted" />
+        <span className="theme-preview__accents">
+          <span className="theme-preview__accent" />
+          <span className="theme-preview__accent theme-preview__accent--secondary" />
+        </span>
+      </span>
+    </span>
   );
 }
 

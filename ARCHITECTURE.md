@@ -150,17 +150,26 @@ results and open detail when their sum changes.
 - Colors are semantic CSS custom properties (`--color-app-bg`, `--color-surface`,
   `--color-surface-elevated`, `--color-sidebar-bg`, `--color-card-bg`,
   `--color-input-bg`, `--color-text-primary`/`-secondary`/`-muted`/`-on-accent`,
-  `--color-border`/`-strong`, `--color-accent`/`-hover`, `--color-hover`,
-  `--color-selected`, `--color-focus`, `--color-disabled-bg`/`-text`,
-  `--color-success`/`-warning`/`-error` and their `-bg` variants,
-  `--color-overlay` (backdrop of modal views such as the lightbox),
-  `--shadow-elevated`). Stylesheets use only these tokens.
+  `--color-border`/`-strong`, `--color-accent`/`-hover`, `--color-accent-secondary`,
+  `--color-hover`, `--color-active`, `--color-selected`, `--color-focus`,
+  `--color-disabled-bg`/`-text`, `--color-success`/`-warning`/`-error` and their
+  `-bg` variants, `--color-overlay` (backdrop of modal views such as the lightbox),
+  `--shadow-elevated`), glow tokens (`--glow-accent`, `--glow-selected`,
+  `--glow-focus` box shadows, transparent in themes without glow, and `--text-glow`)
+  and `--scrollbar-color`, `--heading-letter-spacing`. Stylesheets use only these
+  tokens and contain no colors (checked by `themes.test.ts`).
 - `src/app/theme/themes.css` defines the complete token set of each theme under
-  `:root[data-theme="<id>"]`; `themes.ts` registers the themes (`light`, `dark`) and
+  `:root[data-theme="<id>"], [data-theme-preview="<id>"]`; `themes.ts` registers the
+  themes (`light`, `dark`, `neon80s`, each with a label and a description) and
   `applyTheme` sets `data-theme` on `<html>`. Light is the default and also applies
   before any `data-theme` is set. The operating system preference is not followed.
 - Adding a theme means defining its tokens in `themes.css` and registering it in
-  `THEMES`; **Settings → Appearance** lists registered themes automatically.
+  `THEMES`; **Settings → Appearance** lists registered themes automatically, each
+  with a preview drawn by `data-theme-preview` from the theme's own tokens.
+- Neon 80s (synthwave): dark violet surfaces, fuchsia primary accent with dark text,
+  cyan secondary accent and focus, moderate glow only on primary buttons, selected
+  items, focus and hover; no filters, `backdrop-filter` or animations, and media keep
+  their colors. Guidelines and the token reference are in [docs/themes.md](docs/themes.md).
 - `main.tsx` applies the saved theme before the first render to avoid a flash.
 
 #### Interface preferences

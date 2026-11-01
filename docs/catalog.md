@@ -86,8 +86,9 @@ The **View** button opens the **View Options** panel:
   [Saved filters](lists-and-favorites.md#saved-filters)).
 
 Changing the view never changes the search, filters, sort or page. The theme
-(**Light**, the default, or **Dark**) is chosen in **Settings → Appearance**. View
-options and the theme are interface preferences, the same for every installation.
+(**Light**, the default, **Dark** or **Neon 80s**; see [Themes](themes.md)) is chosen
+in **Settings → Appearance**. View options and the theme are interface preferences,
+the same for every installation.
 
 ### Switching MAME version
 

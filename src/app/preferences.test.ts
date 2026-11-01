@@ -101,6 +101,15 @@ describe("UI preferences", () => {
     expect(loadPreferences().favoritesOnly).toBe(false);
   });
 
+  it("keeps the Neon 80s theme and rejects unknown or differently written theme ids", () => {
+    savePreferences({ ...DEFAULT_PREFERENCES, theme: "neon80s" });
+    expect(loadPreferences().theme).toBe("neon80s");
+    for (const theme of ["neon", "Neon80s", "neon-80s", 3, null]) {
+      store(PREFERENCES_KEY, { theme, renderer: "mediaGrid" });
+      expect(loadPreferences()).toMatchObject({ theme: "light", renderer: "mediaGrid" });
+    }
+  });
+
   it("ignores malformed data", () => {
     localStorage.setItem(PREFERENCES_KEY, "{not json");
     expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);

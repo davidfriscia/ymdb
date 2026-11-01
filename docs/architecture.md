@@ -41,7 +41,8 @@ optional), a thin frontend over a rich Rust core, and no copyrighted content shi
   over `src/shared/ipc.ts`, whose types mirror the serialized Rust types. The four
   pages (Catalog, Lists, MAME, Settings) stay mounted; MAME and Settings are two-pane
   pages.
-- Colors come from semantic theme tokens (`src/app/theme/themes.css`); interface
+- Colors come from semantic theme tokens (`src/app/theme/themes.css`, themes `light`,
+  `dark`, `neon80s`; see [Themes](themes.md)); interface
   preferences are stored in the web view's `localStorage`, validated field by field.
 
 ## MAME integration and installations
