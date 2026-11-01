@@ -17,6 +17,7 @@ Documentation of [Your MAME DB](../README.md), a companion desktop frontend for 
 | [Favorites, lists and saved filters](lists-and-favorites.md) | Favorites, custom lists, folder `.ini` import, saved filters  |
 | [Support files](support-files.md)                            | Genre, Category, Series and Version Added classifications     |
 | [Backup and restore](backup-and-restore.md)                  | Application data inventory, backups, window state             |
+| [Themes](themes.md)                                          | Light, Dark and Neon 80s; theme architecture and new themes   |
 | [Troubleshooting](troubleshooting.md)                        | Symptoms and solutions                                        |
 
 ## Developing YMDB

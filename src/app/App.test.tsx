@@ -255,6 +255,42 @@ describe("App", () => {
     expect(storedPreferences()).toMatchObject({ theme: "dark" });
   });
 
+  it("switches to Neon 80s and back immediately, keeping the choice for the next start", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    const neon = screen.getByRole("radio", { name: "Neon 80s" });
+    expect(neon).toHaveAccessibleDescription(/Synthwave arcade/);
+    await user.click(neon);
+    expect(document.documentElement).toHaveAttribute("data-theme", "neon80s");
+    expect(storedPreferences()).toMatchObject({ theme: "neon80s" });
+
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    await user.click(screen.getByRole("radio", { name: "Neon 80s" }));
+    unmount();
+
+    delete document.documentElement.dataset.theme;
+    render(<App />);
+    expect(document.documentElement).toHaveAttribute("data-theme", "neon80s");
+    expect(screen.getByRole("radio", { name: "Neon 80s", hidden: true })).toBeChecked();
+  });
+
+  it("shows a preview of every theme drawn from its own tokens", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    const previews = document.querySelectorAll("[data-theme-preview]");
+    expect([...previews].map((preview) => preview.getAttribute("data-theme-preview"))).toEqual([
+      "light",
+      "dark",
+      "neon80s",
+    ]);
+    for (const preview of previews) expect(preview).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("restores saved preferences at startup, migrating the previous format", () => {
     localStorage.setItem(
       LEGACY_PREFERENCES_KEY,

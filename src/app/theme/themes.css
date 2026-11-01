@@ -1,11 +1,20 @@
 /*
- * Semantic color tokens. Components use these variables only; a theme is a
+ * Semantic design tokens. Components use these variables only; a theme is a
  * complete set of values for them, selected by `data-theme` on <html>.
- * Register new themes in `themes.ts`.
+ * Register new themes in `themes.ts`; `themes.test.ts` checks that every
+ * registered theme defines exactly the tokens of the light theme.
+ *
+ * `[data-theme-preview="<id>"]` applies a theme's tokens to one element only:
+ * Settings → Appearance uses it to draw the color preview of each theme.
+ *
+ * Glow tokens are box shadows (`--glow-*`) or a text shadow (`--text-glow`).
+ * Themes without glow use a transparent shadow (box shadows may be combined
+ * in lists, where `none` is invalid) and `none` for the text shadow.
  */
 
 :root,
-:root[data-theme="light"] {
+:root[data-theme="light"],
+[data-theme-preview="light"] {
   color-scheme: light;
 
   --color-app-bg: #f3f5f8;
@@ -25,7 +34,9 @@
 
   --color-accent: #1f5fbf;
   --color-accent-hover: #194f9f;
+  --color-accent-secondary: #1f5fbf;
   --color-hover: #e8eef7;
+  --color-active: #d3e0f4;
   --color-selected: #dce7f8;
   --color-focus: #1f5fbf;
 
@@ -41,9 +52,18 @@
 
   --shadow-elevated: 0 4px 16px rgb(20 30 50 / 12%);
   --color-overlay: rgb(15 20 30 / 82%);
+
+  --glow-accent: 0 0 0 transparent;
+  --glow-selected: 0 0 0 transparent;
+  --glow-focus: 0 0 0 transparent;
+  --text-glow: none;
+
+  --scrollbar-color: auto;
+  --heading-letter-spacing: normal;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+[data-theme-preview="dark"] {
   color-scheme: dark;
 
   --color-app-bg: #121418;
@@ -63,7 +83,9 @@
 
   --color-accent: #7aaeff;
   --color-accent-hover: #9cc2ff;
+  --color-accent-secondary: #7aaeff;
   --color-hover: #262c37;
+  --color-active: #2c3443;
   --color-selected: #22344f;
   --color-focus: #9cc2ff;
 
@@ -79,4 +101,69 @@
 
   --shadow-elevated: 0 4px 16px rgb(0 0 0 / 45%);
   --color-overlay: rgb(0 0 0 / 85%);
+
+  --glow-accent: 0 0 0 transparent;
+  --glow-selected: 0 0 0 transparent;
+  --glow-focus: 0 0 0 transparent;
+  --text-glow: none;
+
+  --scrollbar-color: auto;
+  --heading-letter-spacing: normal;
+}
+
+/*
+ * Neon 80s: synthwave and arcade signage. Dark violet surfaces, fuchsia as
+ * the primary accent (dark text on it), cyan as the secondary accent and the
+ * focus ring, electric violet for selections. Glow is reserved for primary
+ * buttons, selected items, focus and hover; media keep their colors.
+ * Text contrast (WCAG): primary ≥ 14:1, secondary ≥ 11:1, muted ≥ 7:1 on
+ * surfaces; fuchsia ≥ 5:1 as text on surfaces, ≥ 4.6:1 on selections.
+ */
+:root[data-theme="neon80s"],
+[data-theme-preview="neon80s"] {
+  color-scheme: dark;
+
+  --color-app-bg: #10091f;
+  --color-surface: #1c1231;
+  --color-surface-elevated: #261843;
+  --color-sidebar-bg: #140b27;
+  --color-card-bg: #1a1030;
+  --color-input-bg: #0d0719;
+
+  --color-text-primary: #f5f0ff;
+  --color-text-secondary: #ddd0f7;
+  --color-text-muted: #b9a1e8;
+  --color-text-on-accent: #10091f;
+
+  --color-border: #3b2863;
+  --color-border-strong: #6f52ad;
+
+  --color-accent: #ff27d8;
+  --color-accent-hover: #ff62e3;
+  --color-accent-secondary: #34dfff;
+  --color-hover: #2a1a4a;
+  --color-active: #34205e;
+  --color-selected: #2f1660;
+  --color-focus: #34dfff;
+
+  --color-disabled-bg: #231a37;
+  --color-disabled-text: #8a7aa8;
+
+  --color-success: #5cf2a6;
+  --color-success-bg: #10302a;
+  --color-warning: #ffd166;
+  --color-warning-bg: #3a2a12;
+  --color-error: #ff6b8b;
+  --color-error-bg: #3d1230;
+
+  --shadow-elevated: 0 6px 20px rgb(0 0 0 / 55%);
+  --color-overlay: rgb(8 4 18 / 88%);
+
+  --glow-accent: 0 0 10px rgb(255 39 216 / 45%);
+  --glow-selected: 0 0 8px rgb(133 40 255 / 60%);
+  --glow-focus: 0 0 10px rgb(52 223 255 / 55%);
+  --text-glow: 0 0 8px rgb(255 39 216 / 55%);
+
+  --scrollbar-color: #6f52ad #140b27;
+  --heading-letter-spacing: 0.03em;
 }

@@ -234,7 +234,9 @@
 .media-gallery__category[aria-pressed="true"] {
   border-color: var(--color-accent);
   background: var(--color-selected);
-  box-shadow: inset 0 0 0 1px var(--color-accent);
+  box-shadow:
+    inset 0 0 0 1px var(--color-accent),
+    var(--glow-selected);
   color: var(--color-accent);
   font-weight: 600;
 }
