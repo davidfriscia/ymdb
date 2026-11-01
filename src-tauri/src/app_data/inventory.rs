@@ -13,6 +13,7 @@ use super::scope::{self, CONTROLLER_PROFILES_DIR, INSTALLATIONS_DIR};
 use super::{AppDirs, Root};
 use crate::catalog::store::CATALOG_FILE_NAME;
 use crate::controllers::store::CONTROLLERS_FILE_NAME;
+use crate::custom_themes::CUSTOM_THEMES_FILE_NAME;
 use crate::installations::store::{REGISTRY_FILE_NAME, RegistryStore};
 use crate::launcher::store::LAUNCH_FILE_NAME;
 use crate::lists::store::LISTS_FILE_NAME;
@@ -156,6 +157,16 @@ const DEFINITIONS: &[Definition] = &[
         description: "Catalog browser filter presets.",
         root: Root::Config,
         relative: SAVED_FILTERS_FILE_NAME,
+        kind: EntryKind::File,
+        class: DataClass::Owned,
+        exclusion_reason: None,
+    },
+    Definition {
+        id: "customThemes",
+        name: "Custom themes",
+        description: "Themes created in Settings → Appearance (design token values).",
+        root: Root::Config,
+        relative: CUSTOM_THEMES_FILE_NAME,
         kind: EntryKind::File,
         class: DataClass::Owned,
         exclusion_reason: None,

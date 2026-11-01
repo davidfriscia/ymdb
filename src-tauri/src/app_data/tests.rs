@@ -19,6 +19,7 @@ use super::*;
 use crate::catalog::store::CatalogStore;
 use crate::controllers::model::ControllersConfig;
 use crate::controllers::store::ControllersStore;
+use crate::custom_themes::{CustomThemes, CustomThemesStore, NewTheme};
 use crate::lists::model::{ListEntry, Lists};
 use crate::lists::store::ListsStore;
 use crate::media::config::{MediaConfig, MediaConfigStore};
@@ -115,6 +116,21 @@ fn populate(fixture: &Fixture) {
     SavedFiltersStore::in_dir(&dirs.config)
         .save(&filters)
         .expect("filters");
+    let mut themes = CustomThemes::default();
+    themes
+        .create(
+            NewTheme {
+                name: "Midnight".to_owned(),
+                source_theme_id: Some("neon80s".to_owned()),
+                tokens_version: 1,
+                tokens: serde_json::json!({ "colors": { "accent": "#ff27d8" } }),
+            },
+            2,
+        )
+        .expect("theme");
+    CustomThemesStore::in_dir(&dirs.config)
+        .save(&themes)
+        .expect("themes");
     let mut controllers = ControllersConfig::new();
     let profile = controllers
         .create_profile("Pad 1", true, |_| false)
@@ -246,6 +262,7 @@ fn exports_every_kind_of_data_with_checksums() {
     for category in [
         Category::Lists,
         Category::SavedFilters,
+        Category::CustomThemes,
         Category::Controllers,
         Category::ControllerBaseFiles,
         Category::ControllerProfileConfigurations,
@@ -356,6 +373,14 @@ fn round_trip_restores_the_same_data() {
     assert_eq!(mazes.display_name(), "Arcade / Mazes");
     assert_eq!((mazes.created_at, mazes.updated_at), (Some(5), Some(6)));
     assert_eq!(mazes.machine_names().collect::<Vec<_>>(), ["pacman"]);
+    // Custom themes come back with their id, name, source and tokens.
+    let themes = CustomThemesStore::in_dir(&fixture.dirs.config)
+        .load()
+        .expect("themes");
+    let midnight = &themes.themes[0];
+    assert_eq!(midnight.name, "Midnight");
+    assert_eq!(midnight.source_theme_id.as_deref(), Some("neon80s"));
+    assert_eq!(midnight.tokens["colors"]["accent"], "#ff27d8");
     assert!(
         CatalogStore::in_dir(&catalogs.join(ID_A))
             .with_reader(|_| Ok(()))
@@ -828,6 +853,17 @@ fn refuses_staged_data_the_stores_cannot_read() {
 
     assert_refused(&fixture, &archive, "cannot be used");
 
+    let invalid = (
+        "config/custom-themes.json",
+        &br#"{ "schemaVersion": 99, "themes": [] }"#[..],
+    );
+    craft(
+        &archive,
+        Some(&manifest_for(&[invalid])),
+        &[(&entry(invalid.0), invalid.1)],
+    );
+    assert_refused(&fixture, &archive, "custom themes");
+
     let database = (
         "data/support-files.sqlite",
         &b"SQLite format 3\0 but not really a database file at all......."[..],
@@ -997,6 +1033,7 @@ fn restoring_an_empty_backup_resets_the_owned_data_only() {
     for name in [
         "lists.json",
         "controllers.json",
+        "custom-themes.json",
         "installations",
         "controller-profiles",
     ] {

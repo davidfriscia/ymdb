@@ -36,7 +36,8 @@ actually use:
   full-text search, facets, filters, sorting and machine, software and software list
   details.
 - **Classic Cards** and **Media Grid** views, image galleries from your local media
-  directories, light and dark themes.
+  directories, built-in themes (Light, Dark, Neon 80s) and custom themes made with the
+  Theme Editor.
 - **Launcher** with launch options, profiles, per-machine and per-software options,
   an exact command line preview and session tracking.
 - **Controllers**: controller profiles, device detection, player assignments mapped

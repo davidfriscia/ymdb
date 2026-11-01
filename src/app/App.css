@@ -305,6 +305,10 @@ body {
   width: min(600px, 100%);
 }
 
+.modal__dialog--wide {
+  width: min(1320px, 100%);
+}
+
 .modal__header {
   display: flex;
   align-items: center;
@@ -899,15 +903,32 @@ progress {
 }
 
 .theme-option {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 12px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface);
+}
+
+/* The radio, the preview and the name: the actions are outside the label. */
+.theme-option__choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 10px;
   cursor: pointer;
+}
+
+.theme-option:has(input:disabled) .theme-option__choice {
+  cursor: not-allowed;
+}
+
+.theme-option__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .theme-option:hover {

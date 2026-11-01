@@ -163,14 +163,39 @@ results and open detail when their sum changes.
   themes (`light`, `dark`, `neon80s`, each with a label and a description) and
   `applyTheme` sets `data-theme` on `<html>`. Light is the default and also applies
   before any `data-theme` is set. The operating system preference is not followed.
-- Adding a theme means defining its tokens in `themes.css` and registering it in
-  `THEMES`; **Settings → Appearance** lists registered themes automatically, each
-  with a preview drawn by `data-theme-preview` from the theme's own tokens.
+- Adding a built-in theme means defining its tokens in `themes.css`, describing it in
+  the token model (`builtinThemeTokens.ts`) and registering it in `THEMES`;
+  **Settings → Appearance** lists registered themes automatically, each with a
+  preview drawn by `data-theme-preview` from the theme's own tokens.
+- Custom themes — Implemented. `themeTokens.ts` defines the editable model
+  (`ThemeTokens`: color scheme, scrollbars, lowercase `#rrggbb` colors and integer
+  effects: glow and shadow intensity, shadow distance and blur, border emphasis,
+  backdrop opacity, title letter spacing) and `themeProperties`, which generates the
+  exact token set of `themes.css` from it; `themes.test.ts` checks that the three
+  built-in themes described in the model produce exactly their CSS declarations, so a
+  clone looks like its source. `applyThemeTokens` sets the generated properties
+  inline on `<html>` with `data-theme="custom"`; `applyTheme` removes them. Values are
+  validated by `parseThemeTokens` (strict, current version only) and never reach CSS
+  as text.
+- `custom_themes.rs` stores the custom themes in `custom-themes.json` (configuration
+  directory, schema version 1, atomic writes, opaque immutable ids, names unique
+  ignoring case); the tokens are stored verbatim with `tokensVersion`, so a theme of a
+  newer format is kept, listed as unusable and never rewritten. An invalid file is
+  reported by every command and never replaced. The selection is the interface
+  preference `theme` (`light`, `dark`, `neon80s` or `custom:<id>`); a missing or
+  unusable custom theme shows Light without changing it, and deleting the theme in
+  use selects Light explicitly. `features/themes/` holds the provider, Settings →
+  Appearance (clone, edit, rename, delete, import, export) and the Theme Editor,
+  whose preview applies the draft to its own element only, so Cancel needs no
+  rollback. Theme files (`.ymdb-theme.json`, format version 1) carry a name, the
+  tokens, an optional built-in base and export metadata; imports always create a new
+  theme.
 - Neon 80s (synthwave): dark violet surfaces, fuchsia primary accent with dark text,
   cyan secondary accent and focus, moderate glow only on primary buttons, selected
   items, focus and hover; no filters, `backdrop-filter` or animations, and media keep
   their colors. Guidelines and the token reference are in [docs/themes.md](docs/themes.md).
-- `main.tsx` applies the saved theme before the first render to avoid a flash.
+- `main.tsx` applies the saved theme before the first render to avoid a flash; a
+  custom theme waits briefly for `get_custom_themes` (`features/themes/startupTheme.ts`).
 
 #### Interface preferences
 
@@ -2155,6 +2180,8 @@ Configuration directory:
   [User lists](#user-lists-favorites-and-custom-lists--implemented)).
 - `media.json`: the media sources, shared by all installations (see
   [Media sources](#media-sources--implemented)).
+- `custom-themes.json`: the custom themes (design token values), shared by all
+  installations (see [Themes](#themes)).
 - `saved-filters.json`: the saved filter presets, shared by all installations (see
   [Saved filter presets](#saved-filter-presets--implemented)).
 - `controllers.json`: controllers, controller profiles and their assignments, shared by
@@ -2243,6 +2270,7 @@ application data, full backups and full restores (**Settings → Application Dat
 | Controller profile base files       | `<config>/controller-profiles/<p>/base.cfg`               | owned       | yes                            |
 | Favorites and lists                 | `<config>/lists.json`                                     | owned       | yes                            |
 | Saved filters                       | `<config>/saved-filters.json`                             | owned       | yes                            |
+| Custom themes                       | `<config>/custom-themes.json`                             | owned       | yes                            |
 | Media sources                       | `<config>/media.json`                                     | owned       | yes                            |
 | Remote connections                  | `<config>/remote-connections.json`                        | owned       | yes (contains no secrets)      |
 | Single-installation layout          | `<config>/settings.json`, `<config>/launch.json`          | owned       | yes                            |

@@ -41,6 +41,7 @@ use super::sqlite;
 use super::{AppDirs, BackupError, Phase, Progress, Root};
 use crate::atomic_file;
 use crate::controllers::store::ControllersStore;
+use crate::custom_themes::CustomThemesStore;
 use crate::installations::store::RegistryStore;
 use crate::launcher::store::LaunchConfigStore;
 use crate::lists::store::ListsStore;
@@ -276,6 +277,7 @@ fn verify_staged(dirs: &AppDirs, manifest: &Manifest) -> Result<(), BackupError>
     check(ListsStore::in_dir(&config).load())?;
     check(ControllersStore::in_dir(&config).load())?;
     check(SavedFiltersStore::in_dir(&config).load())?;
+    check(CustomThemesStore::in_dir(&config).load())?;
     check(MediaConfigStore::in_dir(&config).load())?;
     check(ConnectionsStore::in_dir(&config).load())?;
     for id in super::export::installation_dirs(&config.join(scope::INSTALLATIONS_DIR))? {

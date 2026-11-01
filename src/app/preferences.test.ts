@@ -110,6 +110,16 @@ describe("UI preferences", () => {
     }
   });
 
+  it("keeps custom theme selections by id and rejects malformed ones", () => {
+    const selection = "custom:0123456789abcdef0123456789abcdef";
+    savePreferences({ ...DEFAULT_PREFERENCES, theme: selection });
+    expect(loadPreferences().theme).toBe(selection);
+    for (const theme of ["custom:", "custom:Midnight", "custom:0123", `${selection}0`, "custom"]) {
+      store(PREFERENCES_KEY, { theme });
+      expect(loadPreferences().theme).toBe("light");
+    }
+  });
+
   it("ignores malformed data", () => {
     localStorage.setItem(PREFERENCES_KEY, "{not json");
     expect(loadPreferences()).toEqual(DEFAULT_PREFERENCES);

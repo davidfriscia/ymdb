@@ -6,6 +6,7 @@ import { launchConfigView } from "../test/launcherFixtures";
 import { mediaSourcesView } from "../test/mediaFixtures";
 import { favoritesList } from "../test/listFixtures";
 import { installationsView, OLD_ID } from "../test/installationFixtures";
+import { customTheme, THEME_ID } from "../test/themeFixtures";
 import { App } from "./App";
 import { LEGACY_PREFERENCES_KEY, PREFERENCES_KEY } from "./preferences";
 
@@ -27,6 +28,7 @@ const EMPTY: Record<string, unknown> = {
   get_support_files: { sources: [], dimensions: [] },
   get_classification_status: { dimensions: [], syncError: null },
   get_saved_filters: [],
+  get_custom_themes: [],
   take_restore_outcome: null,
 };
 
@@ -289,6 +291,37 @@ describe("App", () => {
       "neon80s",
     ]);
     for (const preview of previews) expect(preview).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("applies a custom theme to the whole application and switches back to a built-in one", async () => {
+    responses = { ...EMPTY, get_custom_themes: [customTheme()] };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    await user.click(await screen.findByRole("radio", { name: "Sunset" }));
+    const root = document.documentElement;
+    expect(root).toHaveAttribute("data-theme", "custom");
+    expect(root.style.getPropertyValue("--color-accent")).toBe("#ff8800");
+    expect(root.style.getPropertyValue("--glow-accent")).toBe("0 0 10px rgb(255 136 0 / 45%)");
+    expect(storedPreferences()).toMatchObject({ theme: `custom:${THEME_ID}` });
+
+    // A built-in theme removes every custom value.
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    expect(root).toHaveAttribute("data-theme", "dark");
+    expect(root.style.getPropertyValue("--color-accent")).toBe("");
+    expect(root.getAttribute("style") ?? "").toBe("");
+  });
+
+  it("shows Light when the selected custom theme no longer exists, keeping the preference", async () => {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ theme: `custom:${THEME_ID}` }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText(/selected custom theme is not available/)).toBeVisible();
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(storedPreferences()).toMatchObject({ theme: `custom:${THEME_ID}` });
   });
 
   it("restores saved preferences at startup, migrating the previous format", () => {

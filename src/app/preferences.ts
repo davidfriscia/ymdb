@@ -1,4 +1,4 @@
-import { DEFAULT_THEME, isThemeId, type ThemeId } from "./theme/themes";
+import { DEFAULT_THEME, isThemeSelection, type ThemeSelection } from "./theme/themes";
 import {
   DEFAULT_BROWSER_PREFERENCES,
   parseBrowserPreferences,
@@ -11,7 +11,8 @@ import {
  * catalog: losing them only restores the defaults.
  */
 export interface UiPreferences extends BrowserPreferences {
-  theme: ThemeId;
+  /** A built-in theme or `custom:<id>`; a missing custom theme shows the default theme. */
+  theme: ThemeSelection;
   /** Whether launch panels show the MAME command line. */
   showCommandPreview: boolean;
 }
@@ -60,7 +61,7 @@ export function loadPreferences(storage: Storage | null = safeStorage()): UiPref
   const values = current ?? (legacy ? migrateV1(legacy) : null);
   if (!values) return DEFAULT_PREFERENCES;
   return {
-    theme: isThemeId(values.theme) ? values.theme : DEFAULT_PREFERENCES.theme,
+    theme: isThemeSelection(values.theme) ? values.theme : DEFAULT_PREFERENCES.theme,
     ...parseBrowserPreferences(values),
     showCommandPreview:
       typeof values.showCommandPreview === "boolean"

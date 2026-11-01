@@ -42,7 +42,8 @@ optional), a thin frontend over a rich Rust core, and no copyrighted content shi
   pages (Catalog, Lists, MAME, Settings) stay mounted; MAME and Settings are two-pane
   pages.
 - Colors come from semantic theme tokens (`src/app/theme/themes.css`, themes `light`,
-  `dark`, `neon80s`; see [Themes](themes.md)); interface
+  `dark`, `neon80s`, plus custom themes generated from the same tokens; see
+  [Themes](themes.md)); interface
   preferences are stored in the web view's `localStorage`, validated field by field.
 
 ## MAME integration and installations
@@ -69,7 +70,7 @@ optional), a thin frontend over a rich Rust core, and no copyrighted content shi
 ## Global application data
 
 User data lives outside the catalogs, in JSON files of the configuration directory:
-`lists.json` (favorites and custom lists), `saved-filters.json`, `media.json`,
+`lists.json` (favorites and custom lists), `saved-filters.json`, `custom-themes.json`, `media.json`,
 `remote-connections.json`, `controllers.json`, plus per installation `launch.json` and
 `remote-sources.json`. Files are written atomically and an invalid file is reported,
 never replaced implicitly. `app_data/` provides the inventory, consistent backups and

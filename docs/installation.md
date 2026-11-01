@@ -124,6 +124,7 @@ Main files:
 | `media.json`                                | configuration | Media sources                                   |
 | `lists.json`                                | configuration | Favorites and custom lists                      |
 | `saved-filters.json`                        | configuration | Saved filters                                   |
+| `custom-themes.json`                        | configuration | Custom themes                                   |
 | `controllers.json`                          | configuration | Controllers, controller profiles, assignments   |
 | `window-state.json`                         | configuration | Position and size of the main window            |
 | `installations/<id>/catalog.sqlite`         | local data    | Catalog of one installation (derived from MAME) |

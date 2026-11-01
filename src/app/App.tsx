@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { CatalogBrowser } from "../features/browser/CatalogBrowser";
 import type { BrowserPreferences } from "../features/browser/browserPreferences";
 import { useInstallations } from "../features/installations/installationsContext";
@@ -17,7 +17,9 @@ import {
   type UiPreferences,
 } from "./preferences";
 import { SettingsView, type SettingsSection } from "./SettingsView";
-import { applyTheme } from "./theme/themes";
+import { CustomThemesProvider } from "../features/themes/CustomThemesProvider";
+import { resolveTheme, useCustomThemes } from "../features/themes/customThemesContext";
+import { applyTheme, applyThemeTokens } from "./theme/themes";
 
 type View = "catalog" | "lists" | "mame" | "settings";
 
@@ -55,7 +57,9 @@ export function App() {
       <InstallationsProvider>
         <FavoritesProvider>
           <CustomListsProvider>
-            <Shell />
+            <CustomThemesProvider>
+              <Shell />
+            </CustomThemesProvider>
           </CustomListsProvider>
         </FavoritesProvider>
       </InstallationsProvider>
@@ -102,9 +106,21 @@ function Shell() {
   }, []);
 
   useEffect(() => {
-    applyTheme(preferences.theme);
     savePreferences(preferences);
   }, [preferences]);
+
+  // The theme applies to the whole document. A missing custom theme shows the
+  // default theme without changing the preference; while the custom themes
+  // load, the theme applied at startup stays.
+  const customThemes = useCustomThemes();
+  const resolvedTheme = useMemo(
+    () => resolveTheme(preferences.theme, customThemes.themes, customThemes.loadError !== null),
+    [preferences.theme, customThemes.themes, customThemes.loadError],
+  );
+  useEffect(() => {
+    if (resolvedTheme.kind === "builtin") applyTheme(resolvedTheme.id);
+    else if (resolvedTheme.kind === "custom") applyThemeTokens(resolvedTheme.tokens);
+  }, [resolvedTheme]);
 
   const updatePreferences = useCallback((change: Partial<UiPreferences>) => {
     setPreferences((current) => ({ ...current, ...change }));

@@ -8,6 +8,7 @@
 pub mod app_data;
 pub mod catalog;
 pub mod controllers;
+pub mod custom_themes;
 pub mod detail;
 pub mod health;
 pub mod installations;

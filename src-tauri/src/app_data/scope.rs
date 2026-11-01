@@ -17,6 +17,7 @@ use super::Root;
 use crate::catalog::store::CATALOG_FILE_NAME;
 use crate::controllers::model::is_id as is_profile_id;
 use crate::controllers::store::CONTROLLERS_FILE_NAME;
+use crate::custom_themes::CUSTOM_THEMES_FILE_NAME;
 use crate::installations::is_installation_id;
 use crate::installations::store::REGISTRY_FILE_NAME;
 use crate::launcher::store::LAUNCH_FILE_NAME;
@@ -42,11 +43,12 @@ pub const EXPORT_WORK_DIR: &str = ".ymdb-export";
 /// Files of the configuration root included in a backup. `settings.json`
 /// and the top-level `launch.json` belong to the single-installation layout:
 /// the migration keeps them as a copy of the old configuration.
-pub const CONFIG_FILES: [&str; 8] = [
+pub const CONFIG_FILES: [&str; 9] = [
     REGISTRY_FILE_NAME,
     CONTROLLERS_FILE_NAME,
     LISTS_FILE_NAME,
     SAVED_FILTERS_FILE_NAME,
+    CUSTOM_THEMES_FILE_NAME,
     MEDIA_FILE_NAME,
     CONNECTIONS_FILE_NAME,
     SETTINGS_FILE_NAME,
@@ -88,6 +90,7 @@ pub enum Category {
     ControllerBaseFiles,
     Lists,
     SavedFilters,
+    CustomThemes,
     MediaSources,
     RemoteConnections,
     LegacyConfiguration,
@@ -108,6 +111,7 @@ impl Category {
             Self::ControllerBaseFiles => "Controller profile base files",
             Self::Lists => "Favorites and lists",
             Self::SavedFilters => "Saved filters",
+            Self::CustomThemes => "Custom themes",
             Self::MediaSources => "Media sources",
             Self::RemoteConnections => "Remote connections",
             Self::LegacyConfiguration => "Configuration of the single-installation layout",
@@ -205,6 +209,7 @@ fn config_file_category(name: &str) -> Option<Category> {
         CONTROLLERS_FILE_NAME => Category::Controllers,
         LISTS_FILE_NAME => Category::Lists,
         SAVED_FILTERS_FILE_NAME => Category::SavedFilters,
+        CUSTOM_THEMES_FILE_NAME => Category::CustomThemes,
         MEDIA_FILE_NAME => Category::MediaSources,
         CONNECTIONS_FILE_NAME => Category::RemoteConnections,
         SETTINGS_FILE_NAME | LAUNCH_FILE_NAME => Category::LegacyConfiguration,
@@ -267,6 +272,11 @@ mod tests {
                 ItemKind::File,
             ),
             ("config/lists.json", Category::Lists, ItemKind::File),
+            (
+                "config/custom-themes.json",
+                Category::CustomThemes,
+                ItemKind::File,
+            ),
             (
                 "config/settings.json",
                 Category::LegacyConfiguration,

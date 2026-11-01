@@ -1,0 +1,337 @@
+/* Settings → Appearance: custom themes and the Theme Editor. Colors come from
+   the semantic tokens only; the preview gets the tokens of the edited theme
+   as inline custom properties. */
+
+.theme-options__empty {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.theme-option__confirm {
+  width: 100%;
+  margin-top: 0;
+  padding: 10px;
+}
+
+.theme-option__confirm .message {
+  margin: 0;
+}
+
+.appearance__error-text {
+  margin: 0 0 8px;
+}
+
+.theme-name__actions {
+  padding-bottom: 20px;
+}
+
+/* Editor: the fields on the left, the preview on the right. Only the modal
+   body scrolls; the preview and the footer stay in view (sticky). */
+.theme-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.theme-editor__controls {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.theme-editor__general {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+}
+
+.theme-editor__general .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.theme-editor__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.theme-editor__tab {
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.theme-editor__tab:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+.theme-editor__tab[aria-selected="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-selected);
+  box-shadow: var(--glow-selected);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.theme-editor__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.theme-editor__subheading {
+  margin: 12px 0 4px;
+  font-size: 0.9375rem;
+}
+
+.theme-editor__preview {
+  position: sticky;
+  top: 0;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.theme-editor__preview .theme-editor__subheading {
+  margin-top: 0;
+}
+
+.theme-editor__footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: 16px;
+  padding: 4px 0 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+
+.theme-editor__footer .message {
+  margin: 8px 0 0;
+}
+
+@media (width <= 900px) {
+  .theme-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .theme-editor__preview {
+    position: static;
+  }
+}
+
+/* One token: name and description, then its controls. */
+.token-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.token-field__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.token-field__label {
+  font-weight: 600;
+}
+
+.token-field__description {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.token-field__controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.token-field__picker {
+  width: 40px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-input-bg);
+  cursor: pointer;
+}
+
+.token-field__hex {
+  width: 6.5rem;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.token-field__slider {
+  width: 160px;
+  accent-color: var(--color-accent);
+}
+
+.token-field__value {
+  min-width: 4.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  text-align: right;
+}
+
+.token-field__error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-error);
+  font-size: 0.8125rem;
+}
+
+@media (width <= 560px) {
+  .token-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Preview: a sample of the interface with the edited tokens. */
+.theme-sample {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-app-bg);
+  color: var(--color-text-primary);
+  scrollbar-color: var(--scrollbar-color);
+}
+
+.theme-sample__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 6px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-sidebar-bg);
+}
+
+.theme-sample__nav .shell__brand {
+  margin-bottom: 8px;
+}
+
+.theme-sample__content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.theme-sample__title {
+  margin: 0;
+}
+
+.theme-sample__text {
+  margin: 0;
+}
+
+.theme-sample__secondary {
+  color: var(--color-text-secondary);
+}
+
+.theme-sample__muted {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.theme-sample__tabs {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.theme-sample__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-sample__row .input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 120px;
+}
+
+/* A field drawn with the focus ring and glow of a focused control. */
+.theme-sample__focused {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  box-shadow: var(--glow-focus);
+}
+
+.theme-sample__cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.theme-sample__card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-card-bg);
+}
+
+.theme-sample__card--selected {
+  border-color: var(--color-accent);
+  background: var(--color-selected);
+  box-shadow:
+    inset 0 0 0 1px var(--color-accent),
+    var(--glow-selected);
+}
+
+.theme-sample__card--hover {
+  background: var(--color-hover);
+  box-shadow: var(--glow-accent);
+}
+
+.theme-sample__card-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-sample .message {
+  margin: 0;
+}
+
+.theme-sample__backdrop {
+  padding: 14px;
+  border-radius: 6px;
+  background: var(--color-overlay);
+}
+
+.theme-sample__dialog {
+  width: 100%;
+}
+
+.theme-sample__dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}

@@ -9,7 +9,8 @@ import { FavoritesSettings } from "../features/lists/FavoritesSettings";
 import { SupportFilesSettings } from "../features/support-files/SupportFilesSettings";
 import { TwoPaneLayout, TwoPaneNavItem } from "../shared/TwoPaneLayout";
 import { useVisited } from "../shared/useVisited";
-import { THEMES, type ThemeId } from "./theme/themes";
+import { AppearanceSettings } from "../features/themes/AppearanceSettings";
+import type { ThemeSelection } from "./theme/themes";
 
 export type SettingsSection =
   | "appearance"
@@ -35,8 +36,8 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
 ];
 
 interface SettingsViewProps {
-  theme: ThemeId;
-  onThemeChange: (theme: ThemeId) => void;
+  theme: ThemeSelection;
+  onThemeChange: (theme: ThemeSelection) => void;
   /** The selected section; the page stays mounted, so it survives visits elsewhere. */
   section: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
@@ -65,7 +66,7 @@ export function SettingsView({
   function content(section: SettingsSection): ReactNode {
     switch (section) {
       case "appearance":
-        return <Appearance theme={theme} onThemeChange={onThemeChange} />;
+        return <AppearanceSettings theme={theme} onThemeChange={onThemeChange} />;
       case "mediaSources":
         return <MediaSourcesSettings />;
       case "remoteConnections":
@@ -114,65 +115,6 @@ export function SettingsView({
         </div>
       ))}
     </TwoPaneLayout>
-  );
-}
-
-function Appearance({ theme, onThemeChange }: Pick<SettingsViewProps, "theme" | "onThemeChange">) {
-  return (
-    <section className="panel" aria-label="Appearance">
-      <fieldset className="choice-group theme-options">
-        <legend>Theme</legend>
-        {THEMES.map((option) => {
-          const nameId = `theme-${option.id}-name`;
-          const descriptionId = `theme-${option.id}-description`;
-          return (
-            <label key={option.id} className="theme-option">
-              <input
-                type="radio"
-                name="theme"
-                value={option.id}
-                checked={theme === option.id}
-                aria-labelledby={nameId}
-                aria-describedby={descriptionId}
-                onChange={() => {
-                  onThemeChange(option.id);
-                }}
-              />
-              <ThemePreview theme={option.id} />
-              <span className="theme-option__text">
-                <span id={nameId} className="theme-option__name">
-                  {option.label}
-                </span>
-                <span id={descriptionId} className="theme-option__description">
-                  {option.description}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </fieldset>
-      <p className="message message--muted">
-        The theme applies immediately to the whole application. Interface preferences are the same
-        for every MAME installation.
-      </p>
-    </section>
-  );
-}
-
-/** A small sample of a theme, drawn with that theme's own tokens. */
-function ThemePreview({ theme }: { theme: ThemeId }) {
-  return (
-    <span className="theme-preview" data-theme-preview={theme} aria-hidden="true">
-      <span className="theme-preview__sidebar" />
-      <span className="theme-preview__surface">
-        <span className="theme-preview__line" />
-        <span className="theme-preview__line theme-preview__line--muted" />
-        <span className="theme-preview__accents">
-          <span className="theme-preview__accent" />
-          <span className="theme-preview__accent theme-preview__accent--secondary" />
-        </span>
-      </span>
-    </span>
   );
 }
 

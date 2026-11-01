@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
-import { DEFAULT_THEME, THEMES, applyTheme, isThemeId } from "./themes";
+import { BUILTIN_THEME_TOKENS } from "./builtinThemeTokens";
+import {
+  DEFAULT_THEME,
+  THEMES,
+  applyTheme,
+  applyThemeTokens,
+  customSelection,
+  customThemeIdOf,
+  isThemeId,
+  isThemeSelection,
+} from "./themes";
+import {
+  THEME_PROPERTY_NAMES,
+  TOKENS_VERSION,
+  parseThemeTokens,
+  themeProperties,
+} from "./themeTokens";
 
 const themesCss = readFileSync("src/app/theme/themes.css", "utf8");
 
@@ -100,5 +116,66 @@ describe("themes", () => {
         expect(defined.has(token), `${path} ${token}`).toBe(true);
       }
     }
+  });
+});
+
+/** The declarations of a theme's rule, including `color-scheme`. */
+function declarationsOf(theme: string): Record<string, string> {
+  return Object.fromEntries(
+    [...ruleOf(theme).body.matchAll(/(--[\w-]+|color-scheme)\s*:\s*([^;]+);/g)].map((match) => [
+      match[1] ?? "",
+      (match[2] ?? "").trim(),
+    ]),
+  );
+}
+
+describe("built-in themes in the token model", () => {
+  it("produce exactly the declarations of themes.css", () => {
+    for (const theme of THEMES) {
+      expect(themeProperties(BUILTIN_THEME_TOKENS[theme.id]), theme.id).toEqual(
+        declarationsOf(theme.id),
+      );
+    }
+  });
+
+  it("are valid tokens of the current version", () => {
+    for (const theme of THEMES) {
+      expect(parseThemeTokens(TOKENS_VERSION, BUILTIN_THEME_TOKENS[theme.id]), theme.id).toEqual(
+        BUILTIN_THEME_TOKENS[theme.id],
+      );
+    }
+  });
+
+  it("list every generated property for removal", () => {
+    expect([...THEME_PROPERTY_NAMES].sort()).toEqual(
+      Object.keys(themeProperties(BUILTIN_THEME_TOKENS.light)).sort(),
+    );
+  });
+});
+
+describe("theme selections", () => {
+  it("accepts built-in ids and custom ids of the stored form", () => {
+    expect(isThemeSelection("neon80s")).toBe(true);
+    expect(isThemeSelection(customSelection("0123456789abcdef0123456789abcdef"))).toBe(true);
+    expect(isThemeSelection("custom:0123456789ABCDEF0123456789ABCDEF")).toBe(false);
+    expect(isThemeSelection("custom:../light")).toBe(false);
+    expect(customThemeIdOf("custom:0123456789abcdef0123456789abcdef")).toBe(
+      "0123456789abcdef0123456789abcdef",
+    );
+    expect(customThemeIdOf("dark")).toBeNull();
+  });
+
+  it("applies custom tokens inline and removes them for a built-in theme", () => {
+    const root = document.createElement("div");
+    root.style.setProperty("width", "10px");
+    applyThemeTokens(BUILTIN_THEME_TOKENS.neon80s, root);
+    expect(root.dataset.theme).toBe("custom");
+    expect(root.style.getPropertyValue("--color-accent")).toBe("#ff27d8");
+    expect(root.style.getPropertyValue("--glow-focus")).toBe("0 0 10px rgb(52 223 255 / 55%)");
+    applyTheme("light", root);
+    expect(root.dataset.theme).toBe("light");
+    for (const name of THEME_PROPERTY_NAMES) expect(root.style.getPropertyValue(name)).toBe("");
+    // Other inline styles are kept.
+    expect(root.style.width).toBe("10px");
   });
 });

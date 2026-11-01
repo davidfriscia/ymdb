@@ -18,7 +18,7 @@ The directories themselves are described in
 **Export backup…** writes one archive (`ymdb-<date>-<time>.ymdb-backup.zip`) with
 every file YMDB owns: installations, launch configurations, ROM Manager settings,
 controllers and controller profile files (including the MAME configuration
-directories of profiles), favorites and lists, saved filters, media sources, remote
+directories of profiles), favorites and lists, saved filters, custom themes, media sources, remote
 connections, catalogs, the support files repository and the interface preferences.
 
 Databases are copied with the SQLite backup API, and the export waits for changes in

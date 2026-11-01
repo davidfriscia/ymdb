@@ -5,6 +5,7 @@ mod atomic_file;
 mod catalog;
 mod commands;
 mod controllers;
+mod custom_themes;
 mod health;
 mod installations;
 mod launcher;
@@ -27,6 +28,7 @@ use crate::app_data::AppDirs;
 use crate::commands::app_data::AppDataState;
 use crate::commands::catalog::CatalogState;
 use crate::commands::controllers::ControllersState;
+use crate::commands::custom_themes::CustomThemesState;
 use crate::commands::installations::InstallationsState;
 use crate::commands::launcher::LauncherState;
 use crate::commands::lists::ListsState;
@@ -88,6 +90,7 @@ pub fn run() {
             // Imported support files can be large: local data, not roaming.
             app.manage(SupportFilesState::new(data_dir.as_deref()));
             app.manage(SavedFiltersState::new(config_dir.as_deref()));
+            app.manage(CustomThemesState::new(config_dir.as_deref()));
             app.manage(
                 ControllersState::new(config_dir.as_deref()).with_data_dir(data_dir.as_deref()),
             );
@@ -167,6 +170,13 @@ pub fn run() {
             commands::saved_filters::update_saved_filter,
             commands::saved_filters::rename_saved_filter,
             commands::saved_filters::delete_saved_filter,
+            commands::custom_themes::get_custom_themes,
+            commands::custom_themes::create_custom_theme,
+            commands::custom_themes::update_custom_theme,
+            commands::custom_themes::rename_custom_theme,
+            commands::custom_themes::delete_custom_theme,
+            commands::custom_themes::choose_theme_file,
+            commands::custom_themes::export_theme_file,
             commands::controllers::get_controllers,
             commands::controllers::create_controller,
             commands::controllers::update_controller,

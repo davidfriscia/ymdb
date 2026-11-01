@@ -10,8 +10,8 @@ interface ModalProps {
   onClose: () => void;
   /** Accessible name of the close button of the header. */
   closeLabel?: string;
-  /** `narrow` for small dialogs, such as a selection list. */
-  size?: "default" | "narrow";
+  /** `narrow` for small dialogs, such as a selection list; `wide` for editors. */
+  size?: "default" | "narrow" | "wide";
   children: ReactNode;
 }
 
@@ -87,7 +87,7 @@ export function Modal({
     >
       <div
         ref={dialogRef}
-        className={size === "narrow" ? "modal__dialog modal__dialog--narrow" : "modal__dialog"}
+        className={size === "default" ? "modal__dialog" : `modal__dialog modal__dialog--${size}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
