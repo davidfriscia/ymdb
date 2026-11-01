@@ -1,8 +1,10 @@
 # Architecture
 
-This document describes the intended architecture of Your MAME DB (YMDB). Each
-component is marked as **Implemented** or **Planned**. Planned components describe
-direction, not commitments; details will be decided when each component is built.
+This document is the detailed reference of the architecture of Your MAME DB (YMDB).
+Each component is marked as **Implemented** or **Planned**; planned items describe
+direction, not commitments, and details are decided when each component is built.
+User guides and a short [architecture overview](docs/architecture.md) are in
+[`docs/`](docs/index.md).
 
 ## Overview
 
@@ -96,6 +98,8 @@ React + TypeScript application rendered by the system WebView through Tauri.
     `CustomListsProvider`, the **Lists** page, the folder file import, Manage Lists
     and the list picker of View Options (see
     [User lists](#user-lists-favorites-and-custom-lists--implemented)).
+  - `app-data`: **Settings → Application Data** (inventory, backup export and
+    import, see [Application data management](#application-data-management--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 #### Application shell
@@ -382,7 +386,7 @@ The Rust crate in `src-tauri/`.
 - `commands/` contains Tauri command adapters (`health.rs`, `mame.rs`,
   `installations.rs`, `catalog.rs`, `search.rs`, `detail.rs`, `launcher.rs`,
   `media.rs`, `remote.rs`, `roms.rs`, `lists.rs`, `support_files.rs`, `saved_filters.rs`,
-  `controllers.rs`).
+  `controllers.rs`, `app_data.rs`).
   Commands extract what they need from the Tauri runtime and delegate
   to plain functions that are unit-tested without Tauri. Blocking work (process
   execution, native dialogs, searches) runs on the blocking thread pool, and
@@ -417,7 +421,11 @@ The Rust crate in `src-tauri/`.
 - `saved_filters.rs` stores the saved filter presets (see
   [Saved filter presets](#saved-filter-presets--implemented)).
 - `controllers/` manages controllers, controller profiles and their assignments (see
-  [Controller management](#controller-management--implemented-phase-1)).
+  [Controller management](#controller-management--implemented)).
+- `app_data/` provides the inventory, backup and restore of the application data (see
+  [Application data management](#application-data-management--implemented)).
+- `window_state.rs` saves and restores the placement of the main window (see
+  [Window state](#window-state--implemented)).
 
 ### MAME integration — Implemented
 
@@ -746,7 +754,7 @@ raw arguments.
   (see below).
 - `controls.rs`: the options of the controller profile of a launch and the creation of
   its configuration directory when MAME starts (see
-  [Controller management](#controller-management--implemented-phase-1)).
+  [Controller management](#controller-management--implemented)).
 - `command.rs`: `LaunchPlan`, the structured command line (executable, working
   directory, arguments with their role and, for options, the level they come from).
   The arguments of the plan are what is executed; the preview shown to the user is
@@ -777,7 +785,7 @@ The option set is deliberately small (display, performance, sound, paths, machin
 configuration such as BIOS and RAM size, `seconds_to_run`) and grows by adding
 definitions. Input options (`ctrlr`, `ctrlrpath`, `joystick`, `mouse`, `lightgun`,
 device mappings) are never launch options: they belong to
-[Controller management](#controller-management--implemented-phase-1), which
+[Controller management](#controller-management--implemented), which
 contributes `cfg_directory`, `ctrlrpath` and `ctrlr` after the launch options and the
 ROM Manager, with the origin `controllers` (`launcher/controls.rs`). Launch profiles
 and controller profiles are independent: a launch selects one of each.
@@ -1826,9 +1834,9 @@ application never blocks its own replacement. If another program keeps the file
 open, the rename fails with a message asking to close it, and the previous catalog
 is kept.
 
-User data (future favorites, collections, launch profiles) must not live in
-`catalog.sqlite`, which is replaced on every import; it will be stored separately and
-reference machines by short name and software by list and short name.
+User data (favorites, custom lists, launch profiles, saved filters) never lives in
+`catalog.sqlite`, which is replaced on every import; it is stored separately and
+references machines by short name and software by list and short name.
 
 #### MAME versions
 
@@ -1873,8 +1881,7 @@ read from the database only when an import ends.
 - Deferred XML data is listed above.
 - Imports cannot be cancelled during the final commit and file replacement.
 
-Planned: full catalog update (machines and software lists in one operation),
-favorites, collections, screenshots, artwork and metadata.
+Planned: full catalog update (machines and software lists in one operation).
 
 ### Catalog details — Implemented
 
@@ -2144,7 +2151,7 @@ Configuration directory:
 - `controllers.json`: controllers, controller profiles and their assignments, shared by
   all installations, and `controller-profiles/<profileId>/base.cfg`, the imported
   controller file of a profile (see
-  [Controller management](#controller-management--implemented-phase-1)).
+  [Controller management](#controller-management--implemented)).
 - `installations/<id>/controller-profiles/<profileId>/cfg/`: the MAME configuration
   directory of a controller profile for one installation, written by MAME only.
 - `settings.json` and `launch.json`: files of the single-installation layout. They are
