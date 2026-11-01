@@ -355,13 +355,13 @@ fn search(
     store: &CatalogStore,
     request: &MachineSearchRequest,
 ) -> Result<MachineSearchResponse, SearchError> {
-    search_with(store, request, None)
+    search_with(store, request, &[])
 }
 
 fn search_with(
     store: &CatalogStore,
     request: &MachineSearchRequest,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
 ) -> Result<MachineSearchResponse, SearchError> {
     store
         .with_reader(|connection| Ok(search_machines(connection, request, members)))
@@ -526,9 +526,9 @@ fn combines_values_with_or_and_dimensions_with_and() {
         ["mspacman", "pacman"]
     );
     let mut favorites = request;
-    favorites.filters.list = Some("favorites".to_owned());
+    favorites.filters.user_lists = vec!["favorites".to_owned()];
     let members = ListMembers::machines(["pacman", "sf2ce", "galaga"]);
-    let response = search_with(&store, &favorites, Some(&members)).expect("search");
+    let response = search_with(&store, &favorites, &[members]).expect("search");
     assert_eq!(names(&response), ["pacman", "sf2ce"]);
 }
 
@@ -987,4 +987,197 @@ fn real_catalog_classifications() {
             );
         }
     }
+}
+
+// Custom lists combined with the other criteria
+
+/// Every result of `request`, page after page, by name.
+fn all_names(
+    store: &CatalogStore,
+    request: &MachineSearchRequest,
+    members: &[ListMembers],
+) -> Vec<String> {
+    let mut names = Vec::new();
+    for page in 0.. {
+        let response = search_with(
+            store,
+            &MachineSearchRequest {
+                page,
+                page_size: Some(2),
+                sort: Some(MachineSort::Name),
+                facets: Vec::new(),
+                ..request.clone()
+            },
+            members,
+        )
+        .expect("search");
+        if response.items.is_empty() {
+            assert_eq!(names.len() as u64, response.total, "pages cover the total");
+            break;
+        }
+        names.extend(response.items.into_iter().map(|item| item.name));
+    }
+    names
+}
+
+#[test]
+fn lists_restrict_results_counts_pages_and_facets_like_a_reference() {
+    let (_fixture, store) = classified();
+    // A custom list with a machine of no catalog, and Favorites.
+    let custom = ["pacman", "mspacman", "sf2ce", "pong", "notinthiscatalog"];
+    let favorites = ["pacman", "sf2ce", "galaga", "puckman"];
+    let combinations: [(&[&str], &[&[&str]]); 4] = [
+        (&["custom"], &[&custom]),
+        (&["favorites", "custom"], &[&favorites, &custom]),
+        (&["empty"], &[&[]]),
+        (&["custom", "empty"], &[&custom, &[]]),
+    ];
+    let requests = [
+        MachineFilters::default(),
+        MachineFilters {
+            genres: strings(&["Maze", "Fighter"]),
+            ..MachineFilters::default()
+        },
+        MachineFilters {
+            categories: strings(&["Maze"]),
+            ..MachineFilters::default()
+        },
+        MachineFilters {
+            series: strings(&["Pac-Man", "Street Fighter II"]),
+            ..MachineFilters::default()
+        },
+        MachineFilters {
+            version_added_range: Some(VersionRange {
+                from: Some("0.1".to_owned()),
+                to: None,
+            }),
+            ..MachineFilters::default()
+        },
+    ];
+    let facet_kinds = [
+        MachineFacet::Genre,
+        MachineFacet::Category,
+        MachineFacet::Series,
+        MachineFacet::VersionAdded,
+        MachineFacet::Manufacturer,
+    ];
+    for text in [None, Some("pac"), Some("fighter")] {
+        for filters in &requests {
+            let unrestricted = MachineSearchRequest {
+                text: text.map(str::to_owned),
+                filters: filters.clone(),
+                ..MachineSearchRequest::default()
+            };
+            let everything = all_names(&store, &unrestricted, &[]);
+            for (ids, lists) in &combinations {
+                let members: Vec<ListMembers> = lists
+                    .iter()
+                    .map(|names| ListMembers::machines(names.iter().copied()))
+                    .collect();
+                let restricted = MachineSearchRequest {
+                    filters: MachineFilters {
+                        user_lists: strings(ids),
+                        ..filters.clone()
+                    },
+                    ..unrestricted.clone()
+                };
+                // Reference: the unrestricted results that are in every list.
+                let expected: Vec<String> = everything
+                    .iter()
+                    .filter(|name| lists.iter().all(|list| list.contains(&name.as_str())))
+                    .cloned()
+                    .collect();
+                let context = format!("{text:?} {filters:?} {ids:?}");
+                assert_eq!(
+                    all_names(&store, &restricted, &members),
+                    expected,
+                    "{context}"
+                );
+
+                // Facets count only list members: each value's count is the
+                // total of the restricted search selecting that value.
+                let response = search_with(
+                    &store,
+                    &MachineSearchRequest {
+                        page_size: Some(1),
+                        facets: facet_kinds
+                            .iter()
+                            .map(|&facet| FacetRequest {
+                                facet,
+                                search: None,
+                                limit: Some(1000),
+                            })
+                            .collect(),
+                        ..restricted.clone()
+                    },
+                    &members,
+                )
+                .expect("facets");
+                assert_eq!(response.total, expected.len() as u64, "{context}");
+                for result in &response.facets {
+                    for value in &result.values {
+                        let Some(selected) = value.value.clone() else {
+                            continue;
+                        };
+                        let mut single = restricted.filters.clone();
+                        match result.facet {
+                            MachineFacet::Genre => single.genres = vec![selected],
+                            MachineFacet::Category => single.categories = vec![selected],
+                            MachineFacet::Series => single.series = vec![selected],
+                            MachineFacet::VersionAdded => {
+                                single.version_added_range = None;
+                                single.versions_added = vec![selected];
+                            }
+                            MachineFacet::Manufacturer => {
+                                single.manufacturers = vec![Some(selected)];
+                            }
+                            _ => unreachable!(),
+                        }
+                        let count = search_with(
+                            &store,
+                            &MachineSearchRequest {
+                                filters: single,
+                                page_size: Some(1),
+                                ..restricted.clone()
+                            },
+                            &members,
+                        )
+                        .expect("count")
+                        .total;
+                        assert_eq!(value.count, count, "{context} {:?} {value:?}", result.facet);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn an_empty_list_matches_nothing_and_unresolved_lists_are_refused() {
+    let (_fixture, store) = classified();
+    let request = filtered(MachineFilters {
+        user_lists: strings(&["empty"]),
+        ..MachineFilters::default()
+    });
+    let empty = ListMembers::machines([]);
+    assert_eq!(
+        search_with(&store, &request, &[empty])
+            .expect("search")
+            .total,
+        0
+    );
+    // A list named in the request must be resolved by the caller.
+    assert!(matches!(
+        search_with(&store, &request, &[]),
+        Err(SearchError::InvalidRequest(_))
+    ));
+    let too_many = filtered(MachineFilters {
+        user_lists: strings(&["a", "b", "c", "d", "e"]),
+        ..MachineFilters::default()
+    });
+    let members = vec![ListMembers::machines(["pacman"]); 5];
+    assert!(matches!(
+        search_with(&store, &too_many, &members),
+        Err(SearchError::InvalidRequest(_))
+    ));
 }

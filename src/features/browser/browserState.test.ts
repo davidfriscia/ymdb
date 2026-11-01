@@ -63,17 +63,17 @@ describe("browser state", () => {
     });
     const query = state.queries.machines;
 
-    expect(buildResultsRequest("machines", "", query, "favorites").request.filters).toEqual({
+    expect(buildResultsRequest("machines", "", query, ["favorites"]).request.filters).toEqual({
       manufacturers: ["Capcom"],
-      list: "favorites",
+      userLists: ["favorites"],
     });
     expect(
-      buildFacetRequest("machines", "", query.filters, query.facetOptions, "favorites").request
+      buildFacetRequest("machines", "", query.filters, query.facetOptions, ["favorites"]).request
         .filters,
-    ).toEqual({ manufacturers: ["Capcom"], list: "favorites" });
+    ).toEqual({ manufacturers: ["Capcom"], userLists: ["favorites"] });
     expect(
-      buildResultsRequest("software", "", state.queries.software, "favorites").request.filters,
-    ).toEqual({ list: "favorites" });
+      buildResultsRequest("software", "", state.queries.software, ["favorites"]).request.filters,
+    ).toEqual({ userLists: ["favorites"] });
     expect(buildResultsRequest("machines", "", query).request.filters).toEqual({
       manufacturers: ["Capcom"],
     });

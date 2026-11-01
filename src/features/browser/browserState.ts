@@ -89,6 +89,12 @@ export interface BrowserState {
   filtersKept: boolean;
   /** The saved filter loaded last, compared with the current filters. */
   presetId: string | null;
+  /**
+   * The custom list restricting the machines (Lists in View Options), by
+   * id; `null` shows all items. A list deleted meanwhile stays selected, so
+   * the browser can say so instead of silently showing everything.
+   */
+  listId: string | null;
 }
 
 export const emptyFilters = (): ScopeFilters => ({ values: {}, flags: {}, ranges: {} });
@@ -110,6 +116,7 @@ export const initialBrowserState: BrowserState = {
   stack: [],
   filtersKept: false,
   presetId: null,
+  listId: null,
 };
 
 /** The search and filters of a saved filter, applied at once. */
@@ -118,6 +125,8 @@ export interface BrowserCriteria {
   text: string;
   filters: ScopeFilters;
   favoritesOnly: boolean;
+  /** The custom list of the machines, by id (`null`: all items). */
+  listId: string | null;
 }
 
 export type BrowserAction =
@@ -131,6 +140,7 @@ export type BrowserAction =
   | { type: "setRange"; facet: string; range: VersionRange | null }
   | { type: "applyCriteria"; criteria: BrowserCriteria; presetId: string | null }
   | { type: "setPreset"; presetId: string | null }
+  | { type: "setList"; listId: string | null }
   | { type: "showClassification"; facet: string; value: string }
   | { type: "clearFilters" }
   | { type: "setSort"; sort: MachineSort | SoftwareSort | null }
@@ -230,9 +240,18 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
         };
       });
     case "clearFilters":
+      // The list is a filter of the machines: clearing them clears it too.
       return {
         ...updateFilters(state, emptyFilters),
         filtersKept: false,
+        listId: state.scope === "machines" ? null : state.listId,
+      };
+    case "setList":
+      if (state.listId === action.listId) return state;
+      return {
+        ...state,
+        listId: action.listId,
+        queries: { ...state.queries, machines: { ...state.queries.machines, page: 0 } },
       };
     case "applyCriteria": {
       // One state change: the controls, results, counts and pages all
@@ -256,6 +275,7 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
         stack: [],
         filtersKept: false,
         presetId: action.presetId,
+        listId: criteria.listId,
       };
     }
     case "setPreset":
@@ -271,6 +291,7 @@ export function browserReducer(state: BrowserState, action: BrowserAction): Brow
           text: "",
           filters: { ...emptyFilters(), values: { [action.facet]: [action.value] } },
           favoritesOnly: false,
+          listId: null,
         },
         presetId: null,
       });
@@ -491,7 +512,10 @@ function textOf(text: string): string | undefined {
   return text.trim() === "" ? undefined : text.trim();
 }
 
-export function machineFilters(filters: ScopeFilters, list?: string): MachineFilters {
+export function machineFilters(
+  filters: ScopeFilters,
+  userLists: readonly string[] = [],
+): MachineFilters {
   return compact<MachineFilters>({
     manufacturers: selected(filters, "manufacturer"),
     years: selected(filters, "year"),
@@ -510,11 +534,14 @@ export function machineFilters(filters: ScopeFilters, list?: string): MachineFil
     runnable: bool(filters.flags.runnable),
     hasRoms: bool(filters.flags.hasRoms),
     hasDisks: bool(filters.flags.hasDisks),
-    list,
+    userLists: [...userLists],
   });
 }
 
-export function softwareFilters(filters: ScopeFilters, list?: string): SoftwareFilters {
+export function softwareFilters(
+  filters: ScopeFilters,
+  userLists: readonly string[] = [],
+): SoftwareFilters {
   return compact<SoftwareFilters>({
     lists: present(filters, "list"),
     publishers: selected(filters, "publisher"),
@@ -524,7 +551,7 @@ export function softwareFilters(filters: ScopeFilters, list?: string): SoftwareF
     clones: filters.flags.clones as CloneFilter | undefined,
     hasRoms: bool(filters.flags.hasRoms),
     hasDisks: bool(filters.flags.hasDisks),
-    list,
+    userLists: [...userLists],
   });
 }
 
@@ -541,7 +568,7 @@ export function buildResultsRequest(
   scope: Scope,
   text: string,
   query: ScopeQuery,
-  list?: string,
+  userLists: readonly string[] = [],
 ): BrowserRequest {
   const common = compact({
     text: textOf(text),
@@ -555,7 +582,7 @@ export function buildResultsRequest(
       request: {
         ...common,
         ...compact({ sort: effectiveSort(query, text) as MachineSort | undefined }),
-        filters: machineFilters(query.filters, list),
+        filters: machineFilters(query.filters, userLists),
       },
     };
   }
@@ -564,7 +591,7 @@ export function buildResultsRequest(
     request: {
       ...common,
       ...compact({ sort: effectiveSort(query, text) as SoftwareSort | undefined }),
-      filters: softwareFilters(query.filters, list),
+      filters: softwareFilters(query.filters, userLists),
     },
   };
 }
@@ -578,7 +605,7 @@ export function buildFacetRequest(
   text: string,
   filters: ScopeFilters,
   facetOptions: ScopeQuery["facetOptions"],
-  list?: string,
+  userLists: readonly string[] = [],
   classifications: readonly Dimension[] = [],
 ): BrowserRequest {
   const shown = (definition: FacetFilterDefinition) =>
@@ -590,7 +617,7 @@ export function buildFacetRequest(
       scope,
       request: {
         ...common,
-        filters: machineFilters(filters, list),
+        filters: machineFilters(filters, userLists),
         facets: facetRequests<MachineFacet>(FACET_FILTERS.machines.filter(shown), query),
       },
     };
@@ -599,7 +626,7 @@ export function buildFacetRequest(
     scope,
     request: {
       ...common,
-      filters: softwareFilters(filters, list),
+      filters: softwareFilters(filters, userLists),
       facets: facetRequests<SoftwareFacet>(FACET_FILTERS.software.filter(shown), query),
     },
   };
@@ -632,7 +659,7 @@ export function buildFacetValuesRequest(
   filters: ScopeFilters,
   facet: string,
   search: string,
-  list?: string,
+  userLists: readonly string[] = [],
 ): BrowserRequest {
   const common = compact({ text: textOf(text), pageSize: 1 });
   const request = compact({
@@ -645,7 +672,7 @@ export function buildFacetValuesRequest(
       scope,
       request: {
         ...common,
-        filters: machineFilters(filters, list),
+        filters: machineFilters(filters, userLists),
         facets: [request as FacetRequest<MachineFacet>],
       },
     };
@@ -654,7 +681,7 @@ export function buildFacetValuesRequest(
     scope,
     request: {
       ...common,
-      filters: softwareFilters(filters, list),
+      filters: softwareFilters(filters, userLists),
       facets: [request as FacetRequest<SoftwareFacet>],
     },
   };

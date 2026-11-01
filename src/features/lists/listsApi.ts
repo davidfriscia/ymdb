@@ -84,3 +84,183 @@ export function previewListsImport(): Promise<ListsImportPreview | null> {
 export function applyListsImport(importId: number, mode: ImportMode): Promise<ImportOutcome[]> {
   return invokeCommand("apply_lists_import", { importId, mode });
 }
+
+// Custom lists
+
+/** Mirrors `ListSummary` in `commands/lists.rs`: a custom list without its entries. */
+export interface ListSummary {
+  id: string;
+  name: string;
+  /** Machine entries. */
+  machines: number;
+  /** All entries (machines and software). */
+  entries: number;
+  /** Milliseconds since the Unix epoch. */
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
+/** Mirrors `ListMachine` in `catalog/search/members.rs`. */
+export interface ListMachine {
+  name: string;
+  /** From the catalog; `null` when the catalog does not have the machine. */
+  description: string | null;
+  /** `null` without a catalog. */
+  inCatalog: boolean | null;
+}
+
+/** Mirrors `ListEntriesPage` in `commands/lists.rs`. */
+export interface ListEntriesPage {
+  list: ListSummary;
+  /** The installation whose catalog gave the descriptions, if any. */
+  installationId: string | null;
+  items: ListMachine[];
+  matched: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Mirrors `Naming` in `lists/folder_import.rs`. */
+export type FolderNaming = "subfolder" | "prefixed";
+
+/** Mirrors `IniWarningKind` in `lists/ini.rs`. */
+export type IniWarningKind =
+  | "notUtf8"
+  | "missingRootFolder"
+  | "outsideSection"
+  | "invalidLine"
+  | "duplicateEntry"
+  | "duplicateFolder"
+  | "unnamedSection";
+
+export interface IniWarning {
+  kind: IniWarningKind;
+  count: number;
+  examples: string[];
+}
+
+/** Mirrors `FolderFileSummary` in `commands/lists.rs`. */
+export interface FolderFileSummary {
+  importId: number;
+  fileName: string;
+  suggestedName: string;
+  rootEntries: number;
+  folders: number;
+  emptyFolders: number;
+  entries: number;
+  duplicates: number;
+  warnings: IniWarning[];
+}
+
+/** Mirrors `PlannedListView` in `commands/lists.rs`. */
+export interface PlannedList {
+  name: string;
+  /** `merge`: an existing list with the same name (ignoring case). */
+  action: "create" | "merge";
+  entries: number;
+  newEntries: number;
+}
+
+/** Mirrors `FolderImportPreview` in `commands/lists.rs`. */
+export interface FolderImportPreview {
+  importId: number;
+  fileName: string;
+  name: string;
+  naming: FolderNaming;
+  hasSubfolders: boolean;
+  toCreate: number;
+  toMerge: number;
+  emptyFolders: number;
+  newEntries: number;
+  existingEntries: number;
+  duplicates: number;
+  warnings: IniWarning[];
+  lists: PlannedList[];
+}
+
+/** Mirrors `FolderImportOutcome` in `lists/folder_import.rs`. */
+export interface FolderImportOutcome {
+  created: number;
+  merged: number;
+  entriesAdded: number;
+}
+
+/** The wanted membership of an entry in one custom list. */
+export interface MembershipChange {
+  listId: string;
+  member: boolean;
+}
+
+/** Names are unique ignoring case, as in `name_key` (`lists/model.rs`). */
+export function listNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export function listUserLists(): Promise<ListSummary[]> {
+  return invokeCommand("list_user_lists");
+}
+
+export function createList(name: string): Promise<ListSummary> {
+  return invokeCommand("create_list", { name });
+}
+
+export function renameList(listId: string, name: string): Promise<ListSummary> {
+  return invokeCommand("rename_list", { listId, name });
+}
+
+export function deleteList(listId: string): Promise<void> {
+  return invokeCommand("delete_list", { listId });
+}
+
+export function getListEntries(
+  listId: string,
+  installationId: string | null,
+  search: string,
+  page: number,
+  pageSize: number,
+): Promise<ListEntriesPage> {
+  return invokeCommand("get_list_entries", {
+    listId,
+    installationId,
+    search: search.trim() === "" ? null : search.trim(),
+    page,
+    pageSize,
+  });
+}
+
+/** Ids of the custom lists containing the entry. */
+export function getEntryLists(entry: ListEntry): Promise<string[]> {
+  return invokeCommand("get_entry_lists", { entry });
+}
+
+/**
+ * Sets the membership of the entry in the named lists in one saved change;
+ * resolves to the ids of the custom lists containing it afterwards.
+ */
+export function setEntryMemberships(
+  entry: ListEntry,
+  changes: MembershipChange[],
+): Promise<string[]> {
+  return invokeCommand("set_entry_memberships", { entry, changes });
+}
+
+/** Opens the native file picker and reads the file; `null` when cancelled. */
+export function chooseFolderImportFile(): Promise<FolderFileSummary | null> {
+  return invokeCommand("choose_folder_import_file");
+}
+
+export function previewFolderImport(
+  importId: number,
+  name: string,
+  naming: FolderNaming,
+): Promise<FolderImportPreview> {
+  return invokeCommand("preview_folder_import", { importId, name, naming });
+}
+
+export function applyFolderImport(
+  importId: number,
+  name: string,
+  naming: FolderNaming,
+): Promise<FolderImportOutcome> {
+  return invokeCommand("apply_folder_import", { importId, name, naming });
+}

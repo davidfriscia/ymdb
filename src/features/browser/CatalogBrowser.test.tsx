@@ -23,7 +23,7 @@ import type {
 import { DEFAULT_BROWSER_PREFERENCES, type BrowserPreferences } from "./browserPreferences";
 import { MediaProvider } from "../media/MediaProvider";
 import { mediaSourcesView } from "../../test/mediaFixtures";
-import { favoritesList } from "../../test/listFixtures";
+import { favoritesList, listSummary } from "../../test/listFixtures";
 import { CatalogBrowser } from "./CatalogBrowser";
 import type { ListEntry } from "../lists/listsApi";
 import { LauncherProvider } from "../launcher/LauncherProvider";
@@ -32,6 +32,7 @@ import { installation, installationsView, NEW_ID, OLD_ID } from "../../test/inst
 import { InstallationsProvider } from "../installations/InstallationsProvider";
 import type { InstallationSummary } from "../installations/installationsApi";
 import { useInstallations } from "../installations/installationsContext";
+import { CustomListsProvider } from "../lists/CustomListsProvider";
 import { FavoritesProvider } from "../lists/FavoritesProvider";
 import { NO_CLASSIFICATIONS } from "../../test/supportFileFixtures";
 
@@ -137,6 +138,7 @@ function commands(
     get_media_sources: () => mediaSourcesView({ snap: ["C:/Artwork ✓/snap"] }),
     list_media: () => [],
     get_list: () => favoritesList([]),
+    list_user_lists: () => [],
     get_classification_status: () => NO_CLASSIFICATIONS,
     get_saved_filters: () => [],
     ...overrides,
@@ -192,7 +194,9 @@ function withLauncher(children: ReactNode) {
       <InstallationsProvider>
         <SwitchToOld />
         <FavoritesProvider>
-          <ActiveLauncher>{children}</ActiveLauncher>
+          <CustomListsProvider>
+            <ActiveLauncher>{children}</ActiveLauncher>
+          </CustomListsProvider>
         </FavoritesProvider>
       </InstallationsProvider>
     </MediaProvider>
@@ -1650,10 +1654,10 @@ describe("CatalogBrowser", () => {
           text: "pac",
           sort: "year",
           page: 0,
-          filters: { manufacturers: ["Namco"], list: "favorites" },
+          filters: { manufacturers: ["Namco"], userLists: ["favorites"] },
         });
       });
-      expect(lastFacetRequest()?.filters).toMatchObject({ list: "favorites" });
+      expect(lastFacetRequest()?.filters).toMatchObject({ userLists: ["favorites"] });
       expect(resultsScroll().scrollTop).toBe(0);
       const active = within(screen.getByRole("group", { name: "Active filters" }));
       expect(active.getByText("Favorites only")).toBeInTheDocument();
@@ -1661,7 +1665,7 @@ describe("CatalogBrowser", () => {
       // Clearing the filters keeps the view option.
       await user.click(active.getByRole("button", { name: "Clear all filters" }));
       await waitFor(() => {
-        expect(lastRequest()?.filters).toEqual({ list: "favorites" });
+        expect(lastRequest()?.filters).toEqual({ userLists: ["favorites"] });
       });
 
       await user.click(
@@ -1688,7 +1692,9 @@ describe("CatalogBrowser", () => {
         search_catalog_machines: (args) => {
           const request = machineRequest(args);
           const matching = names
-            .filter((name) => request.filters?.list !== "favorites" || favorites.has(name))
+            .filter(
+              (name) => !request.filters?.userLists?.includes("favorites") || favorites.has(name),
+            )
             .map((name) => machine(name, { description: `Machine ${name}` }));
           const pageSize = request.pageSize ?? 50;
           const page = request.page ?? 0;
@@ -1712,7 +1718,7 @@ describe("CatalogBrowser", () => {
 
       // Reloaded without the removed favorite: the empty second page gives way to the first.
       expect(await screen.findByText("1–50 of 50 machines")).toBeInTheDocument();
-      expect(lastRequest()).toMatchObject({ page: 0, filters: { list: "favorites" } });
+      expect(lastRequest()).toMatchObject({ page: 0, filters: { userLists: ["favorites"] } });
       expect(results().queryByText("Machine m50")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Page 2" })).not.toBeInTheDocument();
     });
@@ -1720,7 +1726,7 @@ describe("CatalogBrowser", () => {
     it("explains when no favorite matches and shows all results again", async () => {
       commands({
         search_catalog_machines: (args) =>
-          machineRequest(args).filters?.list === "favorites"
+          machineRequest(args).filters?.userLists?.includes("favorites")
             ? machineSearch([], { total: 0 })(args)
             : machineSearch()(args),
       });
@@ -1783,6 +1789,185 @@ describe("CatalogBrowser", () => {
 
       expect(bookmark("Pac-Man")).toHaveAttribute("aria-pressed", "false");
       expect(membershipCalls()).toEqual([{ listId: "favorites", entry: pacman, member: false }]);
+    });
+  });
+
+  describe("custom lists", () => {
+    const LISTS = [listSummary("maze-id", "Mazes", 2), listSummary("shmup-id", "Shooters", 1)];
+    const viewOptions = () => within(screen.getByRole("complementary", { name: "View options" }));
+    const chooseList = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+      const field = await viewOptions().findByRole("combobox", { name: "List" });
+      await user.click(field);
+      await user.click(await screen.findByRole("option", { name: new RegExp(`^${name}`) }));
+    };
+    const savedFilter = (listId: string) => ({
+      id: "p1",
+      name: "My mazes",
+      criteriaVersion: 2,
+      criteria: {
+        scope: "machines",
+        text: "",
+        values: {},
+        flags: {},
+        ranges: {},
+        favoritesOnly: false,
+        listId,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    it("restricts results and facets to the chosen list in the backend, before paging", async () => {
+      commands({ list_user_lists: () => LISTS });
+      const { user } = renderBrowser({ preferences: { ...PREFERENCES, viewOptionsVisible: true } });
+      await screen.findByText("1–3 of 3 machines");
+      await chooseList(user, "Mazes");
+
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({ userLists: ["maze-id"] });
+      });
+      expect(lastRequest()?.page).toBe(0);
+      expect(lastFacetRequest()?.filters).toEqual({ userLists: ["maze-id"] });
+      expect(await screen.findByText("List: Mazes")).toBeInTheDocument();
+
+      // Removing the chip shows all items again.
+      await user.click(screen.getByRole("button", { name: "Remove filter List: Mazes" }));
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({});
+      });
+    });
+
+    it("combines the list with Favorites and the other filters (AND)", async () => {
+      commands({ list_user_lists: () => LISTS });
+      const { user } = renderBrowser({
+        preferences: { ...PREFERENCES, viewOptionsVisible: true, favoritesOnly: true },
+      });
+      await screen.findByText("1–3 of 3 machines");
+      await chooseList(user, "Shooters");
+      const filters = within(screen.getByRole("complementary", { name: "Filters" }));
+      await user.click(await filters.findByRole("checkbox", { name: /Namco/ }));
+
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({
+          manufacturers: ["Namco"],
+          userLists: ["favorites", "shmup-id"],
+        });
+      });
+      expect(lastFacetRequest()?.filters).toMatchObject({
+        userLists: ["favorites", "shmup-id"],
+      });
+    });
+
+    it("reports a deleted list instead of showing all items", async () => {
+      commands({
+        list_user_lists: () => LISTS,
+        get_saved_filters: () => [savedFilter("deleted-id")],
+      });
+      const { user } = renderBrowser({ preferences: { ...PREFERENCES, viewOptionsVisible: true } });
+      await screen.findByText("1–3 of 3 machines");
+      const searches = resultRequests().length;
+
+      await user.click(await viewOptions().findByRole("button", { name: "Load My mazes" }));
+
+      expect(
+        await screen.findByText(/The list selected for these results no longer exists/),
+      ).toBeInTheDocument();
+      expect(screen.getByText("List: Deleted list")).toBeInTheDocument();
+      expect(viewOptions().getByRole("combobox", { name: "List" })).toHaveValue("Deleted list");
+      expect(viewOptions().getByText("This list was deleted.")).toBeInTheDocument();
+      // No search with an unknown list, no results of all items, no pages.
+      expect(resultRequests()).toHaveLength(searches);
+      expect(screen.queryByRole("list", { name: "Results" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Show all items" }));
+      expect(await screen.findByText("1–3 of 3 machines")).toBeInTheDocument();
+    });
+
+    it("finds a renamed list by id in a saved filter", async () => {
+      commands({
+        list_user_lists: () => [listSummary("maze-id", "Renamed mazes", 2)],
+        get_saved_filters: () => [savedFilter("maze-id")],
+      });
+      const { user } = renderBrowser({ preferences: { ...PREFERENCES, viewOptionsVisible: true } });
+      await screen.findByText("1–3 of 3 machines");
+      await user.click(await viewOptions().findByRole("button", { name: "Load My mazes" }));
+
+      await waitFor(() => {
+        expect(lastRequest()?.filters).toEqual({ userLists: ["maze-id"] });
+      });
+      expect(await screen.findByText("List: Renamed mazes")).toBeInTheDocument();
+      expect(viewOptions().queryByText("Modified")).not.toBeInTheDocument();
+    });
+
+    it("reloads list results after a membership change", async () => {
+      const members = new Set(["pacman", "galaga"]);
+      const nameOf = (args: Args) => (args.entry as { name: string }).name;
+      commands({
+        list_user_lists: () => [listSummary("maze-id", "Mazes", members.size)],
+        get_entry_lists: (args) => (members.has(nameOf(args)) ? ["maze-id"] : []),
+        set_entry_memberships: (args) => {
+          for (const change of args.changes as { member: boolean }[]) {
+            if (!change.member) members.delete(nameOf(args));
+          }
+          return [];
+        },
+        search_catalog_machines: (args) => {
+          const request = machineRequest(args);
+          const items = request.filters?.userLists?.includes("maze-id")
+            ? MACHINES.filter((entry) => members.has(entry.name))
+            : MACHINES;
+          return response(items, { pageSize: request.pageSize ?? 50, facets: facets() });
+        },
+      });
+      const { user } = renderBrowser({ preferences: { ...PREFERENCES, viewOptionsVisible: true } });
+      await screen.findByText("1–3 of 3 machines");
+      await chooseList(user, "Mazes");
+      expect(await screen.findByText("1–2 of 2 machines")).toBeInTheDocument();
+
+      await user.click(results().getByRole("button", { name: "Manage lists: Galaga" }));
+      const dialog = within(await screen.findByRole("dialog", { name: "Manage Lists" }));
+      await user.click(await dialog.findByRole("checkbox", { name: /Mazes/ }));
+      await user.click(dialog.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText("1–1 of 1 machines")).toBeInTheDocument();
+    });
+
+    it("puts Manage Lists next to the bookmark of machine cards in every renderer", async () => {
+      commands({ list_user_lists: () => LISTS });
+      const { rerender } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      for (const renderer of ["classicCards", "mediaGrid"] as const) {
+        rerender({ preferences: { ...PREFERENCES, renderer } });
+        const button = results().getByRole("button", { name: "Manage lists: Pac-Man" });
+        const item = required(button.closest("li"));
+        expect(within(item).getByRole("button", { name: "Favorite: Pac-Man" })).toBeInTheDocument();
+        // Never inside the button that opens the card.
+        expect(button.parentElement?.closest("button")).toBeNull();
+
+        const user = userEvent.setup();
+        await user.click(button);
+        expect(await screen.findByRole("dialog", { name: "Manage Lists" })).toBeInTheDocument();
+        expect(invokeMock).not.toHaveBeenCalledWith("get_machine_detail", expect.anything());
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+      }
+    });
+
+    it("opens the same window from the machine detail", async () => {
+      commands({
+        list_user_lists: () => LISTS,
+        get_entry_lists: () => ["maze-id"],
+        get_machine_detail: () => machineDetail("pacman", { description: "Pac-Man" }),
+      });
+      const { user } = renderBrowser();
+      await screen.findByText("1–3 of 3 machines");
+      await openCard("Pac-Man");
+      const header = await screen.findByRole("heading", { name: "Pac-Man" });
+      const detail = within(required(header.closest("article")));
+      await user.click(detail.getByRole("button", { name: "Manage lists: Pac-Man" }));
+      const dialog = within(await screen.findByRole("dialog", { name: "Manage Lists" }));
+      expect(await dialog.findByRole("checkbox", { name: /Mazes/ })).toBeChecked();
+      expect(dialog.getByRole("checkbox", { name: /Shooters/ })).not.toBeChecked();
     });
   });
 });

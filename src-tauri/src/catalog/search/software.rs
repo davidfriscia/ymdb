@@ -46,13 +46,13 @@ const WITH_DISKS: &str = "SELECT p.software_id FROM software_parts p
 pub fn search_software(
     connection: &Connection,
     request: &SoftwareSearchRequest,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
 ) -> Result<SoftwareSearchResponse, SearchError> {
     let started = Instant::now();
     let page = validate_page(request.page, request.page_size)?;
     validate_text(request.text.as_deref())?;
     validate_filters(&request.filters)?;
-    check_members(request.filters.list.as_deref(), members)?;
+    check_members(&request.filters.user_lists, members)?;
     let facet_queries = validate_facets(&request.facets)?;
     let text = text::parse(request.text.as_deref())?;
     let imported: bool = connection.query_row(
@@ -134,13 +134,13 @@ pub(super) fn from_clause(text: Option<&TextQuery>) -> &'static str {
 /// (used to count the values of that facet).
 pub(super) fn conditions(
     filters: &SoftwareFilters,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
     text: Option<&TextQuery>,
     excluded: Option<SoftwareFacet>,
 ) -> Conditions {
     let applies = |facet| excluded != Some(facet);
     let mut conditions = Conditions::default();
-    if let Some(members) = members {
+    for members in members {
         // Uncorrelated: the list is read once, then matched on the unique
         // (list, name) pair, so equal names of different lists never mix.
         conditions.push(
@@ -241,7 +241,7 @@ pub(super) fn order_by(
 fn facet(
     connection: &Connection,
     filters: &SoftwareFilters,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
     text: Option<&TextQuery>,
     query: &FacetQuery<SoftwareFacet>,
 ) -> Result<FacetResult<SoftwareFacet>, SearchError> {

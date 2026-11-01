@@ -16,6 +16,7 @@ const CRITERIA: BrowserCriteria = {
     ranges: { versionAdded: { from: "0.30" } },
   },
   favoritesOnly: true,
+  listId: "list-1",
 };
 
 describe("saved filter criteria", () => {
@@ -27,6 +28,7 @@ describe("saved filter criteria", () => {
       flags: { clones: "parents" },
       ranges: { versionAdded: { from: "0.30" } },
       favoritesOnly: true,
+      listId: "list-1",
     });
   });
 
@@ -55,7 +57,35 @@ describe("saved filter criteria", () => {
   });
 
   it("of an unknown version cannot be loaded", () => {
-    expect(parseCriteria(2, { anything: true })).toEqual({ kind: "unsupported", version: 2 });
+    expect(parseCriteria(3, { anything: true })).toEqual({ kind: "unsupported", version: 3 });
+  });
+
+  it("keep the list by id and compare it", () => {
+    const stored = encodeCriteria(CRITERIA);
+    expect(stored.listId).toBe("list-1");
+    expect(sameCriteria({ ...CRITERIA, listId: "list-2" }, CRITERIA)).toBe(false);
+    expect(sameCriteria({ ...CRITERIA, listId: null }, CRITERIA)).toBe(false);
+    // Lists restrict machines only: software criteria never keep one.
+    expect(encodeCriteria({ ...CRITERIA, scope: "software" }).listId).toBeNull();
+    // A list id that no longer exists is kept: the browser reports it.
+    const parsed = parseCriteria(2, { ...stored, listId: "deleted" });
+    expect(parsed.kind === "ok" && parsed.criteria.listId).toBe("deleted");
+    expect(parseCriteria(2, { ...stored, listId: 3 }).kind).toBe("invalid");
+    expect(parseCriteria(2, { ...stored, listId: undefined }).kind).toBe("invalid");
+  });
+
+  it("read version 1, before lists, as all items", () => {
+    const v1: Record<string, unknown> = { ...encodeCriteria(CRITERIA) };
+    delete v1.listId;
+    const parsed = parseCriteria(1, v1);
+    expect(parsed.kind).toBe("ok");
+    if (parsed.kind !== "ok") return;
+    expect(parsed.criteria.listId).toBeNull();
+    expect(sameCriteria(parsed.criteria, { ...CRITERIA, listId: null })).toBe(true);
+    expect(parsed.ignored).toEqual([]);
+    // A list id in a version 1 preset is not part of that version.
+    const withList = parseCriteria(1, { ...v1, listId: "list-1" });
+    expect(withList.kind === "ok" && withList.criteria.listId).toBeNull();
   });
 
   it("report invalid content", () => {
@@ -82,6 +112,7 @@ describe("saved filter criteria", () => {
         text: "",
         filters: { ...emptyFilters(), values: { list: ["nes"] }, flags: { clones: "parents" } },
         favoritesOnly: false,
+        listId: null,
       },
       // Software has no genre, BIOS or version added; `publisher` and `hasRoms` are malformed.
       ignored: ["genre", "publisher", "bios", "hasRoms", "versionAdded"],

@@ -83,8 +83,8 @@ export interface MachineFilters {
   /** Versions added; alternatives of `versionAddedRange`. */
   versionsAdded?: string[];
   versionAddedRange?: VersionRange;
-  /** Only machines of this user list (for example `favorites`). */
-  list?: string;
+  /** Only machines of every one of these user lists (Favorites, a custom list). */
+  userLists?: string[];
 }
 
 export interface MachineSearchRequest {
@@ -131,8 +131,8 @@ export interface SoftwareFilters {
   hasRoms?: boolean;
   hasDisks?: boolean;
   interfaces?: string[];
-  /** Only software of this user list (for example `favorites`). */
-  list?: string;
+  /** Only software of every one of these user lists (for example Favorites). */
+  userLists?: string[];
 }
 
 export interface SoftwareSearchRequest {

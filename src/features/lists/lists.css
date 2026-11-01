@@ -83,3 +83,318 @@
   margin: 0;
   padding-left: 20px;
 }
+
+/* Manage Lists button: next to the bookmark, the same discreet look. */
+
+.list-button--overlay {
+  position: absolute;
+  top: 6px;
+  right: 40px;
+  opacity: var(--bookmark-opacity, 0.55);
+}
+
+/* Manage Lists window */
+
+.manage-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+
+.manage-lists__target {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.manage-lists__title {
+  font-weight: 600;
+}
+
+.manage-lists__search {
+  max-width: none;
+  margin-top: 0;
+}
+
+/* Bounded: hundreds of lists scroll inside the window. */
+.manage-lists__options {
+  max-height: min(360px, 45vh);
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  list-style: none;
+}
+
+.manage-lists__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.manage-lists__option:hover {
+  background: var(--color-hover);
+}
+
+.manage-lists__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.manage-lists__count {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.manage-lists__create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.manage-lists__create .input {
+  flex: 1;
+}
+
+.manage-lists__actions {
+  margin-top: 8px;
+}
+
+/* Lists combobox (View Options) */
+
+.list-combobox {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.list-combobox__input {
+  width: 100%;
+}
+
+.list-combobox__options {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  z-index: 20;
+  max-height: 280px;
+  margin: 2px 0 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-elevated);
+  list-style: none;
+}
+
+.list-combobox__option {
+  padding: 4px 8px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.list-combobox__option[aria-selected="true"] {
+  font-weight: 600;
+}
+
+.list-combobox__option--active {
+  background: var(--color-selected);
+}
+
+.list-combobox__count {
+  margin-left: 6px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lists page */
+
+.lists-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.lists-nav__actions {
+  margin: 0;
+}
+
+.lists-nav__sort {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lists-nav__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lists-nav__count {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lists-empty,
+.list-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.list-detail__meta {
+  margin: 0;
+}
+
+.list-detail__search,
+.list-add__search {
+  width: 100%;
+  max-width: 420px;
+}
+
+.list-entries {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.list-entries th,
+.list-entries td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.list-entries th {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.list-entries[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.list-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-add__results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list-add__result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.list-add__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Folder file import */
+
+.folder-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+
+.folder-import__file {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-import__warnings {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.folder-import__examples {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.folder-import__naming {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.folder-import__choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-import__counts {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.folder-import__search {
+  width: 100%;
+  max-width: 420px;
+}
+
+/* Bounded: an import may create hundreds of lists. */
+.folder-import__lists {
+  max-height: min(320px, 40vh);
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  list-style: none;
+}
+
+.folder-import__list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+}
+
+.folder-import__list-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-import__list-count {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-import__actions {
+  margin-top: 8px;
+}

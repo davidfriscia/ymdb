@@ -23,7 +23,7 @@ locally; macOS and Linux are currently verified through CI builds only.
 - Detect and configure a local MAME installation.
 - Import and index the complete MAME catalog, including software lists.
 - Fast full-text search and combinable filters across the whole catalog.
-- Favorites and user-defined collections.
+- Favorites and custom lists, with the import of frontend folder files.
 - Screenshots, artwork and metadata management.
 - Launch machines and software through the local MAME, with full support for MAME
   command-line options, launch profiles and per-machine configuration.
@@ -389,6 +389,84 @@ computer and with any MAME version:
 
 Favorites are saved in `lists.json`, in the configuration directory (see
 [Where installations are stored](#where-installations-are-stored)).
+
+## Custom lists
+
+Custom lists organize machines in collections of your own: "Shooters to finish",
+"Pinball", or the hundreds of categories of a frontend folder file. A machine can be
+in any number of lists. Like Favorites, lists belong to YMDB, not to a MAME
+installation: machines are identified by their MAME short name, so a list works with
+every MAME version, and machines missing from the active catalog are kept (they are
+shown as "Not in this catalog"). Favorites stays separate: it has its own bookmark
+and is never shown or changed as a custom list.
+
+The **Lists** page (main navigation) shows your lists, with a search and a sort (name,
+most machines, recently changed, recently created):
+
+- **New list** creates an empty list. Names are unique ignoring case ("Shooters" and
+  "shooters" are the same name) and may contain `/`.
+- Selecting a list shows its machines, a page at a time, with their description and
+  whether the catalog of the active MAME version has them. Search them by short name
+  or description, remove machines, or add machines found in the catalog.
+- **Rename…** keeps the list, its machines and the saved filters that use it. A name
+  already used by another list is refused: renaming never merges lists.
+- **Delete…** asks for confirmation and removes only that list: machines, catalogs,
+  Favorites and other lists are not changed. Lists that become empty are kept.
+
+In the catalog, every machine card (Classic Cards and Media Grid) has a list button
+next to its bookmark, and so does the machine detail page. It opens **Manage Lists**:
+the lists of that machine as checkboxes, with a search and **Create list**. Nothing
+changes until **Save**, which applies every change at once; **Cancel** discards them.
+Changes made elsewhere while the window is open (on the Lists page, by an import) are
+kept.
+
+**View Options › Lists** shows only the machines of one list ("All items" shows
+everything). Type in the field to find a list among hundreds. The list combines with
+the search text, the filters, Favorites only, the sort and the pages: counts, facets
+and pages cover the machines of the list only. It is shown as a chip above the
+results, can be saved in a saved filter (by list, so renaming the list keeps the
+filter working), and applies to machines only. If the selected list is deleted, the
+catalog says so and shows nothing until you choose another list or **Show all items**.
+
+### Importing folder files
+
+**Import INI…** on the Lists page imports the folder files of MAME frontends, such as
+the `bootlegs.ini`, `category.ini` or `mame.ini` of the
+[progettoSNAPS](https://www.progettosnaps.net/) support files:
+
+```ini
+[FOLDER_SETTINGS]
+RootFolderIcon mame
+
+;; BOOTLEGS.ini 0.288 / 09-Jun-26 / MAME 0.288 ;;
+
+[ROOT_FOLDER]
+1942abl
+1942iti
+
+[Arcade / Pinball]
+aliencr
+```
+
+- Frontend settings (`[FOLDER_SETTINGS]`) and comments are ignored. The machines of
+  `[ROOT_FOLDER]` become a list with the import name you choose (proposed from the
+  file name); an empty root creates no list.
+- Every other section is a subfolder. Choose how their lists are named: **By
+  subfolder name** (`Arcade / Pinball`) or **With the import name first**
+  (`Category / Arcade / Pinball`). Empty subfolders are ignored.
+- A list whose name already exists (ignoring case) is **merged**: its machines stay
+  and only the missing ones are added. Importing the same file twice with the same
+  choices therefore changes nothing.
+- Before anything changes, a preview shows the lists to create and to update, the
+  machines to add, those already present, the empty subfolders, duplicates and lines
+  that are not machine names (skipped), and every resulting list, with a search.
+  **Import** applies everything at once, or nothing if it fails.
+- Files can be UTF-8 (with or without BOM) or Windows-1252, with any line endings.
+
+Custom lists are saved in `lists.json` with Favorites, in the configuration directory,
+and are part of the application backup (see
+[Application data and backups](#application-data-and-backups)). This version manages
+lists of machines; software entries are kept but not managed.
 
 ## Support files and saved filters
 
@@ -858,7 +936,7 @@ The workflow does not publish releases or use any secrets.
 Implemented:
 
 - Tauri 2 + React + TypeScript project skeleton.
-- Application shell with Catalog, MAME and Settings pages; light and dark themes.
+- Application shell with Catalog, Lists, MAME and Settings pages; light and dark themes.
 - Multi-version MAME installation management: any number of installations (also of
   the same version) added through the native file picker or detection, validated
   through `-version`, verified, renamed, removed and selected as active from the MAME
@@ -877,6 +955,11 @@ Implemented:
 - Global favorites for machines and software: bookmarks on every card and detail
   page, a **Favorites only** view applied by the search engine, and JSON export and
   import with merge or replace (see [Favorites](#favorites)).
+- Custom lists of machines: a Lists page (create, search, sort, rename, delete, browse
+  and edit the machines of a list), Manage Lists on every machine card and detail page,
+  a Lists filter in View Options applied by the search engine and saved in saved
+  filters, and the import of frontend folder files (`.ini`) with naming choices and
+  merging (see [Custom lists](#custom-lists)).
 - MAME support files (catver.ini, genre.ini, catlist.ini, version.ini, series.ini):
   manual import into a global repository, one projection per catalog synchronized when
   the catalog is opened, Genre, Category, Series and Version Added filters and facets,

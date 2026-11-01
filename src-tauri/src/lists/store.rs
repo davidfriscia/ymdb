@@ -85,8 +85,10 @@ impl ListsStore {
             message,
         };
         lists.validate().map_err(invalid)?;
-        let mut content =
-            serde_json::to_vec_pretty(lists).map_err(|error| invalid(error.to_string()))?;
+        // Compact: imported lists reach tens of thousands of entries, and the
+        // indented form is twice as large (7 MB instead of 3.4 MB with the
+        // `mame.ini` and `category.ini` folder files imported).
+        let mut content = serde_json::to_vec(lists).map_err(|error| invalid(error.to_string()))?;
         content.push(b'\n');
         atomic_file::write(&self.file, &content).map_err(|source| ListsStoreError::Write {
             path: self.file.clone(),

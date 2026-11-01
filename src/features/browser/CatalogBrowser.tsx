@@ -14,7 +14,9 @@ import { getCatalogStatus, type CatalogStatus } from "../catalog/catalogApi";
 import { describeFreshness, formatCount } from "../catalog/catalogMessages";
 import { InstallationSelect } from "../installations/InstallationSelect";
 import { InstallationScope, useInstallations } from "../installations/installationsContext";
+import { useCustomLists } from "../lists/customListsContext";
 import { useFavorites } from "../lists/favoritesContext";
+import { DELETED_LIST_LABEL, ListCombobox } from "../lists/ListCombobox";
 import { FAVORITES_LIST_ID } from "../lists/listsApi";
 import { searchMachines, searchSoftware, type FacetResult } from "../search/searchApi";
 import { SavedFiltersSection } from "../saved-filters/SavedFiltersSection";
@@ -342,18 +344,31 @@ function Workspace({
   const query = state.queries[scope];
   const softwareUnavailable = scope === "software" && !softwareImported;
   const favorites = useFavorites();
+  const customLists = useCustomLists();
   const { favoritesOnly } = preferences;
-  // Favorites only restricts the search itself, so counts, facets and pages
-  // cover the favorites of this catalog only.
-  const list = favoritesOnly ? FAVORITES_LIST_ID : undefined;
-  // Favorites-only results change with the list: they reload after every
-  // saved change. Both keys only grow, so their sum changes with either.
-  const searchKey = refreshKey + (favoritesOnly ? favorites.revision : 0);
+  // Custom lists hold machines: the Lists filter restricts the machines only.
+  const listId = scope === "machines" ? state.listId : null;
+  const selectedList = listId === null ? undefined : customLists.byId(listId);
+  // A list deleted after it was chosen (or saved in a filter) is reported,
+  // never replaced by all items; nothing is searched until it is changed.
+  const listMissing = listId !== null && customLists.lists !== null && !selectedList;
+  // Favorites only and the list restrict the search itself (AND), so counts,
+  // facets and pages cover the matching machines of this catalog only.
+  const listKey = [favoritesOnly ? FAVORITES_LIST_ID : null, listId]
+    .filter((id) => id !== null)
+    .join("\n");
+  const userLists = useMemo(() => listKey.split("\n").filter(Boolean), [listKey]);
+  // Restricted results change with the lists: they reload after every saved
+  // change. Every key only grows, so their sum changes with any of them.
+  const searchKey =
+    refreshKey +
+    (favoritesOnly ? favorites.revision : 0) +
+    (listId !== null ? customLists.revision : 0);
 
   // New request objects only when the query changes, so rendering never searches again.
   const request = useMemo(
-    () => buildResultsRequest(scope, appliedText, query, list),
-    [scope, appliedText, query, list],
+    () => buildResultsRequest(scope, appliedText, query, userLists),
+    [scope, appliedText, query, userLists],
   );
   // The classifications of this catalog (support files), brought up to date
   // by the backend when they are read; tagged so that another catalog's
@@ -395,20 +410,20 @@ function Workspace({
         appliedText,
         filters,
         facetOptions,
-        list,
+        userLists,
         facetDimensions.split(",").filter(Boolean) as Dimension[],
       ),
-    [scope, appliedText, filters, facetOptions, list, facetDimensions],
+    [scope, appliedText, filters, facetOptions, userLists, facetDimensions],
   );
   const loadFacetValues = useCallback(
     async (facet: string, valueSearch: string): Promise<FacetResult<string>> => {
       const { facets } = await runFacetSearch(
         installationId,
-        buildFacetValuesRequest(scope, appliedText, filters, facet, valueSearch, list),
+        buildFacetValuesRequest(scope, appliedText, filters, facet, valueSearch, userLists),
       );
       return facets[0] ?? { facet, values: [], hasMore: false };
     },
-    [installationId, scope, appliedText, filters, list],
+    [installationId, scope, appliedText, filters, userLists],
   );
 
   // Classification values that no machine of this catalog has (a saved
@@ -447,10 +462,12 @@ function Workspace({
     text: state.text.trim(),
     filters,
     favoritesOnly,
+    listId: state.listId,
   };
+  const skipSearch = softwareUnavailable || listMissing;
   const load = useCallback(
-    () => (softwareUnavailable ? Promise.resolve(null) : runSearch(installationId, request)),
-    [installationId, request, softwareUnavailable],
+    () => (skipSearch ? Promise.resolve(null) : runSearch(installationId, request)),
+    [installationId, request, skipSearch],
   );
   const search = useLoader(load, searchKey);
   const current = search.state.status === "ready" ? search.state.value : null;
@@ -460,9 +477,8 @@ function Workspace({
     result?.installationId === installationId && result.scope === scope;
   const shown = current ?? (sameCatalog(search.latest) ? search.latest : null);
   const loadFacets = useCallback(
-    () =>
-      softwareUnavailable ? Promise.resolve(null) : runFacetSearch(installationId, facetRequest),
-    [installationId, facetRequest, softwareUnavailable],
+    () => (skipSearch ? Promise.resolve(null) : runFacetSearch(installationId, facetRequest)),
+    [installationId, facetRequest, skipSearch],
   );
   const facetSearch = useLoader(loadFacets, searchKey);
   const currentFacets = facetSearch.state.status === "ready" ? facetSearch.state.value : null;
@@ -486,9 +502,13 @@ function Workspace({
     if (resultsRef.current) resultsRef.current.scrollTop = 0;
   }, [request]);
 
-  // Removing the last favorite of the last page leaves it empty: show the new last page.
+  // Removing the last favorite or list member of the last page leaves it
+  // empty: show the new last page.
   const pastLastPage =
-    favoritesOnly && current && current.meta.total > 0 && current.items.length === 0
+    (favoritesOnly || listId !== null) &&
+    current &&
+    current.meta.total > 0 &&
+    current.items.length === 0
       ? current.meta.pageCount - 1
       : null;
   useEffect(() => {
@@ -520,7 +540,7 @@ function Workspace({
   const top = stack.at(-1);
   // One footer for every renderer, shown whenever there are results to page through.
   const pageMeta =
-    !softwareUnavailable && search.state.status !== "error" && shown && shown.meta.total > 0
+    !skipSearch && search.state.status !== "error" && shown && shown.meta.total > 0
       ? shown.meta
       : null;
 
@@ -639,11 +659,32 @@ function Workspace({
                 state={state}
                 dispatch={dispatch}
                 favoritesOnly={favoritesOnly}
+                listLabel={
+                  listId === null
+                    ? null
+                    : (selectedList?.name ?? (listMissing ? DELETED_LIST_LABEL : "…"))
+                }
                 onShowAll={() => {
                   setFavoritesOnly(false);
                 }}
               />
-              {softwareUnavailable ? (
+              {listMissing ? (
+                <div className="state-message" role="alert">
+                  <p className="message message--warning">
+                    The list selected for these results no longer exists, so no machine is shown.
+                    Choose another list or show all items.
+                  </p>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() => {
+                      dispatch({ type: "setList", listId: null });
+                    }}
+                  >
+                    Show all items
+                  </button>
+                </div>
+              ) : softwareUnavailable ? (
                 <div className="state-message">
                   <p className="message message--muted">
                     The software lists have not been imported yet. Import them from the MAME page to
@@ -659,6 +700,7 @@ function Workspace({
                   search={search}
                   shown={shown}
                   filterCount={filterCount}
+                  listSelected={listId !== null}
                   preferences={preferences}
                   dispatch={dispatch}
                   onShowAll={() => {
@@ -704,6 +746,35 @@ function Workspace({
                   <span>Favorites only</span>
                 </label>
               </fieldset>
+              <fieldset className="view-panel__section">
+                <legend className="view-panel__title">Lists</legend>
+                {scope === "machines" ? (
+                  <>
+                    <ListCombobox
+                      label="List"
+                      value={state.listId}
+                      lists={customLists.lists}
+                      onChange={(selected) => {
+                        dispatch({ type: "setList", listId: selected });
+                      }}
+                    />
+                    {listMissing && (
+                      <p className="message message--warning" role="status">
+                        This list was deleted.
+                      </p>
+                    )}
+                    {customLists.loadError !== null && (
+                      <p className="message message--error" role="alert">
+                        The lists could not be read: {describeError(customLists.loadError)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="message message--muted">
+                    Lists contain machines: the list filter applies to the Machines catalog.
+                  </p>
+                )}
+              </fieldset>
               <SavedFiltersSection
                 criteria={criteria}
                 activeId={state.presetId}
@@ -746,16 +817,20 @@ function ActiveFilterBar({
   state,
   dispatch,
   favoritesOnly,
+  listLabel,
   onShowAll,
 }: {
   scope: Scope;
   state: BrowserState;
   dispatch: Dispatch<BrowserAction>;
   favoritesOnly: boolean;
+  /** The name of the selected custom list, when one restricts the results. */
+  listLabel: string | null;
   onShowAll: () => void;
 }) {
   const active = activeFilters(scope, state.queries[scope].filters);
-  if (active.length === 0 && !favoritesOnly) return null;
+  if (active.length === 0 && !favoritesOnly && listLabel === null) return null;
+  const label = `List: ${listLabel ?? ""}`;
   return (
     <div className="active-filters" aria-label="Active filters" role="group">
       {/* A view option, not a filter: "Clear all filters" keeps it. */}
@@ -767,6 +842,21 @@ function ActiveFilterBar({
             className="chip__remove"
             aria-label="Show all results, not only favorites"
             onClick={onShowAll}
+          >
+            ×
+          </button>
+        </span>
+      )}
+      {listLabel !== null && (
+        <span className="chip">
+          {label}
+          <button
+            type="button"
+            className="chip__remove"
+            aria-label={`Remove filter ${label}`}
+            onClick={() => {
+              dispatch({ type: "setList", listId: null });
+            }}
           >
             ×
           </button>
@@ -807,6 +897,8 @@ interface ResultsProps {
   search: Loader<SearchResult | null>;
   shown: SearchResult | null;
   filterCount: number;
+  /** A custom list restricts the machines. */
+  listSelected: boolean;
   preferences: BrowserPreferences;
   dispatch: Dispatch<BrowserAction>;
   /** Turns Favorites only off. */
@@ -820,6 +912,7 @@ function Results({
   search,
   shown,
   filterCount,
+  listSelected,
   preferences,
   dispatch,
   onShowAll,
@@ -878,16 +971,18 @@ function Results({
       {meta.total === 0 && (
         <div className="state-message">
           <p className="message message--muted">
-            {preferences.favoritesOnly
-              ? "No favorites match the search and filters in this catalog."
-              : "No results match the search and filters."}
+            {listSelected
+              ? `No machines of the selected list match the search and filters in this catalog.`
+              : preferences.favoritesOnly
+                ? "No favorites match the search and filters in this catalog."
+                : "No results match the search and filters."}
           </p>
           {preferences.favoritesOnly && (
             <button type="button" className="button button--secondary" onClick={onShowAll}>
               Show all results
             </button>
           )}
-          {filterCount > 0 && (
+          {(filterCount > 0 || listSelected) && (
             <button
               type="button"
               className="button button--secondary"

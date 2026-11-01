@@ -40,7 +40,7 @@ fn run(connection: &Connection, request: &Request) -> u64 {
             machines::search_machines(
                 connection,
                 request,
-                machine_members(connection, &request.filters).as_ref(),
+                &machine_members(connection, &request.filters),
             )
             .expect("search")
             .total
@@ -49,7 +49,7 @@ fn run(connection: &Connection, request: &Request) -> u64 {
             software::search_software(
                 connection,
                 request,
-                software_members(connection, &request.filters).as_ref(),
+                &software_members(connection, &request.filters),
             )
             .expect("search")
             .total
@@ -61,8 +61,10 @@ fn run(connection: &Connection, request: &Request) -> u64 {
 const LIST_SIZE: usize = 2000;
 
 /// A sample list (every 10th machine by name) when the request has a list filter.
-fn machine_members(connection: &Connection, filters: &MachineFilters) -> Option<ListMembers> {
-    filters.list.as_ref()?;
+fn machine_members(connection: &Connection, filters: &MachineFilters) -> Vec<ListMembers> {
+    if filters.user_lists.is_empty() {
+        return Vec::new();
+    }
     let names: Vec<String> = connection
         .prepare(&format!(
             "SELECT name FROM machines WHERE id % 10 = 0 ORDER BY name LIMIT {LIST_SIZE}"
@@ -72,12 +74,14 @@ fn machine_members(connection: &Connection, filters: &MachineFilters) -> Option<
         .expect("sample")
         .collect::<Result<_, _>>()
         .expect("rows");
-    Some(ListMembers::machines(names.iter().map(String::as_str)))
+    vec![ListMembers::machines(names.iter().map(String::as_str))]
 }
 
 /// A sample list (every 10th software) when the request has a list filter.
-fn software_members(connection: &Connection, filters: &SoftwareFilters) -> Option<ListMembers> {
-    filters.list.as_ref()?;
+fn software_members(connection: &Connection, filters: &SoftwareFilters) -> Vec<ListMembers> {
+    if filters.user_lists.is_empty() {
+        return Vec::new();
+    }
     let keys: Vec<(String, String)> = connection
         .prepare(&format!(
             "SELECT list_name, name FROM software WHERE id % 10 = 0 LIMIT {LIST_SIZE}"
@@ -87,10 +91,10 @@ fn software_members(connection: &Connection, filters: &SoftwareFilters) -> Optio
         .expect("sample")
         .collect::<Result<_, _>>()
         .expect("rows");
-    Some(ListMembers::software(
+    vec![ListMembers::software(
         keys.iter()
             .map(|(list, name)| (list.as_str(), name.as_str())),
-    ))
+    )]
 }
 fn millis(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
@@ -414,7 +418,7 @@ fn cases() -> Vec<(&'static str, Request)> {
             "machines: favorites (2000), 5 facets",
             Request::Machines(MachineSearchRequest {
                 filters: MachineFilters {
-                    list: Some("favorites".to_owned()),
+                    user_lists: vec!["favorites".to_owned()],
                     ..MachineFilters::default()
                 },
                 facets: machine_facets(),
@@ -426,7 +430,7 @@ fn cases() -> Vec<(&'static str, Request)> {
             Request::Machines(MachineSearchRequest {
                 text: Some("pac".to_owned()),
                 filters: MachineFilters {
-                    list: Some("favorites".to_owned()),
+                    user_lists: vec!["favorites".to_owned()],
                     ..MachineFilters::default()
                 },
                 ..MachineSearchRequest::default()
@@ -436,7 +440,7 @@ fn cases() -> Vec<(&'static str, Request)> {
             "software: favorites (2000), 5 facets",
             Request::Software(SoftwareSearchRequest {
                 filters: SoftwareFilters {
-                    list: Some("favorites".to_owned()),
+                    user_lists: vec!["favorites".to_owned()],
                     ..SoftwareFilters::default()
                 },
                 facets: software_facets(),
@@ -468,7 +472,7 @@ fn explain_plans(connection: &Connection) {
                 let text = text::parse(request.text.as_deref()).expect("text");
                 let conditions = machines::conditions(
                     &request.filters,
-                    machine_members(connection, &request.filters).as_ref(),
+                    &machine_members(connection, &request.filters),
                     text.as_ref(),
                     None,
                 );
@@ -488,7 +492,7 @@ fn explain_plans(connection: &Connection) {
                 let text = text::parse(request.text.as_deref()).expect("text");
                 let conditions = software::conditions(
                     &request.filters,
-                    software_members(connection, &request.filters).as_ref(),
+                    &software_members(connection, &request.filters),
                     text.as_ref(),
                     None,
                 );

@@ -195,13 +195,22 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
   finalized without ever replacing an existing file. Download plans are snapshots of
   their installation and request; Download & Play launches only that request.
 - `src-tauri/src/lists/`: global user lists in `lists.json` (Favorites is the system
-  list `favorites`; user lists share the model). Entries reference machines by MAME
-  short name and software by list and short name only; entries missing from a
-  catalog are kept, never matched approximately. Lists never go into a catalog:
-  searches restricted to a list receive its entries through `ListMembers` (one JSON
-  parameter read with `json_each`). Changes are saved before being kept in memory; an
-  invalid `lists.json` is reported, never replaced. Imports are previewed, then
-  applied atomically.
+  list `favorites`; custom lists are `user` lists with an opaque immutable id, a name
+  unique ignoring case (`name_key`) and dates). Favorites and custom lists stay
+  functionally independent: custom list commands refuse system lists and Favorites
+  is never shown as a custom list. Entries reference machines by MAME short name and
+  software by list and short name only; entries missing from a catalog are kept,
+  never matched approximately. Lists never go into a catalog: searches take
+  `userLists` (each an AND condition, an empty list matches nothing, an unknown list
+  is an error) and receive the entries through `ListMembers` (one JSON parameter read
+  with `json_each`, cached until the next change). Changes are saved before being
+  kept in memory; an invalid `lists.json` is reported, never replaced. Membership
+  changes name their lists and set wanted states (never a whole-list replace from
+  a frontend snapshot); renaming never merges. Imports are previewed, then planned
+  again and applied atomically; folder `.ini` imports (`ini.rs`, `folder_import.rs`)
+  never import `[FOLDER_SETTINGS]` or non short-name lines, merge into same-named
+  lists as a set union, and must stay idempotent. The interface manages machine
+  entries only; software entries are kept.
 - `src-tauri/src/support_files/`: MAME support files (catver, genre, catlist,
   version, series), imported only by explicit user action (preview, then apply);
   never downloaded, never modified on disk. Each format has its own parser producing
@@ -269,7 +278,14 @@ Persistent instructions for AI-assisted development sessions on Your MAME DB (YM
 - Favorite state comes only from `FavoritesProvider` and is changed only through
   `FavoriteBookmark` (cards and detail pages); never request membership per card.
   Bookmarks sit next to, never inside, the button that opens a card. "Favorites
-  only" is an interface preference that adds the `list` filter to backend requests.
+  only" is an interface preference that adds `favorites` to the `userLists` filter
+  of backend requests.
+- Custom list summaries come only from `CustomListsProvider`; views that change a
+  list call `changed()` so every view reloads. Memberships are changed through
+  `ManageListsModal` (one implementation for cards and details, one
+  `set_entry_memberships` per Save with only the changed lists) or the Lists page.
+  The Lists filter is `listId` of the browser state (machines only, saved in saved
+  filters by id); a deleted list is reported, never turned into "All items".
 - Detail artwork goes through `MediaGallery` (same `mediaUrl` requests as the Media
   Grid, one per configured category); never add another way to look up image files.
 - Interface preferences have a versioned key; a format change gets a new key and a

@@ -5,7 +5,9 @@ import { useInstallations } from "../features/installations/installationsContext
 import { InstallationsProvider } from "../features/installations/InstallationsProvider";
 import { MamePage } from "../features/installations/MamePage";
 import { LauncherProvider } from "../features/launcher/LauncherProvider";
+import { CustomListsProvider } from "../features/lists/CustomListsProvider";
 import { FavoritesProvider } from "../features/lists/FavoritesProvider";
+import { ListsPage } from "../features/lists/ListsPage";
 import { MediaProvider } from "../features/media/MediaProvider";
 import { takeRestoreOutcome, type RestoreOutcome } from "../features/app-data/appDataApi";
 import {
@@ -17,13 +19,18 @@ import {
 import { SettingsView, type SettingsSection } from "./SettingsView";
 import { applyTheme } from "./theme/themes";
 
-type View = "catalog" | "mame" | "settings";
+type View = "catalog" | "lists" | "mame" | "settings";
 
 const NAVIGATION: { view: View; label: string; icon: ReactNode }[] = [
   {
     view: "catalog",
     label: "Catalog",
     icon: <path d="M3 4h18v4H3zM3 10h18v4H3zM3 16h18v4H3z" />,
+  },
+  {
+    view: "lists",
+    label: "Lists",
+    icon: <path d="M4 6h11M4 12h11M4 18h7M18 15v6M15 18h6" />,
   },
   {
     view: "mame",
@@ -47,7 +54,9 @@ export function App() {
     <MediaProvider>
       <InstallationsProvider>
         <FavoritesProvider>
-          <Shell />
+          <CustomListsProvider>
+            <Shell />
+          </CustomListsProvider>
         </FavoritesProvider>
       </InstallationsProvider>
     </MediaProvider>
@@ -177,6 +186,10 @@ function Shell() {
               setView("settings");
             }}
           />
+        </main>
+
+        <main className="shell__main shell__main--split" hidden={view !== "lists"}>
+          <ListsPage />
         </main>
 
         <main className="shell__main shell__main--split" hidden={view !== "mame"}>

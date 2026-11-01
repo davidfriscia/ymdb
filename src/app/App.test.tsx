@@ -23,6 +23,7 @@ const EMPTY: Record<string, unknown> = {
   get_media_sources: mediaSourcesView(),
   get_remote_connections: { connections: [], loadError: null },
   get_list: favoritesList(),
+  list_user_lists: [],
   get_support_files: { sources: [], dimensions: [] },
   get_classification_status: { dimensions: [], syncError: null },
   get_saved_filters: [],
@@ -57,6 +58,7 @@ describe("App", () => {
     );
     expect(navigation.getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Catalog",
+      "Lists",
       "MAME",
       "Settings",
     ]);

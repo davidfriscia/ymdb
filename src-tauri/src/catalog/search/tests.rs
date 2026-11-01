@@ -73,7 +73,7 @@ impl Catalog {
         request: &MachineSearchRequest,
     ) -> Result<MachineSearchResponse, SearchError> {
         self.store
-            .with_reader(|connection| Ok(search_machines(connection, request, None)))
+            .with_reader(|connection| Ok(search_machines(connection, request, &[])))
             .expect("store")
             .expect("catalog")
     }
@@ -83,7 +83,7 @@ impl Catalog {
         request: &SoftwareSearchRequest,
     ) -> Result<SoftwareSearchResponse, SearchError> {
         self.store
-            .with_reader(|connection| Ok(search_software(connection, request, None)))
+            .with_reader(|connection| Ok(search_software(connection, request, &[])))
             .expect("store")
             .expect("catalog")
     }
@@ -720,7 +720,7 @@ fn classification_facets_with_text_start_from_the_full_text_index() {
                     }])
                     .expect("facet")
                     .remove(0);
-                    let (sql, params) = facet_query(filters, None, parsed.as_ref(), &query);
+                    let (sql, params) = facet_query(filters, &[], parsed.as_ref(), &query);
                     let loops = plan_loops(connection, &sql, &params);
                     let context = format!("{facet:?} {filters:?}: {loops:#?}");
                     assert_eq!(loops.len(), 3, "{context}");
@@ -754,7 +754,7 @@ fn classification_facets_with_text_start_from_the_full_text_index() {
                     facets: vec![facet(MachineFacet::Genre)],
                     ..text("pac")
                 },
-                None,
+                &[],
             ))
         })
         .expect("store")

@@ -79,6 +79,15 @@ export function DownloadIcon(props: IconProps) {
   );
 }
 
+/** A list with a plus: the lists an item belongs to. */
+export function ListsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2 3.5h8M2 7h8M2 10.5h4.5M11.5 9v5M9 11.5h5" />
+    </Icon>
+  );
+}
+
 /** A bookmark; filled when the item is bookmarked. */
 export function BookmarkIcon({ filled = false, ...props }: IconProps & { filled?: boolean }) {
   return (

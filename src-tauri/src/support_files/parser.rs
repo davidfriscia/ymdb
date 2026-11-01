@@ -154,7 +154,7 @@ fn decode(content: &[u8], warnings: &mut Warnings) -> String {
     }
 }
 
-fn windows_1252(byte: u8) -> char {
+pub(crate) fn windows_1252(byte: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž',
         '\u{8F}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}',

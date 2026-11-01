@@ -2,8 +2,8 @@
 //!
 //! Every search names the installation whose catalog it reads. Searches run
 //! on the blocking thread pool with that catalog's cached read connection, so
-//! they never block the main thread. A `list` filter is resolved here from the
-//! global lists: the catalog never stores them.
+//! they never block the main thread. `userLists` filters are resolved here from
+//! the global lists: the catalog never stores them.
 
 use tauri::State;
 
@@ -26,13 +26,13 @@ pub async fn search_catalog_machines(
     support: State<'_, SupportFilesState>,
 ) -> Result<MachineSearchResponse, CommandError> {
     let store = installations.resolve(&installation_id)?.catalog;
-    let members = lists.machine_members(request.filters.list.as_deref())?;
+    let members = lists.machine_members(&request.filters.user_lists)?;
     let target = support.target();
     run_blocking(move || {
         // A failure keeps the previous projection; the status reports it.
         let _ = sync_catalog(&store, target);
         search(&store, |connection| {
-            search_machines(connection, &request, members.as_ref())
+            search_machines(connection, &request, &members)
         })
     })
     .await?
@@ -46,10 +46,10 @@ pub async fn search_catalog_software(
     lists: State<'_, ListsState>,
 ) -> Result<SoftwareSearchResponse, CommandError> {
     let store = installations.resolve(&installation_id)?.catalog;
-    let members = lists.software_members(request.filters.list.as_deref())?;
+    let members = lists.software_members(&request.filters.user_lists)?;
     run_blocking(move || {
         search(&store, |connection| {
-            search_software(connection, &request, members.as_ref())
+            search_software(connection, &request, &members)
         })
     })
     .await?

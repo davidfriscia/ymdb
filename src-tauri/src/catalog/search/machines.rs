@@ -41,13 +41,13 @@ const RANK: &str = "bm25(machines_fts, 10.0, 4.0, 2.0, 1.0)";
 pub fn search_machines(
     connection: &Connection,
     request: &MachineSearchRequest,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
 ) -> Result<MachineSearchResponse, SearchError> {
     let started = Instant::now();
     let page = validate_page(request.page, request.page_size)?;
     validate_text(request.text.as_deref())?;
     validate_filters(&request.filters)?;
-    check_members(request.filters.list.as_deref(), members)?;
+    check_members(&request.filters.user_lists, members)?;
     let facet_queries = validate_facets(&request.facets)?;
     let text = text::parse(request.text.as_deref())?;
 
@@ -150,13 +150,13 @@ pub(super) fn from_clause(text: Option<&TextQuery>) -> &'static str {
 /// (used to count the values of that facet).
 pub(super) fn conditions(
     filters: &MachineFilters,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
     text: Option<&TextQuery>,
     excluded: Option<MachineFacet>,
 ) -> Conditions {
     let applies = |facet| excluded != Some(facet);
     let mut conditions = Conditions::default();
-    if let Some(members) = members {
+    for members in members {
         // Uncorrelated: the list is read once, then matched on the unique name.
         conditions.push(
             "m.name IN (SELECT value FROM json_each(?))",
@@ -299,7 +299,7 @@ pub(super) fn order_by(
 pub(super) fn facet(
     connection: &Connection,
     filters: &MachineFilters,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
     text: Option<&TextQuery>,
     query: &FacetQuery<MachineFacet>,
 ) -> Result<FacetResult<MachineFacet>, SearchError> {
@@ -316,7 +316,7 @@ pub(super) fn facet(
 /// more than the limit.
 pub(super) fn facet_query(
     filters: &MachineFilters,
-    members: Option<&ListMembers>,
+    members: &[ListMembers],
     text: Option<&TextQuery>,
     query: &FacetQuery<MachineFacet>,
 ) -> (String, Vec<Value>) {

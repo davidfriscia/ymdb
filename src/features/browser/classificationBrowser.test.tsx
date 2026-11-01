@@ -11,6 +11,7 @@ import { NO_CLASSIFICATIONS, classificationStatus } from "../../test/supportFile
 import { InstallationsProvider } from "../installations/InstallationsProvider";
 import { useInstallations } from "../installations/installationsContext";
 import { LauncherProvider } from "../launcher/LauncherProvider";
+import { CustomListsProvider } from "../lists/CustomListsProvider";
 import { FavoritesProvider } from "../lists/FavoritesProvider";
 import { MediaProvider } from "../media/MediaProvider";
 import type { SavedFilter } from "../saved-filters/savedFiltersApi";
@@ -104,6 +105,7 @@ function commands(overrides: Partial<Record<string, Handler>> = {}) {
     get_media_sources: () => mediaSourcesView(),
     list_media: () => [],
     get_list: () => favoritesList([]),
+    list_user_lists: () => [],
     ...overrides,
   };
   invokeMock.mockImplementation((command: string, args?: Args) => {
@@ -146,13 +148,15 @@ function Providers({ children }: { children: ReactNode }) {
       <InstallationsProvider>
         <SwitchToOld />
         <FavoritesProvider>
-          <LauncherProvider
-            installationId={NEW_ID}
-            showCommandPreview={false}
-            onShowCommandPreviewChange={() => undefined}
-          >
-            {children}
-          </LauncherProvider>
+          <CustomListsProvider>
+            <LauncherProvider
+              installationId={NEW_ID}
+              showCommandPreview={false}
+              onShowCommandPreviewChange={() => undefined}
+            >
+              {children}
+            </LauncherProvider>
+          </CustomListsProvider>
         </FavoritesProvider>
       </InstallationsProvider>
     </MediaProvider>
@@ -460,7 +464,7 @@ describe("Saved Filters", () => {
       expect(calls("create_saved_filter")).toEqual([
         {
           name: "Mazes",
-          criteriaVersion: 1,
+          criteriaVersion: 2,
           criteria: {
             scope: "machines",
             text: "",
@@ -468,6 +472,7 @@ describe("Saved Filters", () => {
             flags: {},
             ranges: {},
             favoritesOnly: false,
+            listId: null,
           },
         },
       ]);

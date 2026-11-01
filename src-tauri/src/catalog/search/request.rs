@@ -128,8 +128,9 @@ pub struct MachineFilters {
     /// Machines added in these versions; alternatives of `version_added_range`.
     pub versions_added: Vec<String>,
     pub version_added_range: Option<VersionRange>,
-    /// Only machines of this user list (for example `favorites`).
-    pub list: Option<String>,
+    /// Only machines of every one of these user lists (for example
+    /// `favorites` and a custom list): each list is one more AND condition.
+    pub user_lists: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -208,8 +209,8 @@ pub struct SoftwareFilters {
     pub has_disks: Option<bool>,
     /// Software with at least one part using one of these interfaces.
     pub interfaces: Vec<String>,
-    /// Only software of this user list (for example `favorites`).
-    pub list: Option<String>,
+    /// Only software of every one of these user lists (for example `favorites`).
+    pub user_lists: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]

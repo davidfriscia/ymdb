@@ -127,7 +127,7 @@ describe("saved criteria", () => {
     };
     const state = browserReducer(before, {
       type: "applyCriteria",
-      criteria: { scope: "machines", text: "1942", filters, favoritesOnly: true },
+      criteria: { scope: "machines", text: "1942", filters, favoritesOnly: true, listId: null },
       presetId: "preset-1",
     });
     expect(state.scope).toBe("machines");

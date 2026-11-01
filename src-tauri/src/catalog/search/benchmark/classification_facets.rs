@@ -17,6 +17,8 @@
 //!   queries on a real catalog.
 //! - `classification_typing_benchmark`: progressive typing through the store
 //!   lock, as the browser sends a results and a facet request per search.
+//! - `custom_list_benchmark`: searches restricted to custom lists of several
+//!   sizes, with text, classifications and Favorites, and their query plans.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -234,7 +236,7 @@ fn run_facet(connection: &Connection, filters: &MachineFilters, text: &str, face
     let query = validate_facets(&[browser_facet(facet)])
         .expect("facet")
         .remove(0);
-    machines::facet(connection, filters, None, parsed.as_ref(), &query).expect("facet");
+    machines::facet(connection, filters, &[], parsed.as_ref(), &query).expect("facet");
 }
 
 #[test]
@@ -250,7 +252,7 @@ fn classification_facet_benchmark() {
         (
             "search".to_owned(),
             Box::new(|connection, text| {
-                machines::search_machines(connection, &text_request(text), None).expect("search");
+                machines::search_machines(connection, &text_request(text), &[]).expect("search");
             }),
         ),
         (
@@ -258,7 +260,7 @@ fn classification_facet_benchmark() {
             Box::new(|connection, text| {
                 let parsed = text::parse(Some(text)).expect("text");
                 let conditions =
-                    machines::conditions(&MachineFilters::default(), None, parsed.as_ref(), None);
+                    machines::conditions(&MachineFilters::default(), &[], parsed.as_ref(), None);
                 sql::count(
                     connection,
                     machines::from_clause(parsed.as_ref()),
@@ -286,7 +288,7 @@ fn classification_facet_benchmark() {
     stages.push((
         "facet request".to_owned(),
         Box::new(|connection, text| {
-            machines::search_machines(connection, &facet_request(text), None).expect("facets");
+            machines::search_machines(connection, &facet_request(text), &[]).expect("facets");
         }),
     ));
 
@@ -301,7 +303,7 @@ fn classification_facet_benchmark() {
         // page cache; the operating system cache may be warm).
         let cold = open_classified(&catalog, &classifications);
         let started = Instant::now();
-        let total = machines::search_machines(&cold, &facet_request(text), None)
+        let total = machines::search_machines(&cold, &facet_request(text), &[])
             .expect("facets")
             .total;
         let first = millis(started.elapsed());
@@ -327,7 +329,7 @@ fn classification_facet_benchmark() {
             let query = validate_facets(&[browser_facet(facet)])
                 .expect("facet")
                 .remove(0);
-            let (sql, params) = machines::facet_query(&filters, None, parsed.as_ref(), &query);
+            let (sql, params) = machines::facet_query(&filters, &[], parsed.as_ref(), &query);
             if *text == EXPLAIN_TEXTS[0] {
                 println!("\n{facet:?} SQL: {sql}\n  params: {params:?}");
             }
@@ -499,14 +501,14 @@ fn snapshot_filters(connection: &Connection) -> Vec<(&'static str, MachineFilter
         (
             "favorites",
             MachineFilters {
-                list: Some("favorites".to_owned()),
+                user_lists: vec!["favorites".to_owned()],
                 ..none.clone()
             },
         ),
         (
             "favorites + genre + version range",
             MachineFilters {
-                list: Some("favorites".to_owned()),
+                user_lists: vec!["favorites".to_owned()],
                 genres: genres[..1].to_vec(),
                 version_added_range: Some(VersionRange {
                     from: Some("0.100".to_owned()),
@@ -539,22 +541,21 @@ fn classification_facet_snapshot() {
             .collect(),
     };
     let mut lines = String::new();
-    let mut record =
-        |label: String, request: &MachineSearchRequest, members: Option<&ListMembers>| {
-            let started = Instant::now();
-            let response = machines::search_machines(&connection, request, members).expect(&label);
-            println!(
-                "{label}: {} results, {:.1} ms",
-                response.total,
-                millis(started.elapsed())
-            );
-            let _ = writeln!(
-                lines,
-                "{label}\t{}\t{}",
-                serde_json::to_string(request).expect("json"),
-                snapshot_line(&response)
-            );
-        };
+    let mut record = |label: String, request: &MachineSearchRequest, members: &[ListMembers]| {
+        let started = Instant::now();
+        let response = machines::search_machines(&connection, request, members).expect(&label);
+        println!(
+            "{label}: {} results, {:.1} ms",
+            response.total,
+            millis(started.elapsed())
+        );
+        let _ = writeln!(
+            lines,
+            "{label}\t{}\t{}",
+            serde_json::to_string(request).expect("json"),
+            snapshot_line(&response)
+        );
+    };
     for (name, filters) in snapshot_filters(&connection) {
         let members = machine_members(&connection, &filters);
         for text in &texts {
@@ -569,7 +570,7 @@ fn classification_facet_snapshot() {
                     facets: browser_facets(),
                     ..base.clone()
                 },
-                members.as_ref(),
+                &members,
             );
             record(
                 format!("{name} / '{text}' / page 1"),
@@ -577,7 +578,7 @@ fn classification_facet_snapshot() {
                     page: 1,
                     ..base.clone()
                 },
-                members.as_ref(),
+                &members,
             );
             // Small limits (has_more) and value searches.
             let small: Vec<FacetRequest<MachineFacet>> = browser_facets()
@@ -594,7 +595,7 @@ fn classification_facet_snapshot() {
                     facets: small,
                     ..base.clone()
                 },
-                members.as_ref(),
+                &members,
             );
             let searched: Vec<FacetRequest<MachineFacet>> = browser_facets()
                 .into_iter()
@@ -611,7 +612,7 @@ fn classification_facet_snapshot() {
                     facets: searched,
                     ..base
                 },
-                members.as_ref(),
+                &members,
             );
         }
     }
@@ -663,7 +664,7 @@ fn classification_typing_benchmark() {
                 store
                     .with_reader(|connection| {
                         lock = millis(started.elapsed());
-                        machines::search_machines(connection, &request, None).expect("search");
+                        machines::search_machines(connection, &request, &[]).expect("search");
                         Ok(())
                     })
                     .expect("store");
@@ -695,6 +696,154 @@ fn classification_typing_benchmark() {
             timing.done - timing.lock,
             timing.done,
             timing.done - timing.sent
+        );
+    }
+}
+
+// Custom lists
+
+/// Every `step`-th machine by name, at most `limit`: a sample list.
+fn sample_list(connection: &Connection, step: usize, limit: usize) -> ListMembers {
+    let names: Vec<String> = connection
+        .prepare(&format!(
+            "SELECT name FROM machines WHERE id % {step} = 0 ORDER BY name LIMIT {limit}"
+        ))
+        .expect("sample")
+        .query_map([], |row| row.get(0))
+        .expect("sample")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    ListMembers::machines(names.iter().map(String::as_str))
+}
+
+/// Results page and browser facet request restricted to custom lists of
+/// several sizes, alone and with search text, classifications and Favorites,
+/// next to the same searches without a list; then the query plans of the
+/// list-restricted classification facets.
+#[test]
+#[ignore = "requires a real catalog and projection in YMDB_BENCH_CATALOG and YMDB_BENCH_CLASSIFICATIONS"]
+fn custom_list_benchmark() {
+    let catalog = env_path("YMDB_BENCH_CATALOG");
+    let classifications = env_path("YMDB_BENCH_CLASSIFICATIONS");
+    let connection = open_classified(&catalog, &classifications);
+    print_environment(&connection, &catalog, &classifications);
+    let genre = top_values(&connection, "memberships", "genre", 1);
+    let category = top_values(&connection, "memberships", "category", 1);
+    let lists = [
+        ("small list (100)", sample_list(&connection, 97, 100)),
+        ("medium list (5,000)", sample_list(&connection, 7, 5_000)),
+        ("large list (36,000)", sample_list(&connection, 1, 36_000)),
+    ];
+    let favorites = sample_list(&connection, 10, 2_000);
+    let none = MachineFilters::default();
+    let filters = [
+        ("no other filter", none.clone()),
+        (
+            "genre",
+            MachineFilters {
+                genres: genre.clone(),
+                ..none.clone()
+            },
+        ),
+        (
+            "category",
+            MachineFilters {
+                categories: category.clone(),
+                ..none.clone()
+            },
+        ),
+        (
+            "version range",
+            MachineFilters {
+                version_added_range: Some(VersionRange {
+                    from: Some("0.100".to_owned()),
+                    to: Some("0.200".to_owned()),
+                }),
+                ..none.clone()
+            },
+        ),
+    ];
+    let measure = |label: &str, request: &MachineSearchRequest, members: &[ListMembers]| {
+        let mut total = 0;
+        let stats = sample(|| {
+            total = machines::search_machines(&connection, request, members)
+                .expect(label)
+                .total;
+        });
+        println!(
+            "  {label}: {total} results, median {:.1} ms, max {:.1} ms ({} runs)",
+            stats.median, stats.max, stats.samples
+        );
+    };
+    for text in ["", "gal", "pac", "s"] {
+        for (filter_label, filters) in &filters {
+            println!("\ntext '{text}', {filter_label}:");
+            let base = MachineSearchRequest {
+                filters: filters.clone(),
+                ..text_request(text)
+            };
+            let facets = MachineSearchRequest {
+                filters: filters.clone(),
+                ..facet_request(text)
+            };
+            measure("no list / page", &base, &[]);
+            measure("no list / facets", &facets, &[]);
+            for (list_label, members) in &lists {
+                let with = |ids: &[&str], request: &MachineSearchRequest| MachineSearchRequest {
+                    filters: MachineFilters {
+                        user_lists: ids.iter().map(|id| (*id).to_owned()).collect(),
+                        ..request.filters.clone()
+                    },
+                    ..request.clone()
+                };
+                let one = std::slice::from_ref(members);
+                measure(&format!("{list_label} / page"), &with(&["l"], &base), one);
+                measure(
+                    &format!("{list_label} / facets"),
+                    &with(&["l"], &facets),
+                    one,
+                );
+                let both = [favorites.clone(), members.clone()];
+                measure(
+                    &format!("{list_label} + favorites / facets"),
+                    &with(&["favorites", "l"], &facets),
+                    &both,
+                );
+            }
+        }
+    }
+
+    println!("\nQuery plans with the large list:");
+    let members = std::slice::from_ref(&lists[2].1);
+    let filters = MachineFilters {
+        user_lists: vec!["l".to_owned()],
+        genres: genre,
+        ..none
+    };
+    for text in ["", "gal"] {
+        let parsed = text::parse(Some(text)).expect("text");
+        for facet in CLASSIFICATION_FACETS
+            .into_iter()
+            .chain([MachineFacet::Manufacturer])
+        {
+            let query = validate_facets(&[browser_facet(facet)])
+                .expect("facet")
+                .remove(0);
+            let (sql, params) = machines::facet_query(&filters, members, parsed.as_ref(), &query);
+            println!(
+                "'{text}' {facet:?}:\n{}",
+                plan_tree(&connection, &sql, &params)
+            );
+        }
+        let conditions = machines::conditions(&filters, members, parsed.as_ref(), None);
+        let sql = format!(
+            "SELECT COUNT(*) FROM {}{}",
+            machines::from_clause(parsed.as_ref()),
+            conditions.where_clause()
+        );
+        println!(
+            "'{text}' count:\n{}",
+            plan_tree(&connection, &sql, conditions.params())
         );
     }
 }

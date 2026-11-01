@@ -5,7 +5,8 @@ import type { VersionRange } from "../search/searchApi";
 /**
  * The criteria of a saved filter, as stored in `saved-filters.json`: the
  * catalog type, the search text, the filters of that type (facet values,
- * single-choice filters, version ranges) and Favorites only. Presentation
+ * single-choice filters, version ranges), Favorites only and the custom list
+ * (by its stable id, so a renamed list keeps working). Presentation
  * (renderer, sizes, panels, theme), sorting and paging are not part of it.
  *
  * Criteria reference classifications and other values by name only, never
@@ -13,9 +14,9 @@ import type { VersionRange } from "../search/searchApi";
  * of filter gets a new {@link CRITERIA_VERSION} and a conversion here; a
  * preset of an unknown version is kept as it is and cannot be loaded.
  */
-export const CRITERIA_VERSION = 1;
+export const CRITERIA_VERSION = 2;
 
-/** The stored shape of version 1. */
+/** The stored shape of version 1 (before custom lists). */
 interface StoredCriteriaV1 {
   scope: Scope;
   text: string;
@@ -23,6 +24,15 @@ interface StoredCriteriaV1 {
   flags: Record<string, string>;
   ranges: Record<string, VersionRange>;
   favoritesOnly: boolean;
+}
+
+/**
+ * Version 2: version 1 and the custom list of the machines, by id (`null`:
+ * all items). A list deleted later stays in the preset; the browser reports
+ * it instead of showing all items.
+ */
+interface StoredCriteriaV2 extends StoredCriteriaV1 {
+  listId: string | null;
 }
 
 export type ParsedCriteria =
@@ -39,7 +49,7 @@ const sorted = (values: (string | null)[]) =>
   [...new Set(values)].sort((a, b) => (a ?? "").localeCompare(b ?? "") || (a === null ? -1 : 1));
 
 /** Criteria in their stored form, normalized so that equal criteria compare equal. */
-export function encodeCriteria(criteria: BrowserCriteria): StoredCriteriaV1 {
+export function encodeCriteria(criteria: BrowserCriteria): StoredCriteriaV2 {
   const { filters } = criteria;
   const values: Record<string, (string | null)[]> = {};
   for (const key of Object.keys(filters.values).sort()) {
@@ -68,6 +78,8 @@ export function encodeCriteria(criteria: BrowserCriteria): StoredCriteriaV1 {
     flags,
     ranges,
     favoritesOnly: criteria.favoritesOnly,
+    // Lists restrict machines only.
+    listId: criteria.scope === "machines" ? criteria.listId : null,
   };
 }
 
@@ -84,9 +96,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * something else instead; the stored preset itself is not changed.
  */
 export function parseCriteria(version: number, stored: unknown): ParsedCriteria {
-  if (version !== CRITERIA_VERSION) return { kind: "unsupported", version };
+  if (version !== 1 && version !== CRITERIA_VERSION) return { kind: "unsupported", version };
   if (!isRecord(stored)) return { kind: "invalid", message: "the criteria are not an object" };
   const { scope, text, values, flags, ranges, favoritesOnly } = stored;
+  // Version 1 had no custom list: all items.
+  const listId = version === 1 ? null : stored.listId;
+  if (listId !== null && (typeof listId !== "string" || listId === "")) {
+    return { kind: "invalid", message: "the list is invalid" };
+  }
   if (scope !== "machines" && scope !== "software") {
     return { kind: "invalid", message: "unknown catalog type" };
   }
@@ -137,5 +154,9 @@ export function parseCriteria(version: number, stored: unknown): ParsedCriteria 
       ...(typeof range.to === "string" && { to: range.to }),
     };
   }
-  return { kind: "ok", criteria: { scope, text, filters, favoritesOnly }, ignored };
+  return {
+    kind: "ok",
+    criteria: { scope, text, filters, favoritesOnly, listId: scope === "machines" ? listId : null },
+    ignored,
+  };
 }

@@ -92,12 +92,18 @@ React + TypeScript application rendered by the system WebView through Tauri.
   - `controllers`: **Settings → Controllers**, the **Controls** selector of the launch
     bar, **Advanced → Controls** and **Configure Controls in MAME** (see
     [Controls interface](#controls-interface)).
+  - `lists`: `FavoritesProvider`, `FavoriteBookmark`, **Settings → Favorites**,
+    `CustomListsProvider`, the **Lists** page, the folder file import, Manage Lists
+    and the list picker of View Options (see
+    [User lists](#user-lists-favorites-and-custom-lists--implemented)).
   - `health-check`: calls `check_health` to verify frontend-backend communication.
 
 #### Application shell
 
-`App.tsx` shows a navigation rail with three pages: **Catalog** (the browser, the
-start page), **MAME** and **Settings**. Pages stay mounted and are hidden with
+`App.tsx` shows a navigation rail with four pages: **Catalog** (the browser, the
+start page), **Lists** (custom lists, see
+[User lists](#user-lists-favorites-and-custom-lists--implemented)), **MAME** and
+**Settings**. Pages stay mounted and are hidden with
 the `hidden` attribute, so the browser keeps its query, results and scroll position
 while the user visits another page. There is no router. Below 640 px the rail
 becomes a top bar.
@@ -172,8 +178,9 @@ size and the `cards` renderer) is migrated when there is no version 2 yet, and
 removed at the next save. Unavailable storage only means the preferences last for
 the session.
 
-Planned: user lists beyond Favorites (see [User lists](#user-lists-favorites--implemented)),
-input devices.
+The custom list selected in View Options › Lists is a search criterion of the
+browser state, not an interface preference (see
+[User lists](#user-lists-favorites-and-custom-lists--implemented)).
 
 ### Catalog browser — Implemented
 
@@ -288,9 +295,14 @@ what happens when the active installation changes).
 - **Favorites.** Both renderers place `ResultBookmark` (`FavoriteBookmark`) in the
   top right corner of each item, as a sibling of the button that opens it (never
   nested), so a click on it never opens the detail. **Favorites only** is the
-  `favoritesOnly` interface preference: it adds `list: "favorites"` to the results
-  and facet requests, returns both catalog types to their first page and is shown
-  as a chip above the results. See [User lists](#user-lists-favorites--implemented).
+  `favoritesOnly` interface preference: it adds `favorites` to `userLists` of the
+  results and facet requests, returns both catalog types to their first page and is
+  shown as a chip above the results. See [User lists](#user-lists-favorites-and-custom-lists--implemented).
+- **Lists.** Machine items also get `ManageListsButton` next to the bookmark. View
+  Options › **Lists** chooses a custom list (`listId` of the browser state, `setList`
+  action); it adds the list id to `userLists` of the machine results and facet
+  requests (AND with Favorites only and every filter), is shown as a chip and is
+  part of saved filters. A deleted list is reported and nothing is searched.
 - **Pagination.** Page numbers around the current page, previous/next, "Page N of
   M", page size (25, 50, 100, 200) and "Go to". The workspace renders one
   `Pagination` in the results footer for every renderer, whenever the current
@@ -400,6 +412,8 @@ The Rust crate in `src-tauri/`.
   [ROM Manager downloads](#rom-manager-downloads--implemented)).
 - `support_files/` parses MAME support files and keeps the global repository of
   classifications (see [MAME support files](#mame-support-files--implemented)).
+- `lists/` keeps Favorites and the custom lists, reads MAME folder files and plans
+  their import (see [User lists](#user-lists-favorites-and-custom-lists--implemented)).
 - `saved_filters.rs` stores the saved filter presets (see
   [Saved filter presets](#saved-filter-presets--implemented)).
 - `controllers/` manages controllers, controller profiles and their assignments (see
@@ -1981,12 +1995,13 @@ of the catalog only; no machine is classified as arcade, console or computer.
   (`cloneOf`, combined with `lists` to select the parent's list), support status (`yes`,
   `partial`, `no` as declared by MAME), has ROMs, has disks, part interfaces. The
   support status is unrelated to media availability.
-- Both: `list`, the id of a [user list](#user-lists-favorites--implemented) such as
-  `favorites`. Lists are not in the catalog: the command resolves the list from the
-  global lists and passes its entries to the search (`ListMembers`) as one JSON
-  parameter, matched with `m.name IN (SELECT value FROM json_each(?))` (software:
-  `(s.list_name, s.name) IN (...)`). The restriction is an ordinary AND condition, so
-  it applies before the count, the facets and the page.
+- Both: `userLists`, the ids of [user lists](#user-lists-favorites-and-custom-lists--implemented)
+  (at most four) every result must belong to, such as `favorites` and a custom list.
+  Lists are not in the catalog: the command resolves each list from the global lists
+  and passes its entries to the search (`ListMembers`) as one JSON parameter, matched
+  with `m.name IN (SELECT value FROM json_each(?))` (software:
+  `(s.list_name, s.name) IN (...)`). Each list is an ordinary AND condition, so it
+  applies before the count, the facets and the page; an empty list matches nothing.
 - Machines, from the support files (see
   [MAME support files](#mame-support-files--implemented)): `genres`, `categories`
   (category nodes: a node selects its descendants), `series`, `versionsAdded` and
@@ -2120,8 +2135,8 @@ Configuration directory:
 - `installations/<id>/remote-sources.json`: the ROM Manager settings of each
   installation (see [Remote repositories](#remote-repositories--implemented-connections-sources-sftp-provider)).
 - `remote-connections.json`: the remote connections, shared by all installations.
-- `lists.json`: the user lists (Favorites), shared by all installations (see
-  [User lists](#user-lists-favorites--implemented)).
+- `lists.json`: the user lists (Favorites and custom lists), shared by all installations (see
+  [User lists](#user-lists-favorites-and-custom-lists--implemented)).
 - `media.json`: the media sources, shared by all installations (see
   [Media sources](#media-sources--implemented)).
 - `saved-filters.json`: the saved filter presets, shared by all installations (see
@@ -2329,22 +2344,28 @@ profile files and databases), not only within each database.
 picker), `get_backup_status` (polled), `cancel_backup_job`, `discard_backup_job`,
 `apply_backup_import` (restarts YMDB) and `take_restore_outcome`.
 
-### User lists (Favorites) — Implemented
+### User lists (Favorites and custom lists) — Implemented
 
-Implemented in `src-tauri/src/lists/` (model, persistence, export format),
-`commands/lists.rs` (state and commands) and `src/features/lists/` (provider,
-bookmark, Settings section). Favorites is the only list of this version; it is
-modeled as a _system list_ so that lists created by the user can be added without
-changing the persistence, the entries or the export format.
+Implemented in `src-tauri/src/lists/` (model, persistence, export format, folder
+files and their import), `commands/lists.rs` (state and commands),
+`catalog/search/members.rs` (the machines of a list in a catalog) and
+`src/features/lists/` (providers, bookmark, Manage Lists, the Lists page, the list
+picker, Settings › Favorites). Favorites is a _system list_; **custom lists** are
+_user lists_ created by the user. Both share the model, the persistence and the
+search filter, but they stay functionally independent: Favorites is never shown or
+changed as a custom list, and custom lists never change Favorites.
 
 #### Model
 
 ```text
 Lists { schemaVersion, lists: [List] }
-List  { id, kind: system | user, name?, entries: [ListEntry] }
+List  { id, kind: system | user, name?, entries: [ListEntry], createdAt?, updatedAt? }
 ListEntry = { kind: "machine", name }               (MAME short name)
           | { kind: "software", listName, name }    (software list + short name)
 ```
+
+A membership is the pair (list id, entry): a list holds each entry at most once, an
+entry may be in any number of lists.
 
 - **Identity.** An entry references a machine by its MAME short name and a software
   by its software list and short name, the same identity MAME uses. Never a catalog
@@ -2356,52 +2377,125 @@ ListEntry = { kind: "machine", name }               (MAME short name)
   printable ASCII characters, without whitespace, `/`, `\` or `:`), so an entry has
   one textual key (`machine:pacman`, `software:nes:smb`).
 - **Missing entries are kept.** Lists do not depend on any catalog: an entry missing
-  from the active catalog is neither removed nor reported, and matches again with an
-  installation that has it. No approximate matching (description, manufacturer) is
-  ever attempted, and a renamed short name is another entry.
+  from the active catalog is neither removed nor hidden from the Lists page, and
+  matches again with an installation that has it. No approximate matching
+  (description, manufacturer) is ever attempted, and a renamed short name is
+  another entry.
 - **System lists** (`SYSTEM_LISTS` in `lists/model.rs`: only `favorites`, displayed
-  as "Favorites") have a stable id, no stored name, cannot be renamed or deleted,
-  and are added automatically when missing. **User lists** (`kind: "user"`) have an
-  id (`[A-Za-z0-9-]`, not a system id) and a name; the model validates and keeps
-  them, but no command creates them yet.
-- **Entries** keep the order in which they were added, without duplicates, at most
-  100,000 per list. `set_membership(list, entry, member)` sets the wanted state and
-  is idempotent; the interface toggles by sending the opposite of the current state.
+  as "Favorites") have a stable id, no stored name and no dates, cannot be renamed,
+  deleted or changed through the custom list commands (`SystemList` error), and are
+  added automatically when missing.
+- **Custom lists** (`kind: "user"`) have an opaque id generated by the backend (a
+  UUID without dashes; never derived from the name, immutable), a name and their
+  creation and last change dates (milliseconds since the Unix epoch). At most 5,000
+  custom lists (a `category.ini` import creates about 650) and 100,000 entries per
+  list.
+- **Names.** 1-200 characters, without leading or trailing spaces or control
+  characters; every other character, including `/` of imported folder names, is kept
+  as written. Names are unique **ignoring case** (`name_key`: trimmed, Unicode
+  lowercase), so "Shooters" and "shooters" are the same name; the displayed spelling
+  is the one the list was created or renamed with. Favorites is not a custom list:
+  a custom list may be called "Favorites".
+- **Entries** keep the order in which they were added, without duplicates.
+  `set_membership(list, entry, member)` and `set_user_memberships(entry, [(list,
+member)])` set wanted states and are idempotent; `merge_into` adds entries after the
+  existing ones (a set union: nothing is removed or reordered). An empty list is
+  valid and is never deleted automatically.
+- **Software entries.** The model, persistence, search filter and export already
+  handle software entries in any list. This version manages custom lists of machines
+  only: the Manage Lists button is shown for machines, the folder import creates
+  machine entries, the Lists filter applies to the Machines catalog, and the Lists
+  page counts software entries but does not list them. Extending custom lists to
+  software needs the interface (button on software cards and details, a software
+  page in the Lists page using the same `ListMembers::software` filter), not a new
+  model.
 
 #### Persistence
 
 `lists.json` in the configuration directory (user data that may roam, next to
 `installations.json`), validated when read and written atomically like every other
-JSON file. A global SQLite database was considered and not used: the data is small
-(a few thousand short names), the JSON pattern with atomic writes already exists,
-and the search needs no join with it (see below). A missing file means empty system
-lists and is not written until the first change. An unreadable or invalid file
-(malformed JSON, unknown version or fields, invalid or duplicate entries) is
-reported by every lists command, including searches with Favorites only, and never
-replaced; it is read again on next use, so a file fixed by hand works without
-restarting.
+JSON file, in compact form (an import of the pS `mame.ini` and `category.ini` makes
+3.4 MB instead of 7.2 MB indented). A global SQLite database was considered again
+for custom lists and not used:
 
-`ListsState` keeps the lists in memory behind a mutex. A change is applied to a
-copy, saved, and only then kept: a failed save (full disk, permissions) leaves the
-lists and the file as they were, and the command reports the error. Catalog
-imports, installation changes and removals never touch `lists.json`, and changing a
-favorite never writes to a catalog.
+- the existing store already gives what the lists need: every change is applied to
+  a copy, validated (unique ids and names, valid and unique entries, limits) and
+  saved atomically, so an import of hundreds of lists is saved entirely or not at
+  all, and a failed save leaves the lists and the file as they were;
+- searches never join a lists database: the entries of a list are bound as one
+  parameter (see below), so a separate database would not make searches faster and
+  could not be attached to the read-only catalog connections anyway;
+- `lists.json` is already part of the inventory, the backup and the restore, with
+  the same rules as the other configuration files;
+- with the three pS sample files imported (644 lists, 88,991 entries) validating and
+  serializing all the lists takes 13 ms in a release build; a change writes 3.4 MB.
+
+Files written before custom lists load unchanged: the new fields (`createdAt`,
+`updatedAt`) are optional, so `SCHEMA_VERSION` stays 1. An older YMDB refuses a file
+with these fields and reports it (never replaces it). A missing file means empty
+system lists and is not written until the first change. An unreadable or invalid
+file (malformed JSON, unknown version or fields, invalid or duplicate entries,
+duplicate names) is reported by every lists command, including searches restricted
+to a list, and never replaced; it is read again on next use, so a file fixed by
+hand works without restarting.
+
+`ListsState` keeps the lists in memory behind a mutex that serializes every change
+(memberships, imports, renames, deletions) without a global application lock. A
+change is applied to a copy, saved, and only then kept. Catalog imports,
+installation changes and removals never touch `lists.json`, and changing a list
+never writes to a catalog. Mutating commands hold the shared data gate
+(`data_change()`) like every other change of application data.
+
+#### Concurrency and stale views
+
+- Every change of a custom list names the lists it changes by id and sets wanted
+  states. The Manage Lists window sends only the lists whose checkbox changed, so a
+  list changed elsewhere after the window opened (another window, the Lists page,
+  an import) keeps that change.
+- A change naming a list that no longer exists fails entirely (`notFound`) and
+  changes nothing; the window keeps its draft and the lists are read again.
+- A folder import is planned again on the current lists when it is applied, under
+  the lists lock: a list created or renamed after the preview is merged, never
+  duplicated. A prepared import is applied at most once.
+- Renaming refuses a name in use (`invalidRequest`), never merges.
 
 #### Search integration
 
-Searches take an optional `list` filter (see [Filters](#filters)). The search
-command reads the list's entries of the searched kind and passes them as a single
-JSON array bound to `json_each(?)` in an uncorrelated `IN` subquery, so:
+Searches take a `userLists` filter: the ids of the lists every result must belong
+to (at most four; the browser sends Favorites and the selected custom list). The
+search command reads the entries of the searched kind of each list and passes them
+as a single JSON array bound to `json_each(?)` in an uncorrelated `IN` subquery, one
+AND condition per list, so:
 
 - the catalog is never modified, attached to another database or re-imported when a
-  favorite changes;
-- the restriction is one more AND condition, applied before counting, faceting,
-  sorting and paging, with the text and every other filter;
-- SQLite reads the array once and looks entries up by the unique indexes
-  (`machines.name`, `software(list_name, name)`); with 2,000 favorites on the 0.280
-  catalog (48,893 machines, 139,122 software) a results page with all five facets
-  takes about 19 ms for machines and 40 ms for software (`search_benchmark`), less
-  than the same search over the whole catalog (65 ms and 159 ms).
+  list changes;
+- the restriction is applied with the text and every other filter before counting,
+  faceting, sorting and paging;
+- SQLite reads each array once per query (`LIST SUBQUERY` with a bloom filter) and
+  looks entries up by the unique indexes (`machines.name`, `software(list_name,
+name)`); with search text, classification facets keep starting from the FTS5 index
+  (`CROSS JOIN`), so the list adds no per-row MATCH;
+- an empty list matches nothing (it is not "no filter"); an unknown list is
+  `notFound`, never ignored;
+- the JSON of each list is built once per change of the lists (`members_cache`,
+  cleared by every saved change) instead of once per search.
+
+`custom_list_benchmark` (`catalog/search/benchmark/classification_facets.rs`)
+measures it on a real catalog. On the MAME 0.288 catalog (50,368 machines, release
+build), medians of a results page / the browser's facet request (nine facets):
+
+| Search                           | No list      | 100 machines | 5,000 machines | 36,000 machines |
+| -------------------------------- | ------------ | ------------ | -------------- | --------------- |
+| No text, no filter               | 0.3 / 167 ms | 0.2 / 45 ms  | 3.3 / 121 ms   | 21 / 304 ms     |
+| No text, genre                   | 9.4 / 177 ms | 5.7 / 75 ms  | 10 / 141 ms    | 34 / 360 ms     |
+| Text `gal`                       | 0.6 / 3.3 ms | 0.3 / 2.0 ms | 2.2 / 13 ms    | 13 / 74 ms      |
+| Text `pac`, category             | 6.1 / 31 ms  | 0.4 / 2.3 ms | 7.9 / 40 ms    | 18 / 106 ms     |
+| List + Favorites (2,000), facets | —            | 69 ms        | 83 ms          | 155 ms          |
+
+Searches without a list are unchanged. Lists up to several thousand machines cost
+about as much as the unrestricted search or less; a list of most of the catalog
+(the pS `mame.ini` has 36,862 machines) reads its whole array once per query, which
+adds up to about 6 ms per facet.
 
 #### Interface
 
@@ -2413,18 +2507,121 @@ JSON array bound to `json_each(?)` in an uncorrelated `IN` subquery, so:
   Every saved change increments `revision`: with Favorites only, the results and
   facets reload, so a removed favorite disappears, counts and pages follow, and an
   emptied last page moves to the new last page.
-- `FavoriteBookmark` is the only control: a toggle button (`aria-pressed`, accessible
-  name "Favorite: <title>", tooltip "Add to favorites" / "Remove from favorites",
-  native keyboard support, visible focus, `aria-busy` while saving, disabled with an
-  explanation when the list cannot be read). On cards it is an overlay in the top
-  right corner, semi-transparent until the card is hovered or the bookmark hovered
-  or focused, and filled with the accent color when the entry is a favorite; on
-  detail pages it sits next to the title of the information bar. Colors come from
-  the theme tokens only, so both themes are covered.
-- **Settings › Favorites** shows the number of favorites, exports them and imports a
-  file (see below).
+- `FavoriteBookmark` is the Favorites control: a toggle button (`aria-pressed`,
+  accessible name "Favorite: <title>", tooltip "Add to favorites" / "Remove from
+  favorites", native keyboard support, visible focus, `aria-busy` while saving,
+  disabled with an explanation when the list cannot be read). On cards it is an
+  overlay in the top right corner, semi-transparent until the card is hovered or
+  the bookmark hovered or focused, and filled with the accent color when the entry is
+  a favorite; on detail pages it sits next to the title of the information bar.
+- `CustomListsProvider` (global) loads the custom list summaries (`list_user_lists`:
+  id, name, counts, dates; never entries) for the Lists page, the list picker, the
+  Manage Lists window and saved filters. Views that change a list call `changed()`,
+  which reads the summaries again and increments `revision`; the catalog results
+  restricted to a list, the facets and the Lists page entries reload with it. No
+  view keeps its own copy of the lists.
+- **Manage Lists.** `ManageListsButton` sits next to the bookmark of machine cards
+  (both renderers, as a sibling of the button that opens the card, so its click
+  never opens the detail or plays) and next to the title of the machine detail. It
+  opens `ManageListsModal`: the machine name and short name, a search of the lists
+  (bounded list, 300 rows rendered, the others found by searching), a checkbox per
+  list reflecting `get_entry_lists`, and **Create list** (same name rules; the new
+  list is checked). **Save** sends the differences with one
+  `set_entry_memberships`; **Cancel** discards them. One implementation for cards and
+  details.
+- **Lists page** (main navigation, between Catalog and MAME; `ListsPage`, a
+  `TwoPaneLayout`): the lists with a name search and a sort (name, most machines,
+  recently changed, recently created), **New list**, **Import INI…**, and the
+  selected list: counts and dates, **Rename…** (refuses a name in use, ignoring
+  case), **Delete…** (confirmed; Favorites, catalogs and other lists are not
+  changed), **Add machines** (a catalog search of the active installation, ten
+  results, **Add**), and its machines from `get_list_entries`: one page (50 by
+  default, the shared `Pagination`) searched in SQL by short name or description,
+  with the description and presence in the active catalog; missing machines stay
+  listed ("Not in this catalog") and can be removed like the others. Without a
+  catalog, machines are listed by short name.
+- **Lists filter.** View Options › Lists has `ListCombobox`, an ARIA combobox: "All
+  items" and the lists, filtered by name while typing (200 options rendered),
+  arrow keys, Enter and Escape. The selection is `listId` in the browser state (a
+  search criterion, not an interface preference, so it is not kept between
+  sessions): it restricts the machines only, is shown as a chip ("List: name"),
+  cleared by "Clear all filters", and returns the machines to their first page. A
+  selected list that was deleted (or a saved filter naming one) is shown as
+  "Deleted list" with a message and **Show all items**: nothing is searched and no
+  result of all items is shown until the user changes it.
 
-#### Export and import
+#### Folder files (`.ini`)
+
+`lists/ini.rs` reads the folder files of MAME frontends (the pS `bootlegs.ini`,
+`category.ini`, `mame.ini` and similar files):
+
+```text
+[FOLDER_SETTINGS]          frontend settings: ignored
+RootFolderIcon mame
+;; BOOTLEGS.ini 0.288 / 09-Jun-26 / MAME 0.288 ;;    comments (; or #): ignored
+[ROOT_FOLDER]              machines of the folder itself
+1942abl
+[Arcade / Pinball]         a subfolder, named as written
+aliencr
+```
+
+- UTF-8 with or without BOM; invalid UTF-8 is read as Windows-1252 with a warning;
+  UTF-16 and binary content are refused. `\n`, `\r\n` and `\r` line endings; blank
+  lines and surrounding spaces are ignored. At most 64 MB.
+- `[FOLDER_SETTINGS]` and comments are frontend metadata and never imported. Every
+  other section is a subfolder, whatever its name (`S1`, `Arcade / Pinball`).
+- Only MAME short names (`is_short_name`) are machines; other lines (`key=value`
+  settings, text, uppercase names) are skipped and reported with their line, never
+  imported. Machines missing from a catalog are kept.
+- Duplicates in a folder are imported once; a folder (or `[ROOT_FOLDER]`) listed
+  twice is combined; `[]` sections and text before the first section are skipped;
+  a missing `[ROOT_FOLDER]` is reported. Each kind of warning is counted with its
+  first five examples.
+- An empty file, a file with sections but no machine, and a file without any
+  section are refused.
+
+The three pS 0.288 sample files: `bootlegs.ini` (2,033 machines in the root),
+`mame.ini` (36,862 machines in the root) and `category.ini` (an empty root and 642
+subfolders, 50,096 memberships) have no warnings; they are parsed in 1, 8 and 11 ms
+and applied in 0.5, 7.5 and 17 ms (release build).
+
+#### Folder import: naming and merging
+
+`lists/folder_import.rs`. The user chooses an import name (proposed from the file
+name: `bootlegs.ini` gives "Bootlegs") and, for files with subfolders, a naming mode:
+
+- `[ROOT_FOLDER]`, when it has machines, becomes the list named after the import
+  name; an empty root creates nothing. Its machines are never copied into the
+  subfolder lists.
+- Each subfolder with machines becomes a list: **By subfolder name**
+  (`subfolder`: `Arcade / Pinball`) or **With the import name first** (`prefixed`:
+  `Category / Arcade / Pinball`, joined by `/`). Empty subfolders create nothing.
+- Planned lists with the same name ignoring case (a subfolder named like the import
+  name) are combined first; then a planned list whose name matches an existing
+  custom list is **merged** into it: existing entries ∪ imported entries, existing
+  entries first and unchanged, nothing removed, the existing spelling kept. Repeating
+  an import with the same choices therefore adds nothing (not even a date change).
+- A name that is invalid (too long once prefixed, for example), a list over the
+  entry limit or too many lists refuse the whole import; it is applied in one saved
+  change, so it is never half applied.
+
+`choose_folder_import_file` (native picker) parses the file and keeps it in memory
+with an id; `preview_folder_import(id, name, naming)` plans it on the current lists
+without changing anything (lists to create, lists to update, empty subfolders,
+memberships to add, memberships already present, duplicates, warnings, and every
+resulting list with its action and counts; the dialog shows them in a searchable,
+bounded list); `apply_folder_import(id, name, naming)` plans again and applies it.
+
+#### Saved filters
+
+Criteria version 2 (`savedFilterCriteria.ts`) adds `listId`: the custom list of the
+machines, by its stable id (`null` for all items; always `null` for software). A
+renamed list keeps working; a deleted one stays in the preset and is reported when
+the preset is loaded (see Lists filter), so the user can choose another list and
+update the preset. Version 1 presets load as before, with all items, and are only
+rewritten when the user updates them.
+
+#### Export and import (Favorites)
 
 `export_lists` writes the chosen lists to a file picked with the native save dialog:
 
@@ -2434,7 +2631,7 @@ JSON array bound to `json_each(?)` in an uncorrelated `IN` subquery, so:
 
 Lists have the same shape as in `lists.json`: ids, kinds, names and entries only,
 never paths, installation ids, connections, credentials or launch settings. The
-format can carry several lists, so exporting user lists later keeps its meaning.
+format can carry several lists. Settings › Favorites exports Favorites only.
 
 Import is two steps. `preview_lists_import` opens the native file picker, reads at
 most 16 MB, checks `format` and `version` (another format or version is refused with
@@ -2448,28 +2645,44 @@ the new entries; `replace` keeps exactly the file's entries) with a single atomi
 save, so a failure leaves the previous lists. Entries missing from the active catalog
 are imported like any other. Paths in the file are never used.
 
-#### Future user lists
+#### Backup
 
-The model, persistence, search filter and export format already handle any number
-of lists. Adding user lists means: commands to create (new `user` list with a
-generated id and a name), rename (change `name`) and delete (remove a `user` list;
-system lists refuse both) lists; `set_list_membership` and `ListMembers` already take
-any list id, so "add to list" and "list only" views reuse them; membership in several
-lists is a lookup per list; exporting several lists passes several ids, and the
-import summarizes and applies each importable list (user lists would be created or
-merged by id). The interface would add a list picker next to the bookmark and list
-management in Settings. Manual ordering would only need the entries' order, which is
-already preserved.
+`lists.json` is in the inventory and the backup scope ("Favorites and lists",
+`config/lists.json`), so exports, restores and their rollback include every custom
+list, its id, name, dates and entries with Favorites; a restore validates it with
+`ListsStore::load` before staging. Backups made before custom lists restore as
+Favorites only. Saved filters (`saved-filters.json`) reference lists by id, and both
+files are restored together, so the references stay consistent.
+
+#### Limitations
+
+- Custom lists hold machines only in the interface (see Software entries).
+- The JSON export format carries custom lists, but Settings exports and imports
+  Favorites only; custom lists are exchanged through folder files (import) and the
+  application backup.
+- Lists are not ordered manually and cannot be exported back to `.ini` files.
+- A list of most of the catalog makes restricted facet requests slower than the
+  unrestricted ones (see the benchmark).
 
 #### Commands
 
-| Command                | Purpose                                                    |
-| ---------------------- | ---------------------------------------------------------- |
-| `get_list`             | A list with its entries (`ListView`).                      |
-| `set_list_membership`  | Adds or removes one entry; returns the new membership.     |
-| `export_lists`         | Writes lists to a JSON file chosen by the user.            |
-| `preview_lists_import` | Chooses and checks a file; returns the summary to confirm. |
-| `apply_lists_import`   | Applies a previewed import in `merge` or `replace` mode.   |
+| Command                     | Purpose                                                                 |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `get_list`                  | A list with its entries (`ListView`), used for Favorites.               |
+| `set_list_membership`       | Adds or removes one entry of one list; returns the new membership.      |
+| `export_lists`              | Writes lists to a JSON file chosen by the user.                         |
+| `preview_lists_import`      | Chooses and checks a JSON file; returns the summary to confirm.         |
+| `apply_lists_import`        | Applies a previewed JSON import in `merge` or `replace` mode.           |
+| `list_user_lists`           | The custom lists without entries (`ListSummary`).                       |
+| `create_list`               | Creates an empty custom list.                                           |
+| `rename_list`               | Renames a custom list (refuses a name in use).                          |
+| `delete_list`               | Deletes a custom list and its entries.                                  |
+| `get_list_entries`          | One page of the machines of a list, searched, with catalog details.     |
+| `get_entry_lists`           | The custom lists containing an entry.                                   |
+| `set_entry_memberships`     | Sets the membership of an entry in several custom lists, atomically.    |
+| `choose_folder_import_file` | Chooses and parses a folder file; returns its summary.                  |
+| `preview_folder_import`     | The lists a folder import would create or merge, for a name and naming. |
+| `apply_folder_import`       | Applies a folder import atomically.                                     |
 
 ### MAME support files — Implemented
 
@@ -2696,12 +2909,16 @@ updatedAt }] }`. Names are unique (ignoring case), 1-100 characters; at most 500
   verbatim; a file of another schema version, or invalid, is reported by every command
   and never replaced. Presets are global: they reference no installation, catalog row
   or file.
-- **Criteria version 1** (`savedFilterCriteria.ts`): `{ scope, text, values, flags,
-ranges, favoritesOnly }`: the catalog type, the search text and the filters of that
-  type (facet values including classifications, single-choice filters, version
-  ranges) and Favorites only. Presentation (renderer, sizes, panels, theme), sort and
-  paging are not included. `encodeCriteria` normalizes them (sorted keys and values,
-  empty entries dropped) so that equal criteria compare equal.
+- **Criteria version 2** (`savedFilterCriteria.ts`): `{ scope, text, values, flags,
+ranges, favoritesOnly, listId }`: the catalog type, the search text and the filters
+  of that type (facet values including classifications, single-choice filters,
+  version ranges), Favorites only and the custom list of the machines by stable id
+  (`null`: all items; see
+  [User lists](#user-lists-favorites-and-custom-lists--implemented)). Version 1
+  (without `listId`) is still read, as all items, and never rewritten implicitly.
+  Presentation (renderer, sizes, panels, theme), sort and paging are not included.
+  `encodeCriteria` normalizes them (sorted keys and values, empty entries dropped) so
+  that equal criteria compare equal.
 - **Loading** validates the criteria; a preset of another `criteriaVersion` is listed
   but cannot be loaded and is kept unchanged. Filters this version does not know are
   left out and named in a notice; nothing else is applied in their place. The criteria
@@ -2729,8 +2946,8 @@ ranges, favoritesOnly }`: the catalog type, the search text and the filters of t
 - Explicit SQL, no ORM. Versioned migrations in `catalog/schema.rs`.
 - Implemented: the catalog database (see [Catalog](#catalog--implemented-machines-and-software-lists)),
   including FTS5 full-text indexes (see [Catalog search](#catalog-search--implemented)).
-- User data stays out of the catalog: Favorites are in `lists.json` (see
-  [User lists](#user-lists-favorites--implemented)), never in a catalog database.
+- User data stays out of the catalog: Favorites and custom lists are in `lists.json` (see
+  [User lists](#user-lists-favorites-and-custom-lists--implemented)), never in a catalog database.
 - `support-files.sqlite` (global repository) and `installations/<id>/classifications.sqlite`
   (projection of each catalog) have their own versioned migrations
   (`support_files/repository.rs`, `catalog/classification.rs`); neither is part of

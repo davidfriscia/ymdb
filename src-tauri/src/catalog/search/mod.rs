@@ -9,12 +9,14 @@
 //! do not depend on Tauri. Machines and software are searched separately.
 
 pub mod machines;
+pub mod members;
 pub mod request;
 pub mod software;
 mod sql;
 mod text;
 
 use std::fmt;
+use std::sync::Arc;
 
 use serde::Serialize;
 
@@ -52,14 +54,15 @@ pub struct FacetValue {
     pub count: u64,
 }
 
-/// Entries of a user list that restrict a search (`list` filter). Lists are
-/// global and never stored in a catalog: the caller resolves the list and the
-/// entries are bound as one JSON parameter, read with `json_each`, so the
+/// Entries of a user list that restrict a search (`userLists` filter). Lists
+/// are global and never stored in a catalog: the caller resolves each list and
+/// its entries are bound as one JSON parameter, read with `json_each`, so the
 /// restriction applies before counting, faceting and paging, whatever the size
-/// of the list.
+/// of the list. Several lists are several AND conditions. Cloning shares the
+/// JSON, so callers can cache it between searches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListMembers {
-    json: String,
+    json: Arc<str>,
 }
 
 impl ListMembers {
@@ -67,7 +70,7 @@ impl ListMembers {
     pub fn machines<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
         let names: Vec<&str> = names.into_iter().collect();
         Self {
-            json: serde_json::json!(names).to_string(),
+            json: serde_json::json!(names).to_string().into(),
         }
     }
 
@@ -75,7 +78,7 @@ impl ListMembers {
     pub fn software<'a>(keys: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
         let keys: Vec<[&str; 2]> = keys.into_iter().map(|(list, name)| [list, name]).collect();
         Self {
-            json: serde_json::json!(keys).to_string(),
+            json: serde_json::json!(keys).to_string().into(),
         }
     }
 
@@ -84,9 +87,17 @@ impl ListMembers {
     }
 }
 
-/// The members are given exactly when the request has a `list` filter.
-fn check_members(list: Option<&str>, members: Option<&ListMembers>) -> Result<(), SearchError> {
-    if list.is_some() == members.is_some() {
+/// Most lists one search combines (Favorites and a custom list, with room to spare).
+pub const MAX_USER_LISTS: usize = 4;
+
+/// The members are given for every list of the `userLists` filter.
+fn check_members(lists: &[String], members: &[ListMembers]) -> Result<(), SearchError> {
+    if lists.len() > MAX_USER_LISTS {
+        return Err(SearchError::InvalidRequest(format!(
+            "at most {MAX_USER_LISTS} user lists can restrict a search"
+        )));
+    }
+    if lists.len() == members.len() {
         Ok(())
     } else {
         Err(SearchError::InvalidRequest(

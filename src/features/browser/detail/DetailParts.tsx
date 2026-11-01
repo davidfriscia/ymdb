@@ -4,6 +4,7 @@ import type { LoadState } from "../../../shared/useLoader";
 import { MediaGallery } from "../../media/MediaGallery";
 import type { MediaTarget } from "../../media/mediaApi";
 import { FavoriteBookmark } from "../../lists/FavoriteBookmark";
+import { ManageListsButton } from "../../lists/ManageListsButton";
 import type { ListEntry } from "../../lists/listsApi";
 import type { RecordLink } from "../detailApi";
 
@@ -68,6 +69,9 @@ export function DetailFrame({
         <h2 id="detail-title" className="detail-summary__title" title={title}>
           {title}
         </h2>
+        {favorite?.kind === "machine" && (
+          <ManageListsButton entry={favorite} title={title} variant="inline" />
+        )}
         {favorite && <FavoriteBookmark entry={favorite} title={title} variant="inline" />}
       </div>
       <p className="detail-summary__line">{subtitle}</p>

@@ -92,6 +92,19 @@ fn populate(fixture: &Fixture) {
             true,
         )
         .expect("favorite");
+    // A custom list, with a machine and its dates.
+    lists
+        .create_user_list("mazes-id", "Arcade / Mazes", 5)
+        .expect("custom list");
+    lists
+        .set_user_memberships(
+            &ListEntry::Machine {
+                name: "pacman".to_owned(),
+            },
+            &[("mazes-id".to_owned(), true)],
+            6,
+        )
+        .expect("membership");
     ListsStore::in_dir(&dirs.config)
         .save(&lists)
         .expect("lists");
@@ -338,6 +351,11 @@ fn round_trip_restores_the_same_data() {
         .load()
         .expect("lists");
     assert_eq!(lists.list("favorites").expect("favorites").entries.len(), 1);
+    // Custom lists come back with their id, name, dates and entries.
+    let mazes = lists.list("mazes-id").expect("custom list");
+    assert_eq!(mazes.display_name(), "Arcade / Mazes");
+    assert_eq!((mazes.created_at, mazes.updated_at), (Some(5), Some(6)));
+    assert_eq!(mazes.machine_names().collect::<Vec<_>>(), ["pacman"]);
     assert!(
         CatalogStore::in_dir(&catalogs.join(ID_A))
             .with_reader(|_| Ok(()))

@@ -148,6 +148,8 @@ fn validates_list_identities() {
         kind: ListKind::User,
         name: Some("Shoot 'em ups".to_owned()),
         entries: vec![ListEntry::machine("1942")],
+        created_at: None,
+        updated_at: None,
     });
     assert_eq!(user.validate(), Ok(()));
     assert_eq!(user.lists[1].display_name(), "Shoot 'em ups");
